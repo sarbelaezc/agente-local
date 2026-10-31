@@ -96,7 +96,8 @@ class InvoiceReviewWindow:
             self.root,
             text=(
                 "Revise y edite cada factura. Seleccione explícitamente las filas "
-                "que autoriza; no se guardará nada hasta confirmar el lote."
+                "que autoriza; pulsar «Aprobar y guardar lote» autoriza la escritura "
+                "sin otro diálogo de confirmación."
             ),
             wraplength=1080,
             padding=12,
@@ -227,6 +228,15 @@ class InvoiceReviewWindow:
         ttk = self.ttk
         approval = ttk.Frame(self.root, padding=12)
         approval.pack(fill="x")
+        ttk.Label(
+            approval,
+            text=f"Archivo de destino: {self.settings.workbook}\n"
+            "Se creará una copia de seguridad antes de guardar.",
+            wraplength=1080,
+        ).pack(fill="x", pady=(0, 8))
+        ttk.Button(
+            approval, text="Seleccionar todas", command=self.select_all
+        ).pack(side="left", padx=(0, 8))
         ttk.Label(approval, text="Aprobado por:").pack(side="left")
         self.approver = tk.StringVar(value=self.settings.approver)
         ttk.Entry(approval, textvariable=self.approver, width=32).pack(
@@ -242,6 +252,10 @@ class InvoiceReviewWindow:
     def run(self) -> bool:
         self.root.mainloop()
         return self.saved
+
+    def select_all(self) -> None:
+        for form in self.forms:
+            form["selected"].set(True)
 
     def approve_and_save(self) -> None:
         from tkinter import messagebox
@@ -276,19 +290,9 @@ class InvoiceReviewWindow:
             messagebox.showerror("No se pudo validar el lote", str(error), parent=self.root)
             return
 
-        approved = messagebox.askyesno(
-            "Confirmar escritura",
-            (
-                f"¿Autoriza guardar {len(invoices)} factura(s) en este archivo?\n\n"
-                f"{self.settings.workbook}\n\n"
-                "Se creará una copia de seguridad antes de reemplazarlo."
-            ),
-            default=messagebox.NO,
-            parent=self.root,
-        )
         try:
             results = record_approved_batch(
-                self.store, invoices, approved=approved
+                self.store, invoices, approved=True
             )
         except (OSError, ValueError) as error:
             messagebox.showerror("No se pudo guardar el lote", str(error), parent=self.root)

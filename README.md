@@ -93,15 +93,19 @@ Ollama. Los candidatos que fallan se listan en el JSON con `requires_review`.
 ```
 
 Descarga y analiza los adjuntos como el modo anterior, y luego abre una ventana de
-revisión. Cada factura debe seleccionarse explícitamente. La columna `Empresa` se
+revisión. Las facturas empiezan sin seleccionar; puede marcarlas individualmente o
+usar «Seleccionar todas» y desmarcar las que no autoriza. Seleccionar no escribe.
+La columna `Empresa` se
 sugiere a partir del historial del Excel cuando todas las filas con la misma razón
 social usan la misma empresa; si no hay una coincidencia histórica inequívoca, usa
 como sugerencia la razón social del documento. Verifique la sugerencia antes de
 aprobar. El campo "Aprobado por" se precarga con `approver` de la configuración y
 sigue siendo editable. La ventana muestra los campos
-extraídos y cualquier campo descartado por Ollama. Escriba quién aprueba y confirme
-el lote en el diálogo final para guardar; cerrar la ventana o cancelar no modifica el
-Excel. Las coincidencias históricas requieren confirmación explícita. El registro crea
+extraídos y cualquier campo descartado por Ollama. La ruta de destino y el aviso de
+respaldo están visibles antes de guardar. Pulsar «Aprobar y guardar lote» es la
+autorización explícita para escribir, sin un diálogo final adicional. Cerrar sin
+guardar no modifica el Excel. Las coincidencias históricas conservan sus diálogos
+de confirmación explícita. El registro crea
 una copia de seguridad, verifica el archivo temporal y no mueve correos. Ollama se usa
 por defecto para completar campos de PDF; `--no-model` lo omite y deja esos campos
 para completar a mano.
