@@ -95,9 +95,10 @@ Ollama. Los candidatos que fallan se listan en el JSON con `requires_review`.
 Descarga y analiza los adjuntos como el modo anterior, y luego abre una ventana de
 revisión. Cada factura debe seleccionarse explícitamente. La columna `Empresa` se
 sugiere a partir del historial del Excel cuando todas las filas con la misma razón
-social usan la misma empresa; si no hay historial o es ambiguo, queda vacía para
-completarla manualmente. El campo "Aprobado por" se precarga con `approver` de la
-configuración y sigue siendo editable. La ventana muestra los campos
+social usan la misma empresa; si no hay una coincidencia histórica inequívoca, usa
+como sugerencia la razón social del documento. Verifique la sugerencia antes de
+aprobar. El campo "Aprobado por" se precarga con `approver` de la configuración y
+sigue siendo editable. La ventana muestra los campos
 extraídos y cualquier campo descartado por Ollama. Escriba quién aprueba y confirme
 el lote en el diálogo final para guardar; cerrar la ventana o cancelar no modifica el
 Excel. Las coincidencias históricas requieren confirmación explícita. El registro crea

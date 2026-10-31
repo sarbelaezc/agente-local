@@ -36,8 +36,9 @@ def reviewed_invoice_from_fields(fields: dict[str, str]) -> ReviewedInvoice:
 
 
 def suggested_company(suggestions: dict[str, str], legal_name: str) -> str:
-    """Returns the historical company for a legal name, or an empty string."""
-    return suggestions.get(" ".join(legal_name.split()).casefold(), "")
+    """Uses a unique historical company or falls back to the document legal name."""
+    normalized_name = " ".join(legal_name.split())
+    return suggestions.get(normalized_name.casefold(), "") or normalized_name
 
 
 def record_approved_batch(
@@ -176,11 +177,17 @@ class InvoiceReviewWindow:
                 card, text="; ".join(details), wraplength=1040, foreground="#8b1a1a"
             ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(0, 6))
 
+        legal_name = " ".join(candidate.legal_name.split())
+        company_from_history = self.company_suggestions.get(legal_name.casefold(), "")
         company = suggested_company(self.company_suggestions, candidate.legal_name)
         if company:
             ttk.Label(
                 card,
-                text="Empresa sugerida a partir del historial del Excel; verifíquela.",
+                text=(
+                    "Empresa sugerida a partir del historial del Excel; verifíquela."
+                    if company_from_history
+                    else "Sin coincidencia histórica inequívoca; se usa la razón social. Verifíquela."
+                ),
                 foreground="#1a4f8b",
             ).grid(row=5, column=0, columnspan=6, sticky="w")
         values = {
