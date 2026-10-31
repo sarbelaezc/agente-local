@@ -189,6 +189,7 @@ Rules:
 
 - Do not commit directly to `main` or `develop`, except for the repository's initial setup.
 - Every change to `main` or `develop` goes through a pull request. Open it with `gh pr create` against the correct base (`develop` for features, `main` for releases and hotfixes).
+- Write pull request descriptions to a Markdown file and pass it with `gh pr create` or `gh pr edit` using `--body-file`. Do not pass multiline Markdown through a PowerShell-quoted `--body` argument, because escaping can corrupt line breaks and backtick-delimited text.
 - Do not merge a pull request without the user's approval.
 - One change per commit, with a descriptive commit message in Spanish, in the imperative mood.
 - Run `pytest` before merging a feature.
