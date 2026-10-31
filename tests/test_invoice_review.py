@@ -10,7 +10,9 @@ from mail_invoices.review_ui import (
     ReviewItem,
     record_approved_batch,
     reviewed_invoice_from_fields,
+    suggested_company,
 )
+from mail_invoices.settings import load_settings
 from mail_invoices.workbook import InvoiceWorkbook
 
 
@@ -92,3 +94,45 @@ def test_zip_pdf_duplicate_prefers_xml_candidate():
         "message",
     )
     assert _prefer_xml_candidates([pdf, xml, other]) == [xml, other]
+
+
+def test_company_suggestions_use_only_unanimous_history(tmp_path):
+    path = tmp_path / "synthetic.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Hoja1"
+    for column, header in enumerate(["Empresa", "Raz\u00f3n Social", "Fecha", "Valor"], 2):
+        sheet.cell(2, column, header)
+    rows = [
+        ("Mercado", "Proveedor  SAS"),
+        ("Mercado", "proveedor sas"),
+        ("Salud", "Clinica SAS"),
+        ("Hogar", "Clinica SAS"),
+        (None, "Sin Empresa SAS"),
+    ]
+    for row, (company, legal_name) in enumerate(rows, 3):
+        sheet.cell(row, 2, company)
+        sheet.cell(row, 3, legal_name)
+    workbook.save(path)
+    workbook.close()
+    original = path.read_bytes()
+
+    suggestions = InvoiceWorkbook(path, tmp_path / "backups").company_suggestions()
+
+    assert suggested_company(suggestions, "PROVEEDOR SAS") == "Mercado"
+    assert suggested_company(suggestions, "Clinica SAS") == ""
+    assert suggested_company(suggestions, "Sin Empresa SAS") == ""
+    assert path.read_bytes() == original
+
+
+def test_approver_is_loaded_from_config(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "opera_executable: opera.exe\n"
+        "profile_dir: profile\n"
+        "workbook: book.xlsx\n"
+        "backup_dir: backups\n"
+        "approver: '  Santiago   Arbelaez '\n",
+        encoding="utf-8",
+    )
+    assert load_settings(config).approver == "Santiago Arbelaez"

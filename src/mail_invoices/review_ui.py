@@ -35,6 +35,11 @@ def reviewed_invoice_from_fields(fields: dict[str, str]) -> ReviewedInvoice:
     return invoice
 
 
+def suggested_company(suggestions: dict[str, str], legal_name: str) -> str:
+    """Returns the historical company for a legal name, or an empty string."""
+    return suggestions.get(" ".join(legal_name.split()).casefold(), "")
+
+
 def record_approved_batch(
     store: InvoiceWorkbook,
     invoices: list[ReviewedInvoice],
@@ -62,11 +67,25 @@ class InvoiceReviewWindow:
         self.store = InvoiceWorkbook(settings.workbook, settings.backup_dir, settings.sheet)
         self.saved = False
         self.forms: list[dict] = []
+        try:
+            self.company_suggestions = self.store.company_suggestions()
+            suggestion_error = None
+        except (OSError, ValueError) as error:
+            self.company_suggestions = {}
+            suggestion_error = str(error)
         self.root = tk.Tk()
         self.root.title("Revisión de facturas - aprobación humana")
         self.root.geometry("1120x760")
         self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
         self._build_header(issues)
+        if suggestion_error:
+            ttk.Label(
+                self.root,
+                text=f"No se pudo leer el historial para sugerir Empresa: {suggestion_error}",
+                wraplength=1080,
+                foreground="#8b1a1a",
+                padding=(12, 0, 12, 8),
+            ).pack(fill="x")
         self._build_cards(items)
         self._build_approval_controls()
 
@@ -157,8 +176,15 @@ class InvoiceReviewWindow:
                 card, text="; ".join(details), wraplength=1040, foreground="#8b1a1a"
             ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(0, 6))
 
+        company = suggested_company(self.company_suggestions, candidate.legal_name)
+        if company:
+            ttk.Label(
+                card,
+                text="Empresa sugerida a partir del historial del Excel; verifíquela.",
+                foreground="#1a4f8b",
+            ).grid(row=5, column=0, columnspan=6, sticky="w")
         values = {
-            "company": "",
+            "company": company,
             "legal_name": candidate.legal_name,
             "issued": candidate.issued.isoformat() if candidate.issued else "",
             "amount": str(candidate.amount) if candidate.amount is not None else "",
@@ -195,7 +221,7 @@ class InvoiceReviewWindow:
         approval = ttk.Frame(self.root, padding=12)
         approval.pack(fill="x")
         ttk.Label(approval, text="Aprobado por:").pack(side="left")
-        self.approver = tk.StringVar()
+        self.approver = tk.StringVar(value=self.settings.approver)
         ttk.Entry(approval, textvariable=self.approver, width=32).pack(
             side="left", padx=8
         )
