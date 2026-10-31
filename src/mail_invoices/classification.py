@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from dataclasses import asdict
+from hashlib import sha256
 from pathlib import Path
 
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
@@ -24,6 +25,7 @@ def classification_ready(statuses: list[str], errors: list[str]) -> bool:
 def simulate_classification(
     settings: MailSettings, days: int, authorized_history: list[str], use_model: bool,
     *, register: bool = False,
+    include_review_items: bool = False,
 ) -> dict:
     """Suggest destinations and verify Excel read-only. No move command is invoked."""
     from mail_invoices.workflow import _build_ocr, _extract_file, _prefer_xml_candidates
@@ -72,6 +74,7 @@ def simulate_classification(
                         page, message.label, settings.attachments_dir / f"classification-{index}",
                     )
                     body = read_message_body(page)
+                    result["body_digest"] = sha256(body.encode("utf-8")).hexdigest()
                     if not paths:
                         result["errors"].append("No supported attachments downloaded")
                     items = []
@@ -87,6 +90,8 @@ def simulate_classification(
                             candidate = _with_archive_path(candidate, path)
                             items.append(ReviewItem(candidate, subject, rejected, error))
                     items = _prefer_xml_candidates(items)
+                    if include_review_items:
+                        result["review_items"] = items
                     reviewed = []
                     if register and items:
                         window = InvoiceReviewWindow(

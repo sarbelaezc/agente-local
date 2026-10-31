@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from hashlib import sha256
 
 from playwright.sync_api import Page
 
@@ -74,7 +76,25 @@ def select_move_destination(dialog, path: str) -> None:
         raise LookupError("Destination selection could not be verified")
 
 
-def move_registered_message(page: Page, message: dict, folder: str, *, approved: bool) -> None:
+def verify_destination(page: Page, message: dict, folder: str) -> None:
+    matches = [f for f in discover_folders(page) if f.path == folder]
+    if len(matches) != 1:
+        raise LookupError("Destination verification failed; review Outlook manually")
+    destination = page.locator(TREE_SELECTOR).nth(matches[0].index)
+    destination.click()
+    page.wait_for_function(
+        "el => (el.innerText || '').includes('seleccionado')", arg=destination.element_handle(),
+    )
+    page.wait_for_timeout(1500)
+    found = find_conversation(page, message["conversation"])
+    if message_metadata(found) != (message["sender"], message["subject"]):
+        raise LookupError("Destination message metadata differs; review Outlook manually")
+
+
+def move_registered_message(
+    page: Page, message: dict, folder: str, *, approved: bool,
+    before_move: Callable[[], None] | None = None,
+) -> None:
     if not approved or not message["eligible"]:
         raise ValueError("Movement requires verified registration and explicit approval")
     matches = [f for f in discover_folders(page) if f.path == folder]
@@ -86,7 +106,9 @@ def move_registered_message(page: Page, message: dict, folder: str, *, approved:
         raise LookupError("Conversation metadata changed; movement blocked")
     option.evaluate("el => el.click()")
     page.get_by_role("document", name="Cuerpo del mensaje", exact=True).wait_for()
-    read_message_body(page)
+    body = read_message_body(page)
+    if message.get("body_digest") and sha256(body.encode("utf-8")).hexdigest() != message["body_digest"]:
+        raise LookupError("Message body changed after review; movement blocked")
     if option.get_attribute("aria-selected") != "true":
         raise LookupError("Expected conversation is not selected")
     if page.locator(f'{MESSAGE_SELECTOR}[aria-selected="true"]').count() != 1:
@@ -96,22 +118,13 @@ def move_registered_message(page: Page, message: dict, folder: str, *, approved:
     dialog = page.get_by_role("dialog")
     select_move_destination(dialog, folder)
     # No retries after this side effect: a verification failure requires manual review.
+    if before_move is not None:
+        before_move()
     message["movement_attempted"] = True
     message["movement_status"] = "unverified"
     dialog.get_by_role("button", name="Mover", exact=True).click()
     dialog.wait_for(state="hidden")
-    matches = [f for f in discover_folders(page) if f.path == folder]
-    if len(matches) != 1:
-        raise LookupError("Moved but destination verification failed; review Outlook manually")
-    destination = page.locator(TREE_SELECTOR).nth(matches[0].index)
-    destination.click()
-    page.wait_for_function(
-        "el => (el.innerText || '').includes('seleccionado')", arg=destination.element_handle(),
-    )
-    page.wait_for_timeout(1500)
-    found = find_conversation(page, message["conversation"])
-    if message_metadata(found) != (message["sender"], message["subject"]):
-        raise LookupError("Destination message metadata differs; review Outlook manually")
+    verify_destination(page, message, folder)
     message["movement_status"] = "verified"
 
 

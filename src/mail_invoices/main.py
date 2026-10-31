@@ -11,6 +11,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Human-reviewed Hotmail invoice organizer")
     parser.add_argument("--config", type=Path, default=Path("config") / "settings.yaml")
     mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--process-invoice-batch", action="store_true", help="Review and approve a small E2E batch.")
+    mode.add_argument("--resume-invoice-batch", action="store_true", help="Resume local pending batches without rescanning.")
     mode.add_argument(
         "--process-one-invoice", action="store_true",
         help="Controlled one-email test: approve Excel registration, then approve a real move.",
@@ -38,6 +40,9 @@ def main() -> int:
         help="Download and analyze candidates, then require explicit human approval before saving to Excel.",
     )
     parser.add_argument(
+        "--batch-size", type=int, default=3, help="Controlled E2E batch size (1-5, default 3)",
+    )
+    parser.add_argument(
         "--history-folder", action="append", default=[],
         help="Authorize metadata history from an exact folder path (classification only).",
     )
@@ -51,9 +56,17 @@ def main() -> int:
     args = parser.parse_args()
     if not 1 <= args.days <= 365:
         parser.error("--days must be between 1 and 365")
+    if not 1 <= args.batch_size <= 5:
+        parser.error("--batch-size must be between 1 and 5")
     if args.history_folder and not args.classify_invoices:
         parser.error("--history-folder requires --classify-invoices")
     settings = load_settings(args.config)
+    if args.process_invoice_batch or args.resume_invoice_batch:
+        from mail_invoices.batch_workflow import process_invoice_batch
+
+        return process_invoice_batch(
+            settings, args.days, not args.no_model, args.batch_size, resume=args.resume_invoice_batch,
+        )
     if args.process_one_invoice:
         return workflow.process_one_invoice(settings, args.days, not args.no_model)
     if args.classify_invoices:

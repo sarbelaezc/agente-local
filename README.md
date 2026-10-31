@@ -9,6 +9,7 @@ implementa.
 | Facturas de Hotmail | En implementación | `src/mail_invoices/` | `python -m mail_invoices.main --login` / `--review-invoices` / `--classify-invoices` |
 | Contexto de carpetas confirmado | Implementado; probado con datos sintéticos | `src/mail_invoices/classification_decisions.py`, `classification_ui.py` | `python -m mail_invoices.main --classify-invoices` |
 | Registro y archivo de un correo | Prueba controlada verificada con un correo real | `src/mail_invoices/workflow.py`, `movement.py` | `python -m mail_invoices.main --process-one-invoice` |
+| Lotes E2E supervisados y recuperación | Implementado; validación sintética | `src/mail_invoices/batch_workflow.py`, `batch_review_ui.py`, `batch_state.py` | `python -m mail_invoices.main --process-invoice-batch` / `--resume-invoice-batch` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
 
 ## Aviso
@@ -40,6 +41,8 @@ El código ejecutable vive en `src/` y las pruebas en `tests/`.
 - `workbook.py`: validación, duplicados, respaldo y escritura verificada del Excel.
 - `settings.py`: lectura de la sección de facturas de la configuración unificada.
 - `classification_decisions.py`: decisiones confirmadas y extractos de contexto en SQLite local.
+- `batch_state.py`, `batch_review_ui.py` y `batch_workflow.py`: estados persistentes,
+  revisión conjunta y ejecución recuperable de lotes pequeños.
 
 Los controles de aprobación se prueban sin abrir ventanas. Una prueba gráfica
 separada construye Tkinter y acciona los botones en un proceso aislado con un
@@ -99,8 +102,9 @@ La simulación de clasificación obtiene las carpetas reales y permite revisar
 destinos. El lector de historial requiere autorización por carpeta. Se revisaron localmente
 63 carpetas y se guardaron 291 ejemplos de remitente/asunto, excluyendo una fila
 sin dirección verificable; esos ejemplos no incluyen cuerpos o facturas históricas
-ni se cargan automáticamente. Son contexto, no entrenamiento de pesos. El movimiento de correos todavía
-solo se habilita en la prueba integrada de un correo descrita abajo.
+ni se cargan automáticamente. Son contexto, no entrenamiento de pesos. El movimiento
+se habilita solo con aprobación en el modo integrado de un correo o en lotes
+supervisados pequeños, descritos abajo.
 
 ### Simular clasificación de facturas (sin mover)
 
@@ -201,8 +205,66 @@ aprobación del movimiento y presencia del mismo correo en la carpeta elegida.
 Una sesión nueva confirmó el registro y el destino sin escribir en Excel.
 La primera tentativa se bloqueó antes de mover por la carga asíncrona del árbol;
 se añadió la espera y se reanudó solo el movimiento aprobado, sin repetir la
-escritura. La suite pasa 138 pruebas. Esto valida una prueba controlada, no
+escritura. En esa etapa la suite pasó 138 pruebas. Esto valida una prueba controlada, no
 clasificación masiva ni precisión general del modelo.
+
+### Lotes pequeños con revisión unificada y estados locales
+
+```powershell
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --process-invoice-batch --batch-size 3 --days 30
+```
+
+Prepara hasta 3 correos por defecto (entre 1 y 5 con `--batch-size`, independiente
+del `batch_limit` de los modos anteriores). La ventana muestra las facturas
+editables, la carpeta sugerida y los errores de cada correo. La selección es por
+correo, empieza desmarcada e incluye TODAS sus facturas; un adjunto con errores
+bloquea la selección. Puede usar «Seleccionar correos aptos» y desmarcar después.
+Revise cada destino: una carpeta propuesta por Ollama no es una autorización.
+
+**«Aprobar y ejecutar lote»** guarda las aprobaciones y autoriza, para cada correo
+seleccionado, registro en Excel con respaldo, guardado local de la carpeta como
+ejemplo y movimiento al destino elegido, sin otra ventana de aprobación.
+Los posibles duplicados históricos conservan sus confirmaciones. Si falta un
+campo, carpeta o confirmador, no se guarda la aprobación del lote. Cerrar sin
+ejecutar conserva los pendientes, pero no escribe Excel ni mueve correos.
+
+Los estados viven en `%LOCALAPPDATA%\MailInvoiceAgent\invoice-batches.sqlite3`,
+separados por perfil, libro y hoja: `pending`, `approved`, `registered`, `moving`,
+`moved` y `blocked`. Se retienen identificador, metadatos, campos necesarios para
+registrar las facturas, extractos acotados de contexto, destino, confirmador,
+fecha de aprobación y último error. No se guardan adjuntos ni evidencia completa
+del PDF en esa base. Es información personal local: no la sincronice ni la suba
+a Git. Los registros se conservan hasta su eliminación manual; **no elimine la
+base para resolver un movimiento incierto**, porque perdería las autorizaciones
+y el estado de recuperación. La sesión también conserva las descargas bajo la
+política de `attachments_dir`.
+
+Para retomar sin descargar ni clasificar de nuevo:
+
+```powershell
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --resume-invoice-batch --batch-size 3
+```
+
+La ventana muestra los pendientes y las aprobaciones previas. Pulsar ejecutar
+retoma estas últimas sin volver a pedir sus datos o carpeta. Un estado `approved`
+registra de forma idempotente y verifica Excel; `registered` verifica el libro
+y continúa solo el archivo. Antes del clic de mover se guarda `moving`. Si el
+proceso se interrumpe ahí, la siguiente ejecución **solo comprueba la carpeta
+aprobada y nunca vuelve a mover automáticamente**. Si no puede verificarla,
+permanece pendiente de revisión con un error explícito. `moved` no se procesa
+de nuevo. Un conflicto de registro bloquea el archivo.
+
+El lote se detiene ante el primer fallo y conserva las demás aprobaciones.
+Un bloqueo del sistema operativo impide ejecutar dos de estos lotes a la vez
+y se libera al cerrar o terminar el proceso. No ejecute simultáneamente los
+modos antiguos: no participan de este bloqueo. Excel y Outlook siguen sin ser
+una transacción atómica. La verificación de identidad incluye remitente, asunto
+y, antes de mover, una huella del cuerpo leído; un cambio bloquea el movimiento.
+La ejecución programada y la aprobación automática sin supervisión siguen
+pendientes. La suite actual pasa 177 pruebas, incluidas aprobación conjunta,
+persistencia, cancelación, recuperación sin duplicar registros, bloqueo de
+ejecuciones simultáneas y una página sintética con los selectores de movimiento.
+Este modo no se ha probado todavía con un lote real de varios correos.
 
 ### Escanear la bandeja (solo lectura)
 
@@ -292,7 +354,8 @@ valores y el formato antes de reemplazar el libro. No agrega filas.
 Las pruebas del escritor usan únicamente libros sintéticos en directorios temporales;
 nunca escriben en el Excel real. La interfaz solicita aprobación explícita antes de
 llamar al registro. La simulación de carpetas ya se probó con Outlook real;
-el modo integrado limita el movimiento real a un correo con aprobación, como se indica arriba.
+el modo de un correo y los lotes pequeños exigen aprobación para el movimiento real,
+como se indica arriba.
 
 La configuración personal está en `config/settings.yaml`, excluida de Git.
 Ambos módulos usan este archivo: `teams` contiene los ajustes de Teams,
