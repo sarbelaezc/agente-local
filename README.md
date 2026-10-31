@@ -12,6 +12,22 @@ implementa.
 | Lotes E2E supervisados y recuperación | Implementado; validación sintética | `src/mail_invoices/batch_workflow.py`, `batch_review_ui.py`, `batch_state.py` | `python -m mail_invoices.main --process-invoice-batch` / `--resume-invoice-batch` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
 
+## Skill de revisión: Ponytail
+
+Instalada para este proyecto en
+[`.github/skills/ponytail/SKILL.md`](.github/skills/ponytail/SKILL.md).
+Fuente: [dietrichgebert/ponytail](https://github.com/dietrichgebert/ponytail),
+revisión `96608e078b2d5ea607c5c3b8b5a54d1c1fba6846`, con su
+[licencia MIT](.github/skills/ponytail/LICENSE). Solo se instalaron las
+instrucciones de la skill y su licencia, sin scripts, hooks ni plugins externos.
+
+Puede solicitar «usa Ponytail para revisar el proyecto» o invocar `/ponytail`
+cuando el cliente la detecte. Su enfoque es el cambio más simple que resuelva
+completamente el problema, sin recortar validación, seguridad o pruebas.
+La instalación no envía código ni datos personales a Ponytail.
+La lista de skills de una sesión abierta puede requerir una nueva sesión para
+reconocerla; en la sesión de instalación se leyeron sus instrucciones directamente.
+
 ## Aviso
 
 Proyecto personal y experimental, sin relación con Microsoft ni con Opera.
