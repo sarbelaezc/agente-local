@@ -193,7 +193,8 @@ Rules:
 - Before creating a pull request, summarize the completed changes, actual validation results, and any unverified behavior, then ask the user whether it is time to open it. Create it only after explicit confirmation, with tested changes ready to version.
 - Write pull request descriptions to a Markdown file and pass it with `gh pr create` or `gh pr edit` using `--body-file`. Do not pass multiline Markdown through a PowerShell-quoted `--body` argument, because escaping can corrupt line breaks and backtick-delimited text.
 - Do not merge a pull request without the user's approval.
-- One change per commit, with a descriptive commit message in Spanish, in the imperative mood.
+- After confirming a merge into `develop`, always fetch with `--prune` and clean up local feature branches whose tips are ancestors of the updated `origin/develop`. Use `git branch -d`, never force deletion. Preserve `main`, `develop`, the current branch, branches checked out in other worktrees, and any branch with unmerged commits. If deletion is refused, report it and leave the branch intact.
+- Keep each commit focused on one coherent change. Use Conventional Commits alongside GitFlow: `<type>(<scope>): <description>`, with a descriptive Spanish description in the imperative mood. Use `feat` for new behavior, `fix` for bug fixes, `refactor` for behavior-preserving restructuring, `test` for tests only, `docs` for documentation or agent instructions, and `chore` for maintenance. GitFlow governs branches and merges; Conventional Commits governs commit messages. Do not rewrite previous commits merely to rename them unless explicitly requested.
 - Run `pytest` before merging a feature.
 - Commit messages include the Copilot `Co-authored-by` trailer, unless the user asks for it to be omitted.
 - Do not rewrite history on shared branches (`main`, `develop`) or use `push --force` on them.
