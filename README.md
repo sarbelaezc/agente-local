@@ -8,7 +8,7 @@ implementa.
 |---|---|---|---|
 | Facturas de Hotmail | En implementación | `src/mail_invoices/` | `python -m mail_invoices.main --login` / `--review-invoices` / `--classify-invoices` |
 | Contexto de carpetas confirmado | Implementado; probado con datos sintéticos | `src/mail_invoices/classification_decisions.py`, `classification_ui.py` | `python -m mail_invoices.main --classify-invoices` |
-| Registro y archivo de un correo | Prueba controlada; integración implementada | `src/mail_invoices/workflow.py`, `movement.py` | `python -m mail_invoices.main --process-one-invoice` |
+| Registro y archivo de un correo | Prueba controlada verificada con un correo real | `src/mail_invoices/workflow.py`, `movement.py` | `python -m mail_invoices.main --process-one-invoice` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
 
 ## Aviso
@@ -194,6 +194,15 @@ Si falla la verificación tras intentar mover, el informe indica
 antes de repetir la prueba: Excel y Outlook no forman una transacción atómica.
 No crea carpetas y no procesa otros correos. Ollama sigue proponiendo, no
 autorizando destinos; sus sugerencias pueden ser incorrectas.
+
+Se verificó una prueba con un correo real: registro aprobado en el Excel
+original, creación de respaldo, corrección y guardado local del destino,
+aprobación del movimiento y presencia del mismo correo en la carpeta elegida.
+Una sesión nueva confirmó el registro y el destino sin escribir en Excel.
+La primera tentativa se bloqueó antes de mover por la carga asíncrona del árbol;
+se añadió la espera y se reanudó solo el movimiento aprobado, sin repetir la
+escritura. La suite pasa 138 pruebas. Esto valida una prueba controlada, no
+clasificación masiva ni precisión general del modelo.
 
 ### Escanear la bandeja (solo lectura)
 
