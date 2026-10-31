@@ -16,27 +16,22 @@ El proyecto es un repositorio independiente; las rutas personales se definen en 
 
 ## Gestión de features y README
 
-El agente local agrupa varios features (por ejemplo, Teams y facturas de Hotmail). El `README.md` es la fuente de verdad sobre ellos.
+El agente local agrupa varios features (por ejemplo, Teams y facturas de Hotmail). Las solicitudes del usuario definen qué se implementa; el `README.md` documenta lo que se ha pedido e implementado, pero no es la fuente de verdad ni limita lo que el usuario puede solicitar.
 
 ### Inicio de cada sesión de trabajo
 
 - Antes de realizar cualquier tarea, preguntar al usuario qué feature quiere implementar o modificar.
-- Ofrecer como opciones los features declarados en la tabla de features del `README.md`, con su estado, y la opción de crear un feature nuevo.
+- Ofrecer como opciones los features listados en la tabla de features del `README.md`, con su estado, y la opción de crear un feature nuevo.
 - No leer código en detalle, editar archivos, instalar dependencias ni ejecutar automatizaciones hasta recibir la respuesta.
 - Limitar el trabajo al feature elegido. Si una tarea requiere tocar otro feature, avisar y pedir confirmación antes.
 
 ### Declaración en el README
 
-- Todo feature del agente local debe estar declarado en el `README.md` antes de implementarse o al mismo tiempo.
+- Toda funcionalidad nueva o modificación que solicite el usuario debe declararse en el `README.md` en el mismo cambio en que se implementa.
 - Cada feature debe figurar en la tabla de features con nombre, estado, módulo y comando de ejecución, y tener su propia sección con alcance, configuración, uso y restricciones de seguridad.
-- Un feature nuevo se agrega primero a la tabla con estado "Planificado" y luego se implementa.
-
-### Consistencia con el README
-
-- Todo lo implementado debe ser consistente con lo que declara el `README.md`: alcance, comandos, rutas de configuración, estado y reglas de seguridad.
-- Si un cambio altera el comportamiento, los comandos, la configuración o el estado de un feature, actualizar el `README.md` en el mismo cambio.
-- Si el código y el `README.md` se contradicen, detenerse, informar la discrepancia y preguntar cuál es el comportamiento correcto antes de continuar.
-- No implementar funcionalidad que no esté declarada en el `README.md`.
+- Si un cambio altera el comportamiento, los comandos, la configuración, las dependencias o el estado de un feature, actualizar el `README.md` para reflejarlo.
+- Distinguir en el `README.md` lo implementado y verificado de lo pendiente o no validado.
+- Si el `README.md` describe algo distinto de lo que el usuario pide ahora, prevalece la solicitud del usuario: implementarla y actualizar el `README.md`. Si la solicitud contradice una regla de seguridad de estas instrucciones, informar el conflicto antes de continuar.
 
 ## Objetivo del MVP
 
@@ -56,6 +51,7 @@ Construir una aplicación local que:
 - Python 3.12.
 - Playwright para Python.
 - Ollama para el modelo local.
+- Tesseract (local) y `pypdfium2` para OCR de PDF escaneados.
 - SQLite para mensajes pendientes, configuración y auditoría.
 - FastAPI solo si se necesita una interfaz web local.
 - Tkinter para una interfaz de escritorio mínima.

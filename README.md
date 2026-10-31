@@ -1,11 +1,12 @@
 # Agente local
 
-Agente local con aprobación humana obligatoria. Todos sus features deben estar
-declarados en esta tabla; lo implementado debe ser consistente con este README.
+Agente local con aprobación humana obligatoria. Toda funcionalidad nueva o
+modificación solicitada se declara en este README en el mismo cambio en que se
+implementa.
 
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
-| Facturas de Hotmail | En implementación | `src/mail_invoices/` | `python -m mail_invoices.main --login` |
+| Facturas de Hotmail | En implementación | `src/mail_invoices/` | `python -m mail_invoices.main --login` / `--analyze-file` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
 
 ## Aviso
@@ -23,9 +24,68 @@ existente; hay un núcleo probado, pero el flujo completo aún no está disponib
 
 ## Hotmail: nuevo alcance en implementación
 
-Se preparó un módulo independiente de Teams con extracción local de XML UBL,
-ZIP y PDF con texto. Los PDF escaneados, enlaces externos y datos incompletos
-requieren revisión manual; no se inventan valores ni se descargan enlaces.
+Se preparó un módulo de facturas independiente del de Teams, con extracción
+local de XML UBL, ZIP y PDF con texto. La lectura de XML sigue siendo la fuente
+preferida para los datos estructurados de la factura.
+
+### Ollama local y OCR
+
+Implementado y probado con datos sintéticos (aún no con facturas ni correos reales):
+
+- **OCR local de PDF escaneados** (`ocr.py`): si un PDF no tiene texto, sus
+  páginas se renderizan en memoria con `pypdfium2` y se leen con Tesseract
+  (`spa+eng`). Límites: 5 páginas, tamaño de página y texto acotados, tiempo
+  máximo por página. Sin Tesseract, el PDF escaneado queda para revisión manual.
+- **Completado de campos con Ollama** (`assist.py`, `local_model.py`): para PDF
+  con texto u OCR, el modelo local propone solo los campos que las reglas no
+  encontraron. Cada valor se acepta únicamente si aparece en el texto del
+  documento (número, razón social, fecha, total y moneda COP); lo que no se
+  puede ubicar se descarta y se informa como rechazado.
+- **Sugerencia de carpetas** (`folders.py`): en este orden, reglas confirmadas en
+  `folder_rules` (remitente exacto o `@dominio`), luego historial unánime del
+  mismo remitente o dominio y, por último, Ollama con la lista de carpetas
+  existentes y ejemplos mínimos (remitente, asunto y carpeta, sin cuerpos de
+  correo). La sugerencia debe ser una carpeta existente; nunca se crean carpetas.
+
+Reglas de seguridad de esta ampliación:
+
+- Ollama solo se acepta en `127.0.0.1`, `localhost` o `::1`, sin proxy ni
+  herramientas; el texto del documento se trata como dato no confiable.
+- El XML y las reglas deterministas prevalecen; el modelo nunca reemplaza un
+  valor existente. Toda factura que no venga completa de XML, o con campos
+  propuestos por el modelo, queda marcada `requires_review`.
+- Ollama no registra datos, no mueve correos ni cambia carpetas. Se requerirá
+  aprobación explícita antes de registrar un lote en Excel, y un correo solo se
+  moverá después de verificar el registro o confirmar que es duplicado.
+- No se inventan valores ni se descargan enlaces externos.
+
+Pendiente: obtener del Outlook real las carpetas y el historial que alimentan
+la sugerencia de carpetas, y conectar estas sugerencias con la interfaz de
+aprobación y el movimiento de correos.
+
+### Analizar un adjunto local (solo lectura)
+
+Extrae los datos de un XML, PDF o ZIP guardado en el equipo y los muestra en
+JSON, con el método usado (`xml`, `pdf_text`, `ocr`), los campos completados
+por el modelo y los rechazados. No escribe en el Excel ni toca el correo.
+
+```powershell
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\mail-invoices.yaml --analyze-file C:\ruta\factura.pdf
+```
+
+Usa `--no-model` para ver solo el resultado de reglas y OCR, sin Ollama.
+
+### Requisitos de OCR
+
+1. `winget install --id UB-Mannheim.TesseractOCR -e`
+2. Descarga `spa.traineddata` de
+   [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) a
+   `%LOCALAPPDATA%\MailInvoiceAgent\tessdata` y copia ahí `eng.traineddata`
+   desde `C:\Program Files\Tesseract-OCR\tessdata`.
+3. Ajusta la sección `ocr` de `config/mail-invoices.yaml` si usas otras rutas.
+
+Ollama debe estar en ejecución con el modelo configurado (`qwen2.5:7b` por
+defecto) en la sección `ollama`.
 
 El registro preparado utiliza `Hoja1`, encabezados en B2:E2 y añade
 `Número de factura` en F2 solo al guardar un lote aprobado. Conserva las filas
@@ -34,9 +94,10 @@ antes de reemplazar el Excel. Una coincidencia histórica sin número requiere
 confirmación; no se completa por inferencia. No se mezclan monedas: el esquema
 actual admite solo valores confirmados en COP.
 
-El Excel real no se ha modificado. El escaneo de Outlook, las sugerencias de
-carpetas y la interfaz de aprobación siguen pendientes de validar la sesión y
-el DOM real de Outlook en Opera.
+El Excel real no se ha modificado. El escaneo de Outlook, la lectura de sus
+carpetas e historial para las sugerencias, la interfaz de aprobación y el
+movimiento de correos siguen pendientes de validar la sesión y el DOM real de
+Outlook en Opera.
 No ejecutar escrituras sobre el Excel real desde código de prueba: la futura
 interfaz debe solicitar aprobación explícita del lote antes de llamar al registro.
 
@@ -98,4 +159,3 @@ Teams puede cambiar su DOM sin aviso. Valida los selectores en `src/automation/s
 ## Licencia
 
 MIT. Ver [LICENSE](LICENSE).
-

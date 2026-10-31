@@ -7,6 +7,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import PurePosixPath
+from typing import Protocol
 from zipfile import BadZipFile, ZipFile
 
 from defusedxml import ElementTree
@@ -17,11 +18,19 @@ from xml.etree.ElementTree import ParseError
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_ZIP_BYTES = 30 * 1024 * 1024
+MAX_PDF_TEXT = 60000
+EVIDENCE_CHARS = 8000
 INVOICE_NS = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
 
 
 class DocumentError(ValueError):
     pass
+
+
+class PdfOcr(Protocol):
+    def pdf_text(self, data: bytes) -> str:
+        """Return text recognized locally from a scanned PDF."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -34,6 +43,13 @@ class InvoiceCandidate:
     amount: Decimal | None = None
     currency: str = ""
     evidence: str = ""
+    method: str = ""
+    assisted_fields: tuple[str, ...] = ()
+
+    @property
+    def requires_review(self) -> bool:
+        """Anything not fully read from a UBL XML needs a human check of every field."""
+        return self.method != "xml" or bool(self.missing_fields) or bool(self.assisted_fields)
 
     @property
     def missing_fields(self) -> tuple[str, ...]:
@@ -117,11 +133,11 @@ def _xml_invoice(data: bytes, source: str) -> InvoiceCandidate:
     currency = payable.attrib.get("currencyID", "") if payable is not None else ""
     return InvoiceCandidate(
         source, hashlib.sha256(data).hexdigest(), number, legal, issued, amount,
-        currency, "UBL Invoice: supplier, IssueDate and PayableAmount",
+        currency, "UBL Invoice: supplier, IssueDate and PayableAmount", "xml",
     )
 
 
-def _pdf_invoice(data: bytes, source: str) -> InvoiceCandidate:
+def _pdf_text(data: bytes) -> str:
     try:
         reader = PdfReader(BytesIO(data))
         if reader.is_encrypted:
@@ -133,14 +149,24 @@ def _pdf_invoice(data: bytes, source: str) -> InvoiceCandidate:
         for page in reader.pages:
             text = page.extract_text() or ""
             size += len(text)
-            if size > 60000:
+            if size > MAX_PDF_TEXT:
                 raise DocumentError("PDF text exceeds the pilot limit")
             pieces.append(text)
-        text = "\n".join(pieces)
     except PdfReadError as exc:
         raise DocumentError("Unreadable PDF requires manual review") from exc
+    return "\n".join(pieces)
+
+
+def _pdf_invoice(data: bytes, source: str, ocr: PdfOcr | None) -> InvoiceCandidate:
+    text = _pdf_text(data)
+    method = "pdf_text"
     if not text.strip():
-        raise DocumentError("Scanned PDF has no extractable text; manual review required")
+        if ocr is None:
+            raise DocumentError("Scanned PDF has no extractable text; manual review required")
+        text = ocr.pdf_text(data)
+        method = "ocr"
+        if not text.strip():
+            raise DocumentError("OCR found no text in the scanned PDF; manual review required")
     if not re.search(r"\bfactura\b", text, flags=re.I):
         raise DocumentError("PDF is not identifiable as an invoice")
     number = _unique_match(
@@ -170,19 +196,25 @@ def _pdf_invoice(data: bytes, source: str) -> InvoiceCandidate:
     currency = "COP" if re.search(r"\bCOP\b", text) else ""
     return InvoiceCandidate(
         source=source, digest=hashlib.sha256(data).hexdigest(), number=number,
-        issued=issued, amount=amount, currency=currency, evidence=text[:2500],
+        issued=issued, amount=amount, currency=currency,
+        evidence=text[:EVIDENCE_CHARS], method=method,
     )
 
 
-def parse_document(data: bytes, source: str) -> list[InvoiceCandidate]:
-    """Parse local invoice bytes without extracting archives or following links."""
+def parse_document(
+    data: bytes, source: str, ocr: PdfOcr | None = None
+) -> list[InvoiceCandidate]:
+    """Parse local invoice bytes without extracting archives or following links.
+
+    Scanned PDFs are only read when a local ``ocr`` engine is supplied.
+    """
     if len(data) > MAX_FILE_BYTES:
         raise DocumentError("Attachment exceeds the 10 MB pilot limit")
     suffix = PurePosixPath(source.replace("\\", "/")).suffix.lower()
     if suffix == ".xml":
         return [_xml_invoice(data, source)]
     if suffix == ".pdf":
-        return [_pdf_invoice(data, source)]
+        return [_pdf_invoice(data, source, ocr)]
     if suffix != ".zip":
         raise DocumentError("Only XML, PDF and ZIP attachments are supported")
     candidates = []
@@ -205,7 +237,9 @@ def parse_document(data: bytes, source: str) -> list[InvoiceCandidate]:
                     raise DocumentError("ZIP compression ratio exceeds the pilot limit")
                 with archive.open(entry) as stream:
                     content = stream.read(MAX_FILE_BYTES + 1)
-                candidates.extend(parse_document(content, f"{source}:{entry.filename}"))
+                candidates.extend(
+                    parse_document(content, f"{source}:{entry.filename}", ocr)
+                )
     except BadZipFile as exc:
         raise DocumentError("Invalid ZIP attachment") from exc
     if not candidates:
