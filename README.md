@@ -66,7 +66,7 @@ aprobación y el movimiento de correos.
 ### Escanear la bandeja (solo lectura)
 
 ```powershell
-.\.venv\Scripts\python.exe -m mail_invoices.main --config config\mail-invoices.yaml --scan-inbox --days 30
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --scan-inbox --days 30
 ```
 
 Lee la lista de la bandeja de Hotmail y muestra los correos con adjunto cuyo asunto
@@ -77,7 +77,7 @@ correos sin fecha reconocible se muestran para revisión.
 ### Descargar y analizar adjuntos
 
 ```powershell
-.\.venv\Scripts\python.exe -m mail_invoices.main --config config\mail-invoices.yaml --download-attachments --days 30
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --download-attachments --days 30
 ```
 
 Escanea la bandeja igual que `--scan-inbox`, abre cada candidato (máximo `batch_limit`),
@@ -89,7 +89,7 @@ Ollama. Los candidatos que fallan se listan en el JSON con `requires_review`.
 ### Revisar y registrar un lote
 
 ```powershell
-.\.venv\Scripts\python.exe -m mail_invoices.main --config config\mail-invoices.yaml --review-invoices --days 30
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --review-invoices --days 30
 ```
 
 Descarga y analiza los adjuntos como el modo anterior, y luego abre una ventana de
@@ -113,7 +113,7 @@ JSON, con el método usado (`xml`, `pdf_text`, `ocr`), los campos completados
 por el modelo y los rechazados. No escribe en el Excel ni toca el correo.
 
 ```powershell
-.\.venv\Scripts\python.exe -m mail_invoices.main --config config\mail-invoices.yaml --analyze-file C:\ruta\factura.pdf
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --analyze-file C:\ruta\factura.pdf
 ```
 
 Usa `--no-model` para ver solo el resultado de reglas y OCR, sin Ollama.
@@ -125,10 +125,10 @@ Usa `--no-model` para ver solo el resultado de reglas y OCR, sin Ollama.
    [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) a
    `%LOCALAPPDATA%\MailInvoiceAgent\tessdata` y copia ahí `eng.traineddata`
    desde `C:\Program Files\Tesseract-OCR\tessdata`.
-3. Ajusta la sección `ocr` de `config/mail-invoices.yaml` si usas otras rutas.
+3. Ajusta la sección `invoices.ocr` de `config/settings.yaml` si usas otras rutas.
 
 Ollama debe estar en ejecución con el modelo configurado (`qwen2.5:7b` por
-defecto) en la sección `ollama`.
+defecto) en la sección compartida `ollama`.
 
 El registro preparado utiliza `Hoja1`, encabezados en B2:E2 y añade
 `Número de factura` en F2 solo al guardar un lote aprobado. Conserva las filas
@@ -143,15 +143,23 @@ llamar al registro. El escaneo de carpetas e historial para las sugerencias y el
 movimiento de correos siguen pendientes de validar la sesión y el DOM real de Outlook
 en Opera.
 
-La configuración personal está en `config/mail-invoices.yaml`, excluida de Git.
-La plantilla es `config/mail-invoices.example.yaml`. El perfil de Opera y las
+La configuración personal está en `config/settings.yaml`, excluida de Git.
+Ambos módulos usan este archivo: `teams` contiene los ajustes de Teams,
+`invoices` los de Hotmail y Excel (incluidos `ocr` y `approver`), y `ollama`
+es compartido. La unificación no activa Teams, que sigue pausado.
+Los lectores conservan compatibilidad con archivos planos anteriores mediante
+`--config`; para migrarlos, agrupe sus ajustes en las secciones indicadas,
+conserve todos los valores personales y resuelva diferencias de Ollama antes
+de retirar el archivo antiguo. No copie la plantilla encima de una configuración
+personal existente.
+La plantilla es `config/settings.example.yaml`. El perfil de Opera y las
 copias locales están bajo `%LOCALAPPDATA%\MailInvoiceAgent`, fuera de los
 perfiles habituales de Opera y Teams.
 
 Inicio de sesión manual (sin escanear ni mover mensajes):
 
 ```powershell
-.\.venv\Scripts\python.exe -m mail_invoices.main --login --config config\mail-invoices.yaml
+.\.venv\Scripts\python.exe -m mail_invoices.main --login --config config\settings.yaml
 ```
 
 Opera se comprobó con Playwright en una página local. Esto no valida todavía

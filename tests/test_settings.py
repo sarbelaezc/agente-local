@@ -1,4 +1,42 @@
+import pytest
+import yaml
+
 from config.settings import load_settings
+from mail_invoices.settings import load_settings as load_mail_settings
+
+
+def test_unified_config_preserves_both_modules(tmp_path):
+    teams = {
+        "edge": {"executable": "edge.exe", "profile_dir": "edge-profile"},
+        "storage": {"database_path": "audit.db"},
+        "allowed_chats": [{"id": "test", "name": "Test"}],
+    }
+    invoices = {
+        "opera_executable": "opera.exe", "profile_dir": "opera-profile",
+        "workbook": "book.xlsx", "backup_dir": "backups", "approver": "Test",
+    }
+    ollama = {"url": "http://localhost:11434", "model": "test-model"}
+    unified = tmp_path / "unified.yaml"
+    unified.write_text(yaml.safe_dump({
+        "teams": teams, "invoices": invoices, "ollama": ollama,
+    }), encoding="utf-8")
+    teams_path = tmp_path / "teams.yaml"
+    teams_path.write_text(yaml.safe_dump({**teams, "ollama": ollama}), encoding="utf-8")
+    invoices_path = tmp_path / "invoices.yaml"
+    invoices_path.write_text(yaml.safe_dump({**invoices, "ollama": ollama}), encoding="utf-8")
+
+    assert load_settings(unified) == load_settings(teams_path)
+    assert load_mail_settings(unified) == load_mail_settings(invoices_path)
+
+
+@pytest.mark.parametrize("section", [None, [], "invalid"])
+def test_unified_config_rejects_invalid_sections(tmp_path, section):
+    path = tmp_path / "invalid.yaml"
+    path.write_text(yaml.safe_dump({"teams": section, "invoices": section}), encoding="utf-8")
+    with pytest.raises(ValueError, match="teams configuration must be a mapping"):
+        load_settings(path)
+    with pytest.raises(ValueError, match="invoices configuration must be a mapping"):
+        load_mail_settings(path)
 
 
 def test_local_paths_expand_environment_variables(tmp_path, monkeypatch):
