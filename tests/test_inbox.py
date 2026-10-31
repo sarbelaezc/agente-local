@@ -82,3 +82,59 @@ def test_virtualized_message_is_bound_to_identity_not_row_index():
     assert result is stable
     page.get_by_role.assert_called_once_with("option", name="Synthetic invoice label", exact=True)
     options.nth.assert_not_called()
+
+
+def test_lookup_continues_with_constant_rendered_row_count():
+    page = MagicMock()
+    options = page.locator.return_value
+    options.count.return_value = 5
+    options.evaluate_all.side_effect = [-1, -1, 2]
+    options.last.evaluate.return_value = True
+    row = page.get_by_role.return_value
+    row.count.return_value = 1
+    row.get_attribute.return_value = None
+    assert _find_message(page, "Target") is row
+    assert options.last.evaluate.call_count == 2
+
+
+def test_lookup_stops_when_scroll_cannot_progress():
+    page = MagicMock()
+    options = page.locator.return_value
+    options.evaluate_all.return_value = -1
+    options.last.evaluate.return_value = False
+    assert _find_message(page, "Missing") is None
+    assert options.last.evaluate.call_count == 1
+
+
+def test_real_virtual_list_lookup_reaches_later_rows_without_growing_dom():
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.set_content("""
+                <div id="list" style="height:100px; overflow:auto" onscroll="render()">
+                  <div style="height:500px; position:relative">
+                    <div id="row" role="option" aria-label="First" data-convid="first"></div>
+                  </div>
+                </div>
+                <script>
+                  function render() {
+                    const index = Math.round(document.getElementById('list').scrollTop / 100);
+                    const row = document.getElementById('row');
+                    row.setAttribute('aria-label', index >= 2 ? 'Target' : 'First');
+                    row.setAttribute('data-convid', index >= 2 ? 'target' : 'first');
+                    row.style.position = 'absolute';
+                    row.style.top = (index * 100 + 40) + 'px';
+                    row.innerText = 'Row';
+                  }
+                  render();
+                </script>
+            """)
+            found = _find_message(page, "Target")
+            assert found is not None
+            assert found.get_attribute("data-convid") == "target"
+            assert page.locator(MESSAGE_SELECTOR).count() == 1
+        finally:
+            browser.close()

@@ -5,7 +5,10 @@ import textwrap
 import pytest
 
 
-@pytest.mark.parametrize("action", ["approve", "close", "no_folder", "no_approver", "blocked", "invalid_field"])
+@pytest.mark.parametrize("action", [
+    "approve", "close", "no_folder", "no_approver", "blocked", "invalid_field",
+    "reapprove", "blocked_close",
+])
 def test_unified_batch_review_requires_complete_explicit_approval(tmp_path, action):
     script = textwrap.dedent("""
         import sys
@@ -22,6 +25,7 @@ def test_unified_batch_review_requires_complete_explicit_approval(tmp_path, acti
         from mail_invoices.folders import IncomingMessage
         from mail_invoices.review import ReviewItem
         from mail_invoices.settings import MailSettings
+        from mail_invoices.workbook import ReviewedInvoice
 
         directory = Path(sys.argv[1])
         action = sys.argv[2]
@@ -48,6 +52,14 @@ def test_unified_batch_review_requires_complete_explicit_approval(tmp_path, acti
             )),
             folder="Salud", errors=["Unreadable document"] if action == "blocked" else [],
         )]
+        if action in ("reapprove", "blocked_close"):
+            messages[0].state = "blocked"
+            messages[0].last_error = "Company conflict"
+            messages[0].approver = "Previous"
+            messages[0].invoices = [
+                ReviewedInvoice("Approved company", "Synthetic SAS", date(2026,10,31),
+                    Decimal("100"), candidate.number, "COP") for candidate in candidates
+            ]
         settings = MailSettings(directory / "opera", directory, path, directory / "backups", "Hoja1", 3, approver="Santi")
         journal = BatchStateStore(directory / "states.sqlite3", "test")
         journal.save(messages)
@@ -57,9 +69,14 @@ def test_unified_batch_review_requires_complete_explicit_approval(tmp_path, acti
         window.root.withdraw()
         assert not window.message_forms[0]["selected"].get()
         assert window.forms[0]["selected"] is window.forms[1]["selected"]
+        if action in ("reapprove", "blocked_close"):
+            assert window.forms[0]["variables"]["company"].get() == "Approved company"
         def act():
-            if action != "close":
+            if action not in ("close", "blocked_close"):
                 window.select_all()
+                if action == "reapprove":
+                    for form in window.forms:
+                        form["variables"]["company"].set("Corrected company")
                 if action == "no_folder":
                     window.message_forms[0]["folder"].set("")
                 if action == "no_approver":
@@ -70,16 +87,24 @@ def test_unified_batch_review_requires_complete_explicit_approval(tmp_path, acti
             if not window.saved:
                 window.root.destroy()
         window.root.after(100, act)
-        assert window.run() == (action == "approve")
+        assert window.run() == (action in ("approve", "reapprove"))
         loaded = journal.load()[0]
         assert path.read_bytes() == original
         assert not (directory / "backups").exists()
-        if action == "approve":
+        if action in ("approve", "reapprove"):
             assert loaded.state == "approved"
             assert loaded.folder == "Salud" and loaded.approver == "Santi"
             assert len(loaded.invoices) == 2
             assert loaded.approved_at.endswith("+00:00")
             assert messages[0].state == "approved"
+            assert not errors
+            if action == "reapprove":
+                assert all(invoice.company == "Corrected company" for invoice in loaded.invoices)
+                assert loaded.last_error == ""
+        elif action == "blocked_close":
+            assert loaded.state == "blocked"
+            assert loaded.approver == "Previous"
+            assert loaded.last_error == "Company conflict"
             assert not errors
         else:
             assert loaded.state == "pending"

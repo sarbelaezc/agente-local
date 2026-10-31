@@ -213,6 +213,34 @@ def test_registration_conflict_blocks_move(stores, monkeypatch):
     assert not decisions.path.exists()
 
 
+@pytest.mark.parametrize("state", ["approved", "registered"])
+def test_company_conflict_is_durable_and_can_be_reapproved(stores, monkeypatch, state):
+    from mail_invoices.workbook import WorkbookError
+
+    journal, workbook, decisions = stores
+    message = approved()
+    workbook.record(message.invoices)
+    message.invoices = [replace(message.invoices[0], company="Wrong company")]
+    message.state = state
+    journal.save([message])
+    before = workbook.path.read_bytes()
+    mock_folders(monkeypatch)
+    monkeypatch.setattr(batch_workflow, "move_registered_message", lambda *a, **kw: pytest.fail("Unexpected move"))
+    with pytest.raises((WorkbookError, ValueError)):
+        batch_workflow.execute_message(message, journal, workbook, decisions, None)
+    assert journal.load()[0].state == "blocked"
+    assert workbook.path.read_bytes() == before
+    corrected = replace(journal.load()[0], state="approved",
+                        invoices=approved().invoices, approver="New approver")
+    journal.save([corrected])
+    monkeypatch.setattr(
+        batch_workflow, "move_registered_message",
+        lambda page, data, folder, *, approved, before_move: before_move(),
+    )
+    batch_workflow.execute_message(journal.load()[0], journal, workbook, decisions, None)
+    assert journal.load()[0].state == "moved"
+
+
 @pytest.mark.parametrize("state", ["pending", "blocked", "moved"])
 def test_non_executable_states_have_no_side_effects(stores, state):
     journal, _, _ = stores

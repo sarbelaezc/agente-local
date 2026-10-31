@@ -150,3 +150,31 @@ def test_restoration_does_not_insert_an_unknown_invoice(store):
     with pytest.raises(WorkbookError, match="existing exact"):
         store.record([invoice()], restore_amount_format=True)
     assert store.path.read_bytes() == before
+
+
+def test_existing_invoice_cannot_silently_ignore_approved_company(store):
+    store.record([invoice()])
+    before = store.path.read_bytes()
+    with pytest.raises(WorkbookError, match="company"):
+        store.record([invoice(company="Different company")])
+    assert store.path.read_bytes() == before
+
+
+def test_registration_verifies_company_when_supplied(store):
+    store.record([invoice()])
+    fields = ("TEST-001", "Example SAS", date(2024, 1, 2), Decimal("1234.56"), "COP")
+    assert store.registration_status(*fields, company="Different") == "conflict"
+    assert store.registration_status(*fields, company=" example ") == "registered"
+    assert store.registration_status(*fields) == "registered"
+
+
+def test_historical_link_cannot_ignore_approved_company(store):
+    workbook = load_workbook(store.path)
+    sheet = workbook["Hoja1"]
+    sheet.append([None, "Historical company", "Example SAS", date(2024, 1, 2), 1234.56])
+    workbook.save(store.path)
+    workbook.close()
+    before = store.path.read_bytes()
+    with pytest.raises(WorkbookError, match="company"):
+        store.record([invoice(legacy_row=3)])
+    assert store.path.read_bytes() == before

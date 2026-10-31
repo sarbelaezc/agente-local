@@ -36,7 +36,7 @@ def test_integrated_flow_moves_only_registered_and_explicitly_approved(
     )
     monkeypatch.setattr(
         workflow.InvoiceWorkbook, "registration_status",
-        lambda *args: "conflict" if outcome == "changed_excel" else "registered",
+        lambda *args, **kwargs: "conflict" if outcome == "changed_excel" else "registered",
     )
 
     def move(page, candidate, folder, *, approved):

@@ -46,6 +46,7 @@ def process_one_invoice(settings: MailSettings, days: int, use_model: bool) -> i
             if not registered or any(
                 store.registration_status(
                     invoice.number, invoice.legal_name, invoice.issued, invoice.amount, invoice.currency,
+                    company=invoice.company,
                 ) != "registered" for invoice in registered
             ):
                 raise ValueError("Excel registration changed after approval; movement blocked")

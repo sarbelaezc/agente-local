@@ -18,7 +18,7 @@ from mail_invoices.inbox import MESSAGE_SELECTOR
 from mail_invoices.movement import move_registered_message, verify_destination
 from mail_invoices.outlook_folders import discover_folders
 from mail_invoices.settings import MailSettings
-from mail_invoices.workbook import InvoiceWorkbook
+from mail_invoices.workbook import InvoiceWorkbook, WorkbookError
 
 
 def _active_messages(messages: list[BatchMessage], limit: int) -> list[BatchMessage]:
@@ -48,12 +48,17 @@ def execute_message(
     }
     try:
         if message.state == "approved":
-            workbook.record(message.invoices)
+            try:
+                workbook.record(message.invoices)
+            except WorkbookError:
+                message.state = "blocked"
+                raise
             message.state = "registered"
             journal.save([message])
         statuses = [
             workbook.registration_status(
                 invoice.number, invoice.legal_name, invoice.issued, invoice.amount, invoice.currency,
+                company=invoice.company,
             ) for invoice in message.invoices
         ]
         if not statuses or any(status != "registered" for status in statuses):

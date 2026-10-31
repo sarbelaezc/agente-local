@@ -269,6 +269,12 @@ proceso se interrumpe ahí, la siguiente ejecución **solo comprueba la carpeta
 aprobada y nunca vuelve a mover automáticamente**. Si no puede verificarla,
 permanece pendiente de revisión con un error explícito. `moved` no se procesa
 de nuevo. Un conflicto de registro bloquea el archivo.
+Los correos `blocked` muestran campos editables precargados con la última revisión.
+Corrija el conflicto en Excel o los datos de la ventana y seleccione explícitamente
+el correo para volver a aprobarlo. Cerrar no altera su estado ni su autorización.
+Una nueva aprobación revalida todos los campos y el registro antes de mover;
+no modifica silenciosamente filas existentes. Los movimientos `moving` siguen
+siendo de verificación solamente, sin esta opción de reaprobar el movimiento.
 
 El lote se detiene ante el primer fallo y conserva las demás aprobaciones.
 Un bloqueo del sistema operativo impide ejecutar dos de estos lotes a la vez
@@ -277,7 +283,7 @@ modos antiguos: no participan de este bloqueo. Excel y Outlook siguen sin ser
 una transacción atómica. La verificación de identidad incluye remitente, asunto
 y, antes de mover, una huella del cuerpo leído; un cambio bloquea el movimiento.
 La ejecución programada y la aprobación automática sin supervisión siguen
-pendientes. La suite actual pasa 177 pruebas, incluidas aprobación conjunta,
+pendientes. La suite actual pasa 187 pruebas, incluidas aprobación conjunta,
 persistencia, cancelación, recuperación sin duplicar registros, bloqueo de
 ejecuciones simultáneas y una página sintética con los selectores de movimiento.
 Este modo no se ha probado todavía con un lote real de varios correos.
@@ -292,6 +298,9 @@ Lee la lista de la bandeja de Hotmail y muestra los correos con adjunto cuyo asu
 o vista previa mencionan factura, invoice, recibo, CFDI o comprobante. Usa `--days`
 para la ventana (1 a 365, por defecto 30). No abre, descarga ni mueve correos. Los
 correos sin fecha reconocible se muestran para revisión.
+La búsqueda de un candidato recorre la lista virtualizada hasta que el scroll
+deja de avanzar, con un límite de 60 páginas. No interpreta un número constante
+de filas visibles como final de la bandeja.
 
 ### Descargar y analizar adjuntos
 
@@ -359,6 +368,10 @@ existentes, comprueba números por proveedor y crea una copia de seguridad local
 antes de reemplazar el Excel. Una coincidencia histórica sin número requiere
 confirmación; no se completa por inferencia. No se mezclan monedas: el esquema
 actual admite solo valores confirmados en COP.
+Un duplicado por número y proveedor también debe coincidir con la `Empresa`
+aprobada, además de fecha e importe. Una diferencia se informa como conflicto,
+sin sobrescribir el libro ni archivar el correo. Esto también se verifica antes
+de mover y al asociar el número a una fila histórica.
 Las nuevas celdas de `Valor` conservan el formato numérico de la fila de datos
 anterior de esa columna (incluido el símbolo monetario y los decimales); se
 omiten filas sin importe. Sin datos previos se usa `#,##0.00`. El importe sigue

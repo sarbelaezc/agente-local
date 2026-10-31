@@ -136,6 +136,7 @@ class InvoiceWorkbook:
     def registration_status(
         self, number: str, legal_name: str, issued: date | None,
         amount: Decimal | None, currency: str,
+        *, company: str | None = None,
     ) -> str:
         """Read-only evidence for classification; historical matches do not authorize moves."""
         if not number.strip() or not legal_name.strip() or issued is None or amount is None:
@@ -154,6 +155,8 @@ class InvoiceWorkbook:
                 return "conflict"
             invoice = ReviewedInvoice(legal_name, legal_name, issued, amount, number, currency)
             if matches:
+                if company is not None and _normalized(sheet.cell(matches[0], 2).value) != _normalized(company):
+                    return "conflict"
                 return "registered" if _matches_row(sheet, matches[0], invoice) else "conflict"
             historical = any(
                 sheet.cell(row, 6).value is None and _matches_row(sheet, row, invoice)
@@ -203,6 +206,8 @@ class InvoiceWorkbook:
                     row = exact[0]
                     if not _matches_row(sheet, row, invoice):
                         raise WorkbookError("Invoice number matches but its date or amount conflicts")
+                    if _normalized(sheet.cell(row, 2).value) != _normalized(invoice.company):
+                        raise WorkbookError("Invoice number matches but its approved company conflicts")
                     if restore_amount_format:
                         previous_format = _previous_amount_format(sheet, row)
                         sheet.cell(row, 5).number_format = previous_format
@@ -219,6 +224,8 @@ class InvoiceWorkbook:
                     if invoice.legacy_row not in legacy:
                         raise WorkbookError("Confirmed historical row no longer matches the invoice")
                     row = invoice.legacy_row
+                    if _normalized(sheet.cell(row, 2).value) != _normalized(invoice.company):
+                        raise WorkbookError("Historical row matches but its approved company conflicts")
                     sheet.cell(row, 6, invoice.number).data_type = "s"
                     results.append(RecordResult(invoice.number, row, False))
                     continue
@@ -260,6 +267,10 @@ class InvoiceWorkbook:
                         != _normalized(invoice.number)
                     ):
                         raise WorkbookError("Save verification failed for an approved invoice")
+                    if (
+                        _normalized(verified_sheet.cell(result.row, 2).value) != _normalized(invoice.company)
+                    ):
+                        raise WorkbookError("Save verification failed for the approved company")
                 for row, number_format in expected_formats.items():
                     if verified_sheet.cell(row, 5).number_format != number_format:
                         raise WorkbookError("Save verification failed for the amount format")

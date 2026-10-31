@@ -110,6 +110,7 @@ def simulate_classification(
                         record = reviewed[position] if len(reviewed) == len(items) else c
                         status = store.registration_status(
                             record.number, record.legal_name, record.issued, record.amount, record.currency,
+                            company=record.company if reviewed and len(reviewed) == len(items) else None,
                         )
                         statuses.append(status)
                         fields = subject.split(";")

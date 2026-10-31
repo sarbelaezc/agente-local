@@ -49,11 +49,17 @@ class BatchReviewWindow(InvoiceReviewWindow):
                 f"{message.reason}\n{message.last_error}\n" + "\n".join(message.errors),
                 wraplength=1000,
             ).pack(fill="x")
-            if message.state != "pending":
+            if message.state not in {"pending", "blocked"}:
                 self.ttk.Label(
                     group, text=f"Destino previamente aprobado: {message.folder or 'Sin destino'}",
                 ).pack(anchor="w")
                 continue
+            if message.state == "blocked":
+                self.ttk.Label(
+                    group, text="Corrija el conflicto en Excel o los datos revisados. "
+                    "Marcar este correo y ejecutar requiere una NUEVA aprobacion; no cambia Excel al editar.",
+                    wraplength=1000,
+                ).pack(fill="x")
             selectable = bool(message.items) and not message.errors
             selected = self.tk.BooleanVar(value=False)
             folder = self.tk.StringVar(value=message.folder or "")
@@ -69,6 +75,15 @@ class BatchReviewWindow(InvoiceReviewWindow):
             for index, item in enumerate(message.items, 1):
                 self._build_card(index, item)
                 form = self.forms[-1]
+                if len(message.invoices) == len(message.items):
+                    approved = message.invoices[index - 1]
+                    values = {
+                        "company": approved.company, "legal_name": approved.legal_name,
+                        "issued": approved.issued.isoformat(), "amount": str(approved.amount),
+                        "number": approved.number, "currency": approved.currency,
+                    }
+                    for key, value in values.items():
+                        form["variables"][key].set(value)
                 form["selected"] = selected
                 card = group.winfo_children()[-1]
                 # One checkbox per email: its invoices cannot be partially approved.

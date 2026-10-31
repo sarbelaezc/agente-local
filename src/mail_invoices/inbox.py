@@ -125,14 +125,15 @@ def _find_message(page, label: str, max_pages: int = 60):
                 if item.count() != 1:
                     raise LookupError("Candidate message identifier is ambiguous")
             return item
-        before = page.locator(MESSAGE_SELECTOR).count()
-        page.locator(MESSAGE_SELECTOR).last.evaluate(
+        changed = page.locator(MESSAGE_SELECTOR).last.evaluate(
             "item => { let box = item.parentElement; "
             "while (box && box.scrollHeight <= box.clientHeight) box = box.parentElement; "
-            "if (box) box.scrollTop += box.clientHeight; }"
+            "if (!box) return false; "
+            "const before = box.scrollTop; box.scrollTop += box.clientHeight; "
+            "return box.scrollTop !== before; }"
         )
         page.wait_for_timeout(800)
-        if page.locator(MESSAGE_SELECTOR).count() == before and index < 0:
+        if not changed:
             break
     return None
 
