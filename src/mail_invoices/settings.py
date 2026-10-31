@@ -34,6 +34,7 @@ class MailSettings:
     ocr_languages: str = "spa+eng"
     folder_rules: dict[str, str] = field(default_factory=dict)
     attachments_dir: Path = Path("tmp")
+    approver: str = ""
 
 
 def load_settings(path: Path) -> MailSettings:
@@ -60,4 +61,5 @@ def load_settings(path: Path) -> MailSettings:
         ocr_languages=str(ocr.get("languages", "spa+eng")),
         folder_rules={str(key): str(value) for key, value in rules.items()},
         attachments_dir=_path(str(raw.get("attachments_dir", "tmp"))),
+        approver=" ".join(str(raw.get("approver") or "").split())[:100],
     )

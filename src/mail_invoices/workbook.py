@@ -106,6 +106,25 @@ class InvoiceWorkbook:
         finally:
             workbook.close()
 
+    def company_suggestions(self) -> dict[str, str]:
+        """Maps normalized legal names to the company used in every historical row.
+
+        Legal names recorded under more than one company are left out, so the
+        reviewer decides instead of the agent guessing.
+        """
+        workbook = load_workbook(self.path)
+        try:
+            sheet = self._sheet(workbook)
+            seen: dict[str, set[str]] = {}
+            for row in range(3, sheet.max_row + 1):
+                legal_name = _normalized(sheet.cell(row, 3).value)
+                company = " ".join(str(sheet.cell(row, 2).value or "").split())
+                if legal_name and company:
+                    seen.setdefault(legal_name, set()).add(company)
+            return {name: next(iter(companies)) for name, companies in seen.items() if len(companies) == 1}
+        finally:
+            workbook.close()
+
     def record(self, invoices: list[ReviewedInvoice]) -> list[RecordResult]:
         """Commit only reviewed records, with backup, conflict detection and verification."""
         if not invoices:
