@@ -41,10 +41,14 @@ def load_settings(path: Path) -> MailSettings:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError("Mail configuration must be a mapping")
+    ollama = raw.get("ollama") or {}
+    if "teams" in raw or "invoices" in raw:
+        raw = raw.get("invoices")
+        if not isinstance(raw, dict):
+            raise ValueError("invoices configuration must be a mapping")
     limit = int(raw.get("batch_limit", 20))
     if not 1 <= limit <= 50:
         raise ValueError("Pilot batch limit must be between 1 and 50")
-    ollama = raw.get("ollama") or {}
     ocr = raw.get("ocr") or {}
     rules = raw.get("folder_rules") or {}
     if not isinstance(ollama, dict) or not isinstance(ocr, dict) or not isinstance(rules, dict):

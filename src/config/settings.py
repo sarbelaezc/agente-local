@@ -41,6 +41,14 @@ def load_settings(path: str | Path) -> Settings:
     with config_path.open("r", encoding="utf-8") as stream:
         raw: dict[str, Any] = yaml.safe_load(stream) or {}
 
+    if not isinstance(raw, dict):
+        raise ValueError("Configuration must be a mapping")
+    ollama = raw.get("ollama", {})
+    if "teams" in raw or "invoices" in raw:
+        raw = raw.get("teams")
+        if not isinstance(raw, dict):
+            raise ValueError("teams configuration must be a mapping")
+
     chats = tuple(
         AllowedChat(id=str(chat["id"]), name=str(chat["name"]))
         for chat in raw.get("allowed_chats", [])
@@ -48,7 +56,6 @@ def load_settings(path: str | Path) -> Settings:
     if not chats:
         raise ValueError("At least one allowed chat is required")
 
-    ollama = raw.get("ollama", {})
     edge = raw.get("edge", {})
     storage = raw.get("storage", {})
     ollama_url = str(ollama.get("url", "http://127.0.0.1:11434")).rstrip("/")

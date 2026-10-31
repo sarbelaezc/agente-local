@@ -258,7 +258,7 @@ def _scan_inbox(settings: MailSettings, days: int) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Human-reviewed Hotmail invoice organizer")
-    parser.add_argument("--config", type=Path, default=Path("config") / "mail-invoices.yaml")
+    parser.add_argument("--config", type=Path, default=Path("config") / "settings.yaml")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--login", action="store_true", help="Open Outlook for a manual sign-in")
     mode.add_argument(

@@ -1,16 +1,28 @@
-teams_url: https://teams.microsoft.com/
-
-edge:
-  executable: "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
-  profile_dir: "%LOCALAPPDATA%\\TeamsLocalAgent\\EdgeProfile"
-
 ollama:
   url: http://127.0.0.1:11434
   model: qwen2.5:7b
 
-storage:
-  database_path: "%LOCALAPPDATA%\\TeamsLocalAgent\\audit.db"
+teams:
+  teams_url: https://teams.microsoft.com/
+  edge:
+    executable: "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+    profile_dir: "%LOCALAPPDATA%\\TeamsLocalAgent\\EdgeProfile"
+  storage:
+    database_path: "%LOCALAPPDATA%\\TeamsLocalAgent\\audit.db"
+  context_messages: 20
+  allowed_chats: []
 
-context_messages: 20
-
-allowed_chats: []
+invoices:
+  opera_executable: "%LOCALAPPDATA%\\Programs\\Opera\\opera.exe"
+  profile_dir: "%LOCALAPPDATA%\\MailInvoiceAgent\\OperaProfile"
+  workbook: "C:\\Documents\\Resumen_Facturas.xlsx"
+  backup_dir: "%LOCALAPPDATA%\\MailInvoiceAgent\\Backups"
+  sheet: Hoja1
+  batch_limit: 20
+  approver: ""
+  attachments_dir: tmp
+  ocr:
+    tesseract_executable: "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+    tessdata_dir: "%LOCALAPPDATA%\\MailInvoiceAgent\\tessdata"
+    languages: spa+eng
+  folder_rules: {}
