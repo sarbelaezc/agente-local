@@ -44,6 +44,14 @@ def test_unknown_date_token_stays_undated_instead_of_today():
     assert message.received is None
 
 
+def test_date_without_time_is_parsed_from_label():
+    label = "No leído Tiene datos adjuntos FacturaCTSColombia@cen.biz 811007832;IPS;1349603246;01;IPS 24/10/2026 SANTIAGO Ha recibido una factura"
+    message = parse_label(label, TODAY)
+    assert message.received == date(2026, 10, 24)
+    assert is_candidate(message, TODAY, 30) is True
+    assert is_candidate(message, TODAY, 3) is False
+
+
 def test_candidate_needs_attachment_and_invoice_term():
     assert is_candidate(parse_label(FACTURA_OLD, TODAY), TODAY, 30) is True
     assert is_candidate(parse_label(CESANTIAS_FRIDAY, TODAY), TODAY, 30) is False

@@ -33,6 +33,7 @@ class MailSettings:
     tessdata_dir: Path | None = None
     ocr_languages: str = "spa+eng"
     folder_rules: dict[str, str] = field(default_factory=dict)
+    attachments_dir: Path = Path("tmp")
 
 
 def load_settings(path: Path) -> MailSettings:
@@ -58,4 +59,5 @@ def load_settings(path: Path) -> MailSettings:
         tessdata_dir=_path(str(tessdata)) if tessdata else None,
         ocr_languages=str(ocr.get("languages", "spa+eng")),
         folder_rules={str(key): str(value) for key, value in rules.items()},
+        attachments_dir=_path(str(raw.get("attachments_dir", "tmp"))),
     )

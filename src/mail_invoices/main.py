@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from mail_invoices.assist import complete_candidate, describe, to_json
+from mail_invoices.browser import outlook_page, reopen_outlook
 from mail_invoices.documents import MAX_FILE_BYTES, DocumentError, parse_document
 from mail_invoices.local_model import LocalModelError, OllamaJsonModel
 from mail_invoices.ocr import TesseractOcr
@@ -25,13 +26,7 @@ def _login(settings: MailSettings) -> int:
             accept_downloads=True,
         )
         try:
-            # Restored tabs from earlier runs are closed so only one Outlook tab remains.
-            pages = [page for page in context.pages if page.url != "about:blank"]
-            page = pages[0] if pages else context.new_page()
-            for extra in context.pages:
-                if extra is not page:
-                    extra.close()
-            page.goto("https://outlook.live.com/mail/0/", wait_until="domcontentloaded")
+            outlook_page(context)
             print(
                 "Sign in to your personal Hotmail account manually. "
                 "Close this Opera window when the inbox is available. "
@@ -45,19 +40,12 @@ def _login(settings: MailSettings) -> int:
     return 0
 
 
-def _analyze_file(settings: MailSettings, path: Path, use_model: bool) -> int:
-    """Read-only analysis of a local attachment: never writes Excel or touches mail."""
-    if not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
-        raise SystemExit("The attachment must be an existing file of at most 10 MB")
-    ocr = TesseractOcr(
-        settings.tesseract_executable, settings.tessdata_dir, settings.ocr_languages
-    )
+def _summarize_file(path: Path, ocr: TesseractOcr, model: OllamaJsonModel | None) -> list[dict]:
+    """Extracts candidates from one local file; errors are returned as review entries."""
     try:
         candidates = parse_document(path.read_bytes(), path.name, ocr)
     except DocumentError as exc:
-        print(to_json({"source": path.name, "error": str(exc), "requires_review": True}))
-        return 1
-    model = OllamaJsonModel(settings.ollama_url, settings.ollama_model) if use_model else None
+        return [{"source": path.name, "error": str(exc), "requires_review": True}]
     results = []
     for candidate in candidates:
         rejected: tuple[str, ...] = ()
@@ -73,6 +61,73 @@ def _analyze_file(settings: MailSettings, path: Path, use_model: bool) -> int:
         if model_error:
             summary["model_error"] = model_error
         results.append(summary)
+    return results
+
+
+def _build_ocr(settings: MailSettings) -> TesseractOcr:
+    return TesseractOcr(settings.tesseract_executable, settings.tessdata_dir, settings.ocr_languages)
+
+
+def _analyze_file(settings: MailSettings, path: Path, use_model: bool) -> int:
+    """Read-only analysis of a local attachment: never writes Excel or touches mail."""
+    if not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
+        raise SystemExit("The attachment must be an existing file of at most 10 MB")
+    model = OllamaJsonModel(settings.ollama_url, settings.ollama_model) if use_model else None
+    results = _summarize_file(path, _build_ocr(settings), model)
+    print(to_json(results))
+    return 1 if any("error" in item for item in results) else 0
+
+
+def _download_attachments(settings: MailSettings, days: int, use_model: bool) -> int:
+    """Downloads invoice attachments from candidate messages, then analyzes them read-only.
+
+    Opening a candidate marks it as read in Outlook. Files are kept in attachments_dir.
+    """
+    from datetime import date
+
+    from playwright.sync_api import Error as PlaywrightError
+    from playwright.sync_api import sync_playwright
+
+    from mail_invoices.inbox import MESSAGE_SELECTOR, download_attachments, scan_inbox
+
+    if not settings.executable.is_file():
+        raise FileNotFoundError("Configured Opera executable does not exist")
+    settings.profile_dir.mkdir(parents=True, exist_ok=True)
+    downloads: list[tuple[str, Path]] = []
+    skipped: list[dict] = []
+    with sync_playwright() as playwright:
+        context = playwright.chromium.launch_persistent_context(
+            str(settings.profile_dir),
+            executable_path=str(settings.executable),
+            headless=False,
+            accept_downloads=True,
+        )
+        try:
+            page = outlook_page(context)
+            page.wait_for_selector(MESSAGE_SELECTOR, timeout=60000)
+            candidates = scan_inbox(page, days, date.today())[: settings.batch_limit]
+            for message in candidates:
+                reopen_outlook(page, MESSAGE_SELECTOR)
+                try:
+                    paths = download_attachments(page, message.label, settings.attachments_dir)
+                except (LookupError, PlaywrightError) as error:
+                    skipped.append({"source": message.label[:80], "error": str(error), "requires_review": True})
+                    continue
+                for path in paths:
+                    if path.stat().st_size > MAX_FILE_BYTES:
+                        skipped.append({"source": path.name, "error": "larger than 10 MB", "requires_review": True})
+                        path.unlink()
+                        continue
+                    downloads.append((message.label[:200], path))
+        finally:
+            context.close()
+    model = OllamaJsonModel(settings.ollama_url, settings.ollama_model) if use_model else None
+    ocr = _build_ocr(settings)
+    results = list(skipped)
+    for label, path in downloads:
+        for item in _summarize_file(path, ocr, model):
+            item["message"] = label
+            results.append(item)
     print(to_json(results))
     return 0
 
@@ -95,8 +150,7 @@ def _scan_inbox(settings: MailSettings, days: int) -> int:
             headless=False,
         )
         try:
-            page = context.pages[0] if context.pages else context.new_page()
-            page.goto("https://outlook.live.com/mail/0/", wait_until="domcontentloaded")
+            page = outlook_page(context)
             page.wait_for_selector(MESSAGE_SELECTOR, timeout=60000)
             candidates = scan_inbox(page, days, date.today())
         finally:
@@ -129,9 +183,14 @@ def main() -> int:
         "--scan-inbox", action="store_true",
         help="List invoice candidates in the inbox list (read-only, opens no message)",
     )
+    mode.add_argument(
+        "--download-attachments", action="store_true",
+        help="Download candidate invoice attachments to attachments_dir and analyze them. "
+        "Opening a message marks it as read.",
+    )
     parser.add_argument(
         "--days", type=int, default=30,
-        help="How many days back --scan-inbox looks (1-365, default 30)",
+        help="How many days back --scan-inbox and --download-attachments look (1-365, default 30)",
     )
     parser.add_argument(
         "--no-model", action="store_true", help="Skip the local Ollama field completion"
@@ -144,8 +203,9 @@ def main() -> int:
         return _login(settings)
     if args.scan_inbox:
         return _scan_inbox(settings, args.days)
+    if args.download_attachments:
+        return _download_attachments(settings, args.days, not args.no_model)
     return _analyze_file(settings, args.analyze_file, not args.no_model)
-
 
 
 if __name__ == "__main__":
