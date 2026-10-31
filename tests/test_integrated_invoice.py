@@ -83,3 +83,24 @@ def test_integrated_mode_refuses_more_than_one_email():
         classification.simulate_classification(
             SimpleNamespace(batch_limit=2), 30, [], False, register=True,
         )
+
+
+def test_destination_waits_for_async_tree_before_validating():
+    events = []
+
+    class Roots:
+        @property
+        def first(self):
+            return self
+
+        def wait_for(self, *, state):
+            assert state == "visible"
+            events.append("loaded")
+
+        def count(self):
+            assert events == ["loaded"]
+            return 0
+
+    dialog = SimpleNamespace(locator=lambda selector: Roots())
+    with pytest.raises(LookupError, match="mailbox"):
+        movement.select_move_destination(dialog, "Sura - Comfama")

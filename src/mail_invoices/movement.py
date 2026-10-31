@@ -40,6 +40,7 @@ def find_conversation(page: Page, identity: str):
 
 def select_move_destination(dialog, path: str) -> None:
     roots = dialog.locator('[role="treeitem"][aria-level="1"]')
+    roots.first.wait_for(state="visible")
     if roots.count() != 1:
         raise LookupError("Move dialog mailbox is missing or ambiguous")
     parent = roots
