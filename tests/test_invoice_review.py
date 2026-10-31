@@ -120,8 +120,9 @@ def test_company_suggestions_use_only_unanimous_history(tmp_path):
     suggestions = InvoiceWorkbook(path, tmp_path / "backups").company_suggestions()
 
     assert suggested_company(suggestions, "PROVEEDOR SAS") == "Mercado"
-    assert suggested_company(suggestions, "Clinica SAS") == ""
-    assert suggested_company(suggestions, "Sin Empresa SAS") == ""
+    assert suggested_company(suggestions, "Clinica SAS") == "Clinica SAS"
+    assert suggested_company(suggestions, "Sin Empresa SAS") == "Sin Empresa SAS"
+    assert suggested_company(suggestions, "  ") == ""
     assert path.read_bytes() == original
 
 
