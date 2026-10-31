@@ -12,12 +12,68 @@ from mail_invoices.documents import (
     parse_document,
 )
 from mail_invoices.local_model import LocalModelError, OllamaJsonModel
+from mail_invoices.inbox import MESSAGE_SELECTOR
 from mail_invoices.ocr import TesseractOcr
 from mail_invoices.review import ReviewItem
 from mail_invoices.review_ui import run_invoice_review
 from mail_invoices.settings import MailSettings
+from mail_invoices.workbook import InvoiceWorkbook
 
 OPERA_EXECUTABLE_ERROR = "Configured Opera executable does not exist"
+
+
+def process_one_invoice(settings: MailSettings, days: int, use_model: bool) -> int:
+    from dataclasses import replace
+    from playwright.sync_api import sync_playwright, Error as PlaywrightError
+    from mail_invoices.classification import simulate_classification
+    from mail_invoices.classification_ui import review_classification
+    from mail_invoices.classification_decisions import ClassificationDecisionStore, decisions_path
+    from mail_invoices.movement import approve_movement, move_registered_message
+
+    report = simulate_classification(
+        replace(settings, batch_limit=1), days, [], use_model, register=True,
+    )
+    review_classification(report, ClassificationDecisionStore(decisions_path()), settings.approver)
+    for message in report["messages"]:
+        if not message["eligible"]:
+            continue
+        folder = approve_movement(message, report["folders"])
+        if folder is None:
+            continue
+        try:
+            store = InvoiceWorkbook(settings.workbook, settings.backup_dir, settings.sheet)
+            registered = message.get("registered_invoices", [])
+            if not registered or any(
+                store.registration_status(
+                    invoice.number, invoice.legal_name, invoice.issued, invoice.amount, invoice.currency,
+                ) != "registered" for invoice in registered
+            ):
+                raise ValueError("Excel registration changed after approval; movement blocked")
+            with sync_playwright() as playwright:
+                context = playwright.chromium.launch_persistent_context(
+                    str(settings.profile_dir), executable_path=str(settings.executable),
+                    headless=False, accept_downloads=True,
+                )
+                try:
+                    page = outlook_page(context)
+                    page.wait_for_selector(MESSAGE_SELECTOR, timeout=60000)
+                    move_registered_message(page, message, folder, approved=True)
+                    report["moved"] = 1
+                    report["simulation"] = False
+                    message["moved_folder"] = folder
+                finally:
+                    context.close()
+        except (LookupError, PlaywrightError, OSError, ValueError) as error:
+            message["errors"].append(
+                f"Movement not verified; inspect Outlook before retrying: {error}"
+            )
+    for message in report["messages"]:
+        message.pop("classification_context", None)
+        message.pop("registered_invoices", None)
+    if any(message.get("movement_attempted") for message in report["messages"]):
+        report["simulation"] = False
+    print(to_json(report))
+    return 0 if report["moved"] == 1 else 1
 
 
 def classify_invoices(

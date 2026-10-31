@@ -23,11 +23,15 @@ def classification_ready(statuses: list[str], errors: list[str]) -> bool:
 
 def simulate_classification(
     settings: MailSettings, days: int, authorized_history: list[str], use_model: bool,
+    *, register: bool = False,
 ) -> dict:
     """Suggest destinations and verify Excel read-only. No move command is invoked."""
     from mail_invoices.workflow import _build_ocr, _extract_file, _prefer_xml_candidates
     from mail_invoices.review import ReviewItem
+    from mail_invoices.review_ui import InvoiceReviewWindow
 
+    if register and settings.batch_limit != 1:
+        raise ValueError("Integrated controlled test requires exactly one email")
     if not settings.executable.is_file():
         raise FileNotFoundError("Configured Opera executable does not exist")
     store = InvoiceWorkbook(settings.workbook, settings.backup_dir, settings.sheet)
@@ -59,7 +63,10 @@ def simulate_classification(
                     if option is None:
                         raise LookupError("Candidate no longer available in inbox")
                     sender, subject = message_metadata(option)
-                    result.update(sender=sender, subject=subject)
+                    result.update(
+                        sender=sender, subject=subject,
+                        conversation=option.get_attribute("data-convid"),
+                    )
                     # Separate message directories prevent same-name attachment overwrites.
                     paths = download_attachments(
                         page, message.label, settings.attachments_dir / f"classification-{index}",
@@ -80,11 +87,24 @@ def simulate_classification(
                             candidate = _with_archive_path(candidate, path)
                             items.append(ReviewItem(candidate, subject, rejected, error))
                     items = _prefer_xml_candidates(items)
+                    reviewed = []
+                    if register and items:
+                        window = InvoiceReviewWindow(
+                            items, [{"error": error} for error in result["errors"]], settings,
+                        )
+                        if window.run():
+                            reviewed = window.approved_invoices
+                        if len(reviewed) != len(items):
+                            result["errors"].append(
+                                "Not all invoices in this email were approved and registered"
+                            )
+                        result["registered_invoices"] = reviewed
                     statuses = []
-                    for item in items:
+                    for position, item in enumerate(items):
                         c = item.candidate
+                        record = reviewed[position] if len(reviewed) == len(items) else c
                         status = store.registration_status(
-                            c.number, c.legal_name, c.issued, c.amount, c.currency,
+                            record.number, record.legal_name, record.issued, record.amount, record.currency,
                         )
                         statuses.append(status)
                         fields = subject.split(";")
@@ -99,8 +119,8 @@ def simulate_classification(
                                 "Rejected model fields: " + ", ".join(item.rejected_model_fields)
                             )
                         result["invoices"].append({
-                            "source": c.source, "number": c.number,
-                            "supplier": c.legal_name, "status": status,
+                            "source": c.source, "number": record.number,
+                            "supplier": record.legal_name, "status": status,
                         })
                     incoming = IncomingMessage(
                         sender, subject,
@@ -126,6 +146,7 @@ def simulate_classification(
             context.close()
     return {
         "simulation": True, "moved": 0, "folders": folders,
+        "registration_requested": register,
         "authorized_history": authorized_history, "history_examples": len(history),
         "confirmed_examples": len(confirmed),
         "messages": results,

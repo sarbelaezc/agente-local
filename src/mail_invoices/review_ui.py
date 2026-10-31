@@ -27,6 +27,7 @@ class InvoiceReviewWindow:
         self.settings = settings
         self.store = InvoiceWorkbook(settings.workbook, settings.backup_dir, settings.sheet)
         self.saved = False
+        self.approved_invoices: list[ReviewedInvoice] = []
         self.forms: list[dict] = []
         try:
             self.company_suggestions = self.store.company_suggestions()
@@ -270,6 +271,7 @@ class InvoiceReviewWindow:
             parent=self.root,
         )
         self.saved = True
+        self.approved_invoices = invoices
         self.root.destroy()
 
     def _resolve_legacy_matches(

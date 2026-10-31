@@ -8,6 +8,7 @@ implementa.
 |---|---|---|---|
 | Facturas de Hotmail | En implementación | `src/mail_invoices/` | `python -m mail_invoices.main --login` / `--review-invoices` / `--classify-invoices` |
 | Contexto de carpetas confirmado | Implementado; probado con datos sintéticos | `src/mail_invoices/classification_decisions.py`, `classification_ui.py` | `python -m mail_invoices.main --classify-invoices` |
+| Registro y archivo de un correo | Prueba controlada; integración implementada | `src/mail_invoices/workflow.py`, `movement.py` | `python -m mail_invoices.main --process-one-invoice` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
 
 ## Aviso
@@ -99,7 +100,7 @@ destinos. El lector de historial requiere autorización por carpeta. Se revisaro
 63 carpetas y se guardaron 291 ejemplos de remitente/asunto, excluyendo una fila
 sin dirección verificable; esos ejemplos no incluyen cuerpos o facturas históricas
 ni se cargan automáticamente. Son contexto, no entrenamiento de pesos. El movimiento de correos todavía
-no está implementado.
+solo se habilita en la prueba integrada de un correo descrita abajo.
 
 ### Simular clasificación de facturas (sin mover)
 
@@ -165,9 +166,34 @@ mensajes), por ejemplo:
 
 `--no-model` omite Ollama. La prueba real sin historial encontró las carpetas
 y facturas pendientes en el Excel original; por ello no se efectuó ningún
-movimiento. Pendiente: validar historial autorizado y, después, implementar
-una prueba de movimiento de un único correo con registro verificado y
-aprobación explícita de su destino.
+movimiento. La simulación nunca mueve; el movimiento real requiere el modo
+integrado y la aprobación explícita de su destino.
+
+### Prueba integrada de UN correo (escribe Excel y mueve con aprobación)
+
+```powershell
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --process-one-invoice --days 30
+```
+
+Procesa únicamente el primer candidato, independientemente de `batch_limit`:
+descarga y extrae las facturas, abre la revisión habitual y registra solo las
+seleccionadas al pulsar «Aprobar y guardar lote». El escritor crea el respaldo
+del Excel. Deben quedar registradas TODAS las facturas del correo y no existir
+errores de extracción para habilitar el movimiento. Cancelar o aprobar solo
+parte del correo bloquea su archivo, sin deshacer registros ya aprobados.
+
+Después permite revisar y guardar ejemplos de carpeta. Esto no mueve nada.
+Una ventana separada **«Aprobar movimiento de UN correo»** exige seleccionar
+un destino existente y pulsar **«Aprobar y mover este correo»**. Cancelar deja
+el correo en la bandeja y conserva el registro de Excel. Se vuelve a comprobar
+el registro después de esta aprobación y se valida la identidad estable del
+correo antes de mover. Se verifica que aparece en la carpeta aprobada.
+
+Si falla la verificación tras intentar mover, el informe indica
+`movement_status: unverified`; no se reintenta automáticamente. Revise Outlook
+antes de repetir la prueba: Excel y Outlook no forman una transacción atómica.
+No crea carpetas y no procesa otros correos. Ollama sigue proponiendo, no
+autorizando destinos; sus sugerencias pueden ser incorrectas.
 
 ### Escanear la bandeja (solo lectura)
 
@@ -250,7 +276,7 @@ actual admite solo valores confirmados en COP.
 Las pruebas del escritor usan únicamente libros sintéticos en directorios temporales;
 nunca escriben en el Excel real. La interfaz solicita aprobación explícita antes de
 llamar al registro. La simulación de carpetas ya se probó con Outlook real;
-el historial autorizado y el movimiento siguen pendientes, como se indica arriba.
+el modo integrado limita el movimiento real a un correo con aprobación, como se indica arriba.
 
 La configuración personal está en `config/settings.yaml`, excluida de Git.
 Ambos módulos usan este archivo: `teams` contiene los ajustes de Teams,

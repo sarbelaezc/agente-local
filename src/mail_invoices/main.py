@@ -11,6 +11,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Human-reviewed Hotmail invoice organizer")
     parser.add_argument("--config", type=Path, default=Path("config") / "settings.yaml")
     mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
+        "--process-one-invoice", action="store_true",
+        help="Controlled one-email test: approve Excel registration, then approve a real move.",
+    )
     mode.add_argument("--login", action="store_true", help="Open Outlook for a manual sign-in")
     mode.add_argument(
         "--classify-invoices", action="store_true",
@@ -50,6 +54,8 @@ def main() -> int:
     if args.history_folder and not args.classify_invoices:
         parser.error("--history-folder requires --classify-invoices")
     settings = load_settings(args.config)
+    if args.process_one_invoice:
+        return workflow.process_one_invoice(settings, args.days, not args.no_model)
     if args.classify_invoices:
         return workflow.classify_invoices(
             settings, args.days, args.history_folder, not args.no_model,
