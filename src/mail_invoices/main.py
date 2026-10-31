@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 from mail_invoices.assist import complete_candidate, describe, to_json
@@ -24,7 +25,12 @@ def _login(settings: MailSettings) -> int:
             accept_downloads=True,
         )
         try:
-            page = context.pages[0] if context.pages else context.new_page()
+            # Restored tabs from earlier runs are closed so only one Outlook tab remains.
+            pages = [page for page in context.pages if page.url != "about:blank"]
+            page = pages[0] if pages else context.new_page()
+            for extra in context.pages:
+                if extra is not page:
+                    extra.close()
             page.goto("https://outlook.live.com/mail/0/", wait_until="domcontentloaded")
             print(
                 "Sign in to your personal Hotmail account manually. "
@@ -32,7 +38,8 @@ def _login(settings: MailSettings) -> int:
                 "No messages are opened or modified in login mode.",
                 flush=True,
             )
-            context.wait_for_event("close", timeout=0)
+            while context.pages:
+                time.sleep(1)
         finally:
             context.close()
     return 0
@@ -70,6 +77,45 @@ def _analyze_file(settings: MailSettings, path: Path, use_model: bool) -> int:
     return 0
 
 
+def _scan_inbox(settings: MailSettings, days: int) -> int:
+    """Read-only: lists invoice candidates from the inbox list without opening messages."""
+    from datetime import date
+
+    from playwright.sync_api import sync_playwright
+
+    from mail_invoices.inbox import MESSAGE_SELECTOR, scan_inbox
+
+    if not settings.executable.is_file():
+        raise FileNotFoundError("Configured Opera executable does not exist")
+    settings.profile_dir.mkdir(parents=True, exist_ok=True)
+    with sync_playwright() as playwright:
+        context = playwright.chromium.launch_persistent_context(
+            str(settings.profile_dir),
+            executable_path=str(settings.executable),
+            headless=False,
+        )
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto("https://outlook.live.com/mail/0/", wait_until="domcontentloaded")
+            page.wait_for_selector(MESSAGE_SELECTOR, timeout=60000)
+            candidates = scan_inbox(page, days, date.today())
+        finally:
+            context.close()
+    print(
+        to_json(
+            [
+                {
+                    "unread": message.unread,
+                    "received": message.received.isoformat() if message.received else None,
+                    "preview": message.label[:300],
+                }
+                for message in candidates
+            ]
+        )
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Human-reviewed Hotmail invoice organizer")
     parser.add_argument("--config", type=Path, default=Path("config") / "mail-invoices.yaml")
@@ -79,14 +125,27 @@ def main() -> int:
         "--analyze-file", type=Path, metavar="PATH",
         help="Extract invoice data from a local XML, PDF or ZIP (read-only)",
     )
+    mode.add_argument(
+        "--scan-inbox", action="store_true",
+        help="List invoice candidates in the inbox list (read-only, opens no message)",
+    )
+    parser.add_argument(
+        "--days", type=int, default=30,
+        help="How many days back --scan-inbox looks (1-365, default 30)",
+    )
     parser.add_argument(
         "--no-model", action="store_true", help="Skip the local Ollama field completion"
     )
     args = parser.parse_args()
+    if not 1 <= args.days <= 365:
+        parser.error("--days must be between 1 and 365")
     settings = load_settings(args.config)
     if args.login:
         return _login(settings)
+    if args.scan_inbox:
+        return _scan_inbox(settings, args.days)
     return _analyze_file(settings, args.analyze_file, not args.no_model)
+
 
 
 if __name__ == "__main__":
