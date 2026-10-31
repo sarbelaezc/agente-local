@@ -24,6 +24,28 @@ existente; hay un núcleo probado, pero el flujo completo aún no está disponib
 
 ## Hotmail: nuevo alcance en implementación
 
+### Organización del código
+
+El código ejecutable vive en `src/` y las pruebas en `tests/`.
+`mail_invoices` agrupa la funcionalidad de facturas:
+
+- `main.py`: argumentos y selección del modo de ejecución; conserva los comandos.
+- `workflow.py`: orquesta sesión, descarga, extracción y revisión.
+- `review.py`: datos y reglas de revisión, sin depender de Tkinter.
+- `review_ui.py`: ventana, selección y aprobación humana.
+- `browser.py` e `inbox.py`: interacción con Opera y Outlook.
+- `documents.py`, `ocr.py`, `assist.py` y `local_model.py`: extracción y asistencia local.
+- `workbook.py`: validación, duplicados, respaldo y escritura verificada del Excel.
+- `settings.py`: lectura de la sección de facturas de la configuración unificada.
+
+Los controles de aprobación se prueban sin abrir ventanas. Una prueba gráfica
+separada construye Tkinter y acciona los botones en un proceso aislado con un
+libro sintético; no requiere correo ni Excel real. Las pruebas de la CLI verifican
+sus argumentos y las del flujo conservan los errores informados.
+
+Teams continúa separado en los paquetes `app`, `automation`, `ai`, `storage` y
+`config`; permanece pausado. Esta refactorización no cambia sus comandos ni lo activa.
+
 Se preparó un módulo de facturas independiente del de Teams, con extracción
 local de XML UBL, ZIP y PDF con texto. La lectura de XML sigue siendo la fuente
 preferida para los datos estructurados de la factura.

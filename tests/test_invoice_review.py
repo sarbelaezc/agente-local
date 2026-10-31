@@ -1,13 +1,15 @@
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
+from typing import Generic, TypeVar
 
 import pytest
 from openpyxl import Workbook, load_workbook
 
 from mail_invoices.documents import InvoiceCandidate
-from mail_invoices.main import _prefer_xml_candidates
-from mail_invoices.review_ui import (
-    InvoiceReviewWindow,
+from mail_invoices.workflow import _prefer_xml_candidates
+from mail_invoices.review_ui import InvoiceReviewWindow
+from mail_invoices.review import (
     ReviewItem,
     record_approved_batch,
     reviewed_invoice_from_fields,
@@ -15,6 +17,19 @@ from mail_invoices.review_ui import (
 )
 from mail_invoices.settings import MailSettings, load_settings
 from mail_invoices.workbook import InvoiceWorkbook
+
+T = TypeVar("T")
+
+
+class FieldValue(Generic[T]):
+    def __init__(self, value: T) -> None:
+        self.value = value
+
+    def get(self) -> T:
+        return self.value
+
+    def set(self, value: T) -> None:
+        self.value = value
 
 
 def test_review_fields_are_converted_and_validated():
@@ -175,8 +190,31 @@ def review_window(tmp_path):
         )
         for number in ("TEST-1", "TEST-2")
     ]
-    window = InvoiceReviewWindow(items, [], settings)
-    window.root.withdraw()
+    # Exercise controller callbacks without opening a desktop window.
+    window = InvoiceReviewWindow.__new__(InvoiceReviewWindow)
+    window.settings = settings
+    window.store = InvoiceWorkbook(path, settings.backup_dir, settings.sheet)
+    window.saved = False
+    window.root = SimpleNamespace(destroy=lambda: None)
+    window.approver = FieldValue(settings.approver)
+    window.forms = [
+        {
+            "selected": FieldValue(False),
+            "variables": {
+                key: FieldValue(value)
+                for key, value in {
+                    "company": item.candidate.legal_name,
+                    "legal_name": item.candidate.legal_name,
+                    "issued": "2026-10-27",
+                    "amount": "100",
+                    "number": item.candidate.number,
+                    "currency": "COP",
+                }.items()
+            },
+            "item": item,
+        }
+        for item in items
+    ]
     yield window
     if not window.saved:
         window.root.destroy()
