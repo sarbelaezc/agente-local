@@ -63,6 +63,17 @@ Pendiente: obtener del Outlook real las carpetas y el historial que alimentan
 la sugerencia de carpetas, y conectar estas sugerencias con la interfaz de
 aprobación y el movimiento de correos.
 
+### Escanear la bandeja (solo lectura)
+
+```powershell
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\mail-invoices.yaml --scan-inbox --days 30
+```
+
+Lee la lista de la bandeja de Hotmail y muestra los correos con adjunto cuyo asunto
+o vista previa mencionan factura, invoice, recibo, CFDI o comprobante. Usa `--days`
+para la ventana (1 a 365, por defecto 30). No abre, descarga ni mueve correos. Los
+correos sin fecha reconocible se muestran para revisión.
+
 ### Analizar un adjunto local (solo lectura)
 
 Extrae los datos de un XML, PDF o ZIP guardado en el equipo y los muestra en
