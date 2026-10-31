@@ -197,6 +197,7 @@ Rules:
 - Keep each commit focused on one coherent change. Use Conventional Commits alongside GitFlow: `<type>(<scope>): <description>`, with a descriptive Spanish description in the imperative mood. Use `feat` for new behavior, `fix` for bug fixes, `refactor` for behavior-preserving restructuring, `test` for tests only, `docs` for documentation or agent instructions, and `chore` for maintenance. GitFlow governs branches and merges; Conventional Commits governs commit messages. Do not rewrite previous commits merely to rename them unless explicitly requested.
 - Run `pytest` before merging a feature.
 - Commit messages include the Copilot `Co-authored-by` trailer, unless the user asks for it to be omitted.
+- After every successful commit, always push the current GitFlow branch to `origin`; use `git push -u origin <branch>` if it has no upstream. Verify the remote branch matches local HEAD. If the push fails, report the error and leave the commit intact; never force-push to bypass rejection. Pushing does not authorize creating or merging a pull request.
 - Do not rewrite history on shared branches (`main`, `develop`) or use `push --force` on them.
 
 ## Tests
