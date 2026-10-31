@@ -71,6 +71,14 @@ def _matches_row(sheet: Worksheet, row: int, invoice: ReviewedInvoice) -> bool:
     )
 
 
+def _previous_amount_format(sheet: Worksheet, row: int) -> str:
+    for previous in range(row - 1, 2, -1):
+        cell = sheet.cell(previous, 5)
+        if cell.value is not None and cell.data_type == "n":
+            return cell.number_format
+    return "#,##0.00"
+
+
 class InvoiceWorkbook:
     def __init__(self, path: Path, backup_dir: Path, sheet_name: str = "Hoja1") -> None:
         self.path = path
@@ -155,7 +163,9 @@ class InvoiceWorkbook:
         finally:
             workbook.close()
 
-    def record(self, invoices: list[ReviewedInvoice]) -> list[RecordResult]:
+    def record(
+        self, invoices: list[ReviewedInvoice], *, restore_amount_format: bool = False,
+    ) -> list[RecordResult]:
         """Commit only reviewed records, with backup, conflict detection and verification."""
         if not invoices:
             raise WorkbookError("No approved invoices were supplied")
@@ -180,6 +190,7 @@ class InvoiceWorkbook:
             sheet.cell(2, 6, "N\u00famero de factura")
             sheet.cell(2, 6)._style = copy(sheet.cell(2, 5)._style)
             results = []
+            expected_formats: dict[int, str] = {}
             for invoice in invoices:
                 exact = [
                     row for row in range(3, sheet.max_row + 1)
@@ -192,8 +203,14 @@ class InvoiceWorkbook:
                     row = exact[0]
                     if not _matches_row(sheet, row, invoice):
                         raise WorkbookError("Invoice number matches but its date or amount conflicts")
+                    if restore_amount_format:
+                        previous_format = _previous_amount_format(sheet, row)
+                        sheet.cell(row, 5).number_format = previous_format
+                        expected_formats[row] = previous_format
                     results.append(RecordResult(invoice.number, row, False))
                     continue
+                if restore_amount_format:
+                    raise WorkbookError("Format restoration requires an existing exact invoice match")
                 legacy = [
                     row for row in range(3, sheet.max_row + 1)
                     if sheet.cell(row, 6).value is None and _matches_row(sheet, row, invoice)
@@ -221,7 +238,9 @@ class InvoiceWorkbook:
                     if isinstance(value, str):
                         cell.data_type = "s"
                 sheet.cell(row, 4).number_format = "yyyy-mm-dd"
-                sheet.cell(row, 5).number_format = '#,##0.00'
+                amount_format = _previous_amount_format(sheet, row)
+                sheet.cell(row, 5).number_format = amount_format
+                expected_formats[row] = amount_format
                 results.append(RecordResult(invoice.number, row, True))
             with tempfile.NamedTemporaryFile(
                 suffix=".xlsx", prefix=".invoices-", dir=self.path.parent, delete=False
@@ -241,6 +260,9 @@ class InvoiceWorkbook:
                         != _normalized(invoice.number)
                     ):
                         raise WorkbookError("Save verification failed for an approved invoice")
+                for row, number_format in expected_formats.items():
+                    if verified_sheet.cell(row, 5).number_format != number_format:
+                        raise WorkbookError("Save verification failed for the amount format")
             finally:
                 verification.close()
             if hashlib.sha256(self.path.read_bytes()).hexdigest() != original_hash:

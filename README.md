@@ -281,6 +281,13 @@ existentes, comprueba números por proveedor y crea una copia de seguridad local
 antes de reemplazar el Excel. Una coincidencia histórica sin número requiere
 confirmación; no se completa por inferencia. No se mezclan monedas: el esquema
 actual admite solo valores confirmados en COP.
+Las nuevas celdas de `Valor` conservan el formato numérico de la fila de datos
+anterior de esa columna (incluido el símbolo monetario y los decimales); se
+omiten filas sin importe. Sin datos previos se usa `#,##0.00`. El importe sigue
+siendo numérico, no texto. Una restauración explícita mediante
+`record(..., restore_amount_format=True)` solo admite facturas existentes con
+número, proveedor, fecha e importe coincidentes; crea respaldo y verifica los
+valores y el formato antes de reemplazar el libro. No agrega filas.
 
 Las pruebas del escritor usan únicamente libros sintéticos en directorios temporales;
 nunca escriben en el Excel real. La interfaz solicita aprobación explícita antes de
