@@ -181,13 +181,15 @@ The repository follows GitFlow:
 
 - `main`: only stable, released code. Each merge is tagged with its version.
 - `develop`: integration branch. Receives finished features.
-- `feature/<short-name>`: branches off `develop` and merges back into `develop` with `--no-ff`.
-- `release/<version>`: branches off `develop` to prepare a version. Only minor fixes are allowed, and it merges into both `main` and `develop`.
-- `hotfix/<short-name>`: branches off `main` to fix urgent production bugs. It merges into both `main` and `develop`.
+- `feature/<short-name>`: branches off `develop` and merges back into `develop` through a pull request.
+- `release/<version>`: branches off `develop` to prepare a version. Only minor fixes are allowed, and it merges into `main` and then back into `develop` through pull requests.
+- `hotfix/<short-name>`: branches off `main` to fix urgent production bugs. It merges into `main` and then into `develop` through pull requests.
 
 Rules:
 
 - Do not commit directly to `main` or `develop`, except for the repository's initial setup.
+- Every change to `main` or `develop` goes through a pull request. Open it with `gh pr create` against the correct base (`develop` for features, `main` for releases and hotfixes).
+- Do not merge a pull request without the user's approval.
 - One change per commit, with a descriptive commit message in Spanish, in the imperative mood.
 - Run `pytest` before merging a feature.
 - Commit messages include the Copilot `Co-authored-by` trailer, unless the user asks for it to be omitted.
