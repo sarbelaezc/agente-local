@@ -1,8 +1,7 @@
-ollama:
-  url: http://127.0.0.1:11434
-  model: qwen2.5:7b
-
 teams:
+  ollama:
+    url: http://127.0.0.1:11435
+    model: qwen2.5:7b
   teams_url: https://teams.microsoft.com/
   edge:
     executable: "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
@@ -13,6 +12,9 @@ teams:
   allowed_chats: []
 
 invoices:
+  ollama:
+    url: http://127.0.0.1:11434
+    model: qwen2.5:7b
   opera_executable: "%LOCALAPPDATA%\\Programs\\Opera\\opera.exe"
   profile_dir: "%LOCALAPPDATA%\\MailInvoiceAgent\\OperaProfile"
   workbook: "C:\\Documents\\Resumen_Facturas.xlsx"

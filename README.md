@@ -6,11 +6,71 @@ implementa.
 
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
-| Facturas de Hotmail | En implementación | `src/mail_invoices/` | `python -m mail_invoices.main --login` / `--review-invoices` / `--classify-invoices` |
-| Contexto de carpetas confirmado | Implementado; probado con datos sintéticos | `src/mail_invoices/classification_decisions.py`, `classification_ui.py` | `python -m mail_invoices.main --classify-invoices` |
-| Registro y archivo de un correo | Prueba controlada verificada con un correo real | `src/mail_invoices/workflow.py`, `movement.py` | `python -m mail_invoices.main --process-one-invoice` |
-| Lotes E2E supervisados y recuperación | Implementado; validación sintética | `src/mail_invoices/batch_workflow.py`, `batch_review_ui.py`, `batch_state.py` | `python -m mail_invoices.main --process-invoice-batch` / `--resume-invoice-batch` |
+| Organización y clasificación de facturas electrónicas en Hotmail | En implementación; validación controlada y sintética | `src/mail_invoices/` | `python -m mail_invoices.main --classify-invoices` / `--process-invoice-batch` / `--resume-invoice-batch` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
+
+## Stack tecnológico
+
+- **Python 3.12 o posterior**; empaquetado con `setuptools` y dependencias declaradas en `pyproject.toml`.
+- **Playwright para Python** automatiza los navegadores. Facturas usa Opera; Teams usa un perfil separado de Microsoft Edge y permanece pausado.
+- **Dos instancias locales de Ollama**, una exclusiva por feature; `httpx` hace las llamadas y `PyYAML` gestiona la configuración. Teams usa `127.0.0.1:11435`; facturas usa `127.0.0.1:11434`.
+- **Facturas:** `openpyxl` para Excel, `defusedxml` para XML, `pypdf` para PDF con texto, y `pypdfium2` más `Pillow` para renderizar PDF escaneados.
+- **Tkinter y SQLite** de la biblioteca estándar para interfaces y persistencia local; **pytest** para pruebas.
+- **Tesseract OCR** es una instalación externa opcional, necesaria solo para PDF escaneados. Opera, Edge y Ollama también se instalan aparte cuando se usa la función correspondiente.
+
+## Reproducir en otro equipo Windows
+
+1. Instala Git, Python 3.12 o posterior y Ollama. Instala Opera para facturas; Edge solo si vas a preparar Teams. Teams está pausado y no debe ejecutarse.
+2. Clona el repositorio y entra en su carpeta:
+
+    ```powershell
+    git clone <URL_DEL_REPOSITORIO>
+    Set-Location agente-local
+    ```
+
+3. Crea el entorno virtual, instala el proyecto y sus dependencias de desarrollo, y descarga Chromium para Playwright:
+
+    ```powershell
+    .\scripts\bootstrap.ps1
+    ```
+
+4. Crea la configuración local solo si aún no existe y completa las rutas de Opera y del libro Excel. La plantilla deja `teams.allowed_chats` vacío; no autoriza conversaciones. `config/settings.yaml` está excluido de Git y debe configurarse en cada equipo, no copiarse al repositorio.
+
+   ```powershell
+   if (-not (Test-Path "config/settings.yaml")) {
+     Copy-Item "config/settings.example.yaml" "config/settings.yaml"
+   }
+   ```
+
+5. Inicia cada instancia de Ollama en una terminal PowerShell independiente, con puerto y directorio de modelos propios. Cierra la instancia automática de Ollama antes de levantar servicios manuales para evitar que ocupe el puerto `11434`.
+
+    Facturas:
+
+    ```powershell
+    $env:OLLAMA_HOST = "127.0.0.1:11434"
+    $env:OLLAMA_MODELS = "$env:LOCALAPPDATA\MailInvoiceAgent\OllamaModels"
+    ollama serve
+    ```
+
+    Teams (solo cuando se reactive):
+
+    ```powershell
+    $env:OLLAMA_HOST = "127.0.0.1:11435"
+    $env:OLLAMA_MODELS = "$env:LOCALAPPDATA\TeamsLocalAgent\OllamaModels"
+    ollama serve
+    ```
+
+    En otra terminal, define el mismo `OLLAMA_HOST` y ejecuta `ollama pull <modelo>` para descargar el modelo configurado en la sección correspondiente. Los modelos y sus datos permanecen separados. Consulta la [guía oficial de configuración de Ollama](https://docs.ollama.com/faq#how-do-i-configure-ollama-server) para más opciones en Windows.
+6. Para OCR en PDF escaneados, instala Tesseract y los datos de idioma siguiendo [Requisitos de OCR](#requisitos-de-ocr). Es opcional para las pruebas.
+7. Ejecuta las pruebas sin credenciales, correos ni libros personales:
+
+    ```powershell
+    .\.venv\Scripts\python.exe -m pytest
+    ```
+
+    La configuración de pytest usa captura `sys`; no la cambies a `fd` para las pruebas gráficas de Windows.
+
+`scripts/run.ps1` inicia el agente de Teams, no el organizador de facturas. No lo ejecutes mientras Teams siga pausado. Los comandos de facturas se muestran en sus secciones y usan `config/settings.yaml`.
 
 ## Skill de revisión: Ponytail
 
@@ -125,8 +185,13 @@ supervisados pequeños, descritos abajo.
 ### Simular clasificación de facturas (sin mover)
 
 ```powershell
-.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --classify-invoices --days 30
+  .\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --classify-invoices --days 30 --candidate-text NUMERO_FACTURA
 ```
+
+`--candidate-text` filtra el texto de la lista/preview antes de abrir mensajes;
+úsalo con un identificador de factura para revisar un único candidato. Abrirlo
+puede marcarlo como leído. Corregir y guardar su destino solo registra un ejemplo
+local para futuras sugerencias; esta simulación nunca mueve correos.
 
 Lee las carpetas existentes de Outlook, abre hasta `invoices.batch_limit` correos
 candidatos y descarga sus adjuntos en subdirectorios `classification-N` de
@@ -140,7 +205,9 @@ acotados de conceptos/texto (1000 caracteres por campo y factura). Los textos se
 tratan como datos no confiables, nunca como instrucciones. Más de 10 facturas
 requiere revisión manual. Si se omite Ollama, no se sustituye este análisis por
 una decisión basada solo en el remitente. No se persisten cuerpos en el informe;
-los adjuntos descargados permanecen bajo la política de archivos temporales.
+los adjuntos se eliminan al terminar cada ejecución.
+Solo se borra el subdirectorio temporal creado por esa ejecución; otros archivos
+de `attachments_dir` y las fuentes de `--analyze-file` no se modifican.
 Los errores y las facturas pendientes bloquean la aptitud para un movimiento
 posterior. La ventana muestra el estado de cada factura, el destino propuesto
 y el motivo; puede cambiar la carpeta o dejarla vacía. **Cerrar la simulación
@@ -252,8 +319,8 @@ fecha de aprobación y último error. No se guardan adjuntos ni evidencia comple
 del PDF en esa base. Es información personal local: no la sincronice ni la suba
 a Git. Los registros se conservan hasta su eliminación manual; **no elimine la
 base para resolver un movimiento incierto**, porque perdería las autorizaciones
-y el estado de recuperación. La sesión también conserva las descargas bajo la
-política de `attachments_dir`.
+y el estado de recuperación. Los adjuntos descargados solo existen durante la
+ejecución y se eliminan al cerrar, cancelar o fallar el flujo.
 
 Para retomar sin descargar ni clasificar de nuevo:
 
@@ -283,7 +350,7 @@ modos antiguos: no participan de este bloqueo. Excel y Outlook siguen sin ser
 una transacción atómica. La verificación de identidad incluye remitente, asunto
 y, antes de mover, una huella del cuerpo leído; un cambio bloquea el movimiento.
 La ejecución programada y la aprobación automática sin supervisión siguen
-pendientes. La suite actual pasa 187 pruebas, incluidas aprobación conjunta,
+pendientes. La suite actual pasa 195 pruebas, incluidas aprobación conjunta,
 persistencia, cancelación, recuperación sin duplicar registros, bloqueo de
 ejecuciones simultáneas y una página sintética con los selectores de movimiento.
 Este modo no se ha probado todavía con un lote real de varios correos.
@@ -309,8 +376,9 @@ de filas visibles como final de la bandeja.
 ```
 
 Escanea la bandeja igual que `--scan-inbox`, abre cada candidato (máximo `batch_limit`),
-guarda sus adjuntos PDF, XML y ZIP en `attachments_dir` (por defecto `tmp\`) y los analiza
-en solo lectura. Omite archivos mayores a 10 MB y no escribe en el Excel. Ten en cuenta
+guarda sus adjuntos PDF, XML y ZIP en un subdirectorio temporal de `attachments_dir`
+(por defecto `tmp\`) y los analiza en solo lectura. El subdirectorio se elimina al
+terminar. Omite archivos mayores a 10 MB y no escribe en el Excel. Ten en cuenta
 que **abrir un correo lo marca como leído** en Outlook. Usa `--no-model` para no llamar a
 Ollama. Los candidatos que fallan se listan en el JSON con `requires_review`.
 
@@ -359,8 +427,8 @@ Usa `--no-model` para ver solo el resultado de reglas y OCR, sin Ollama.
    desde `C:\Program Files\Tesseract-OCR\tessdata`.
 3. Ajusta la sección `invoices.ocr` de `config/settings.yaml` si usas otras rutas.
 
-Ollama debe estar en ejecución con el modelo configurado (`qwen2.5:7b` por
-defecto) en la sección compartida `ollama`.
+La instancia Ollama de facturas debe estar activa en `invoices.ollama`; Teams
+usa de forma independiente `teams.ollama`. Cada sección define su URL y modelo.
 
 El registro preparado utiliza `Hoja1`, encabezados en B2:E2 y añade
 `Número de factura` en F2 solo al guardar un lote aprobado. Conserva las filas
@@ -387,14 +455,16 @@ el modo de un correo y los lotes pequeños exigen aprobación para el movimiento
 como se indica arriba.
 
 La configuración personal está en `config/settings.yaml`, excluida de Git.
-Ambos módulos usan este archivo: `teams` contiene los ajustes de Teams,
-`invoices` los de Hotmail y Excel (incluidos `ocr` y `approver`), y `ollama`
-es compartido. La unificación no activa Teams, que sigue pausado.
+Ambos módulos usan este archivo: `teams` contiene los ajustes de Teams y su
+instancia `ollama`; `invoices` contiene Hotmail, Excel (incluidos `ocr` y
+`approver`) y su propia instancia `ollama`. Las URLs deben ser distintas. La
+unificación no activa Teams, que sigue pausado.
 Los lectores conservan compatibilidad con archivos planos anteriores mediante
 `--config`; para migrarlos, agrupe sus ajustes en las secciones indicadas,
-conserve todos los valores personales y resuelva diferencias de Ollama antes
-de retirar el archivo antiguo. No copie la plantilla encima de una configuración
-personal existente.
+conserve todos los valores personales y configure una instancia Ollama separada
+para cada feature. En configuraciones antiguas, el bloque global `ollama` se
+conserva como instancia de facturas; Teams usa su endpoint nuevo por defecto.
+No copie la plantilla encima de una configuración personal existente.
 La plantilla es `config/settings.example.yaml`. El perfil de Opera y las
 copias locales están bajo `%LOCALAPPDATA%\MailInvoiceAgent`, fuera de los
 perfiles habituales de Opera y Teams.
@@ -413,7 +483,7 @@ ventana; no compartas credenciales ni copies cookies.
 
 Aplicacion local que prepara borradores de Teams Web y exige aprobacion humana antes de insertar o enviar texto.
 
-## Seguridad
+### Seguridad de Teams
 
 - Solo procesa los chats definidos en `config/settings.yaml`.
 - No solicita ni almacena credenciales.
@@ -422,32 +492,10 @@ Aplicacion local que prepara borradores de Teams Web y exige aprobacion humana a
 - Siempre requiere aprobacion humana antes de insertar.
 - Insertar no implica enviar: el envio exige una segunda confirmacion.
 
-## Instalacion en Windows
-
-1. Instala Python 3.12, Microsoft Edge y Ollama.
-2. Ejecuta `.\scripts\bootstrap.ps1`.
-3. Copia y ajusta la configuracion:
-   `Copy-Item config/settings.example.yaml config/settings.yaml`
-   Agrega solo el identificador y nombre exacto de un chat interno autorizado.
-   La configuración de ejemplo no autoriza chats.
-4. Inicia con `.\scripts\run.ps1`.
-
 El perfil persistente de Edge y la base de datos se guardan bajo
 `%LOCALAPPDATA%\TeamsLocalAgent`, fuera de la carpeta sincronizada del proyecto.
-No copies ni sincronices esa carpeta.
-
-Para iniciar sesion dentro del mismo contexto persistente de Playwright, ejecuta
-`.\.venv\Scripts\python.exe -m app.main --process login --config config/settings.yaml`.
-Completa el inicio de sesion/MFA manualmente en Edge y cierra la ventana. Este modo
-no abre chats ni lee mensajes. El agente no pide ni maneja credenciales.
-Si el siguiente inicio vuelve a pedir autenticacion, detente y consulta a TI: no uses
-el perfil habitual ni intentes eludir politicas de acceso.
-
-Teams puede cambiar su DOM sin aviso. Valida los selectores en `src/automation/selectors.py` en un chat de prueba antes de usar la aplicacion.
-
-## Pruebas
-
-`.venv\Scripts\python.exe -m pytest`
+No copies ni sincronices esa carpeta. Teams puede cambiar su DOM sin aviso; sus
+selectores deben validarse en un chat de prueba antes de reanudar esta función.
 
 ## Licencia
 

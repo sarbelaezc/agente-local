@@ -32,7 +32,7 @@ def main() -> int:
     )
     mode.add_argument(
         "--download-attachments", action="store_true",
-        help="Download candidate invoice attachments to attachments_dir and analyze them. "
+        help="Download candidate invoice attachments to a temporary directory and analyze them. "
         "Opening a message marks it as read.",
     )
     mode.add_argument(
@@ -45,6 +45,10 @@ def main() -> int:
     parser.add_argument(
         "--history-folder", action="append", default=[],
         help="Authorize metadata history from an exact folder path (classification only).",
+    )
+    parser.add_argument(
+        "--candidate-text",
+        help="Only classify inbox candidates whose list preview contains this text.",
     )
     parser.add_argument(
         "--days", type=int, default=30,
@@ -60,6 +64,8 @@ def main() -> int:
         parser.error("--batch-size must be between 1 and 5")
     if args.history_folder and not args.classify_invoices:
         parser.error("--history-folder requires --classify-invoices")
+    if args.candidate_text is not None and not args.classify_invoices:
+        parser.error("--candidate-text requires --classify-invoices")
     settings = load_settings(args.config)
     if args.process_invoice_batch or args.resume_invoice_batch:
         from mail_invoices.batch_workflow import process_invoice_batch
@@ -71,7 +77,7 @@ def main() -> int:
         return workflow.process_one_invoice(settings, args.days, not args.no_model)
     if args.classify_invoices:
         return workflow.classify_invoices(
-            settings, args.days, args.history_folder, not args.no_model,
+            settings, args.days, args.history_folder, not args.no_model, args.candidate_text,
         )
     if args.login:
         return workflow.login(settings)

@@ -36,6 +36,31 @@ def _expand_local_path(value: str, label: str) -> str:
     return str(Path(expanded).expanduser())
 
 
+def ensure_feature_ollama_isolation(
+    config: dict[str, Any], feature: str, feature_url: str
+) -> None:
+    other_feature = "invoices" if feature == "teams" else "teams"
+    other_config = config.get(other_feature)
+    if not isinstance(other_config, dict):
+        return
+    fallback = config.get("ollama") if feature == "teams" else None
+    other_ollama = other_config.get("ollama", fallback) or {}
+    if not isinstance(other_ollama, dict):
+        raise ValueError(f"{other_feature}.ollama must be a mapping")
+    default_port = 11434 if feature == "teams" else 11435
+    other_url = str(other_ollama.get("url", f"http://127.0.0.1:{default_port}"))
+    feature_endpoint = urlparse(feature_url.rstrip("/"))
+    other_endpoint = urlparse(other_url.rstrip("/"))
+    loopback_hosts = ("127.0.0.1", "localhost", "::1")
+    feature_host = "loopback" if feature_endpoint.hostname in loopback_hosts else feature_endpoint.hostname
+    other_host = "loopback" if other_endpoint.hostname in loopback_hosts else other_endpoint.hostname
+    if (feature_host, feature_endpoint.port or 80) == (
+        other_host,
+        other_endpoint.port or 80,
+    ):
+        raise ValueError("Teams and invoices must use separate Ollama instances")
+
+
 def load_settings(path: str | Path) -> Settings:
     config_path = Path(path)
     with config_path.open("r", encoding="utf-8") as stream:
@@ -43,11 +68,15 @@ def load_settings(path: str | Path) -> Settings:
 
     if not isinstance(raw, dict):
         raise ValueError("Configuration must be a mapping")
-    ollama = raw.get("ollama", {})
-    if "teams" in raw or "invoices" in raw:
-        raw = raw.get("teams")
+    unified = "teams" in raw or "invoices" in raw
+    root = raw
+    if unified:
+        raw = root.get("teams")
         if not isinstance(raw, dict):
             raise ValueError("teams configuration must be a mapping")
+    ollama = raw.get("ollama") or {}
+    if not isinstance(ollama, dict):
+        raise ValueError("teams.ollama must be a mapping")
 
     chats = tuple(
         AllowedChat(id=str(chat["id"]), name=str(chat["name"]))
@@ -58,7 +87,7 @@ def load_settings(path: str | Path) -> Settings:
 
     edge = raw.get("edge", {})
     storage = raw.get("storage", {})
-    ollama_url = str(ollama.get("url", "http://127.0.0.1:11434")).rstrip("/")
+    ollama_url = str(ollama.get("url", "http://127.0.0.1:11435")).rstrip("/")
     parsed_ollama_url = urlparse(ollama_url)
     if parsed_ollama_url.scheme != "http" or parsed_ollama_url.hostname not in (
         "127.0.0.1",
@@ -66,6 +95,8 @@ def load_settings(path: str | Path) -> Settings:
         "::1",
     ):
         raise ValueError("Ollama URL must be local (127.0.0.1, localhost, or ::1)")
+    if unified:
+        ensure_feature_ollama_isolation(root, "teams", ollama_url)
 
     return Settings(
         edge_executable=str(edge["executable"]),

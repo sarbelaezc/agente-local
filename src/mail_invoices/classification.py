@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import date
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from hashlib import sha256
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
@@ -11,7 +12,9 @@ from mail_invoices.browser import outlook_page, reopen_outlook
 from mail_invoices.documents import MAX_FILE_BYTES, InvoiceCandidate
 from mail_invoices.folders import IncomingMessage, bounded_context, suggest_folder
 from mail_invoices.classification_decisions import ClassificationDecisionStore, decisions_path
-from mail_invoices.inbox import MESSAGE_SELECTOR, _find_message, download_attachments, scan_inbox
+from mail_invoices.inbox import (
+    MESSAGE_SELECTOR, _find_message, download_attachments, filter_inbox_messages, scan_inbox,
+)
 from mail_invoices.local_model import LocalModelError, OllamaJsonModel
 from mail_invoices.outlook_folders import discover_folders, message_metadata, read_history, read_message_body
 from mail_invoices.settings import MailSettings
@@ -26,6 +29,25 @@ def simulate_classification(
     settings: MailSettings, days: int, authorized_history: list[str], use_model: bool,
     *, register: bool = False,
     include_review_items: bool = False,
+    candidate_text: str | None = None,
+) -> dict:
+    """Run classification with attachments isolated to a cleaned temporary directory."""
+    if register and settings.batch_limit != 1:
+        raise ValueError("Integrated controlled test requires exactly one email")
+    settings.attachments_dir.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix="classification-run-", dir=settings.attachments_dir) as run_dir:
+        return _simulate_classification(
+            replace(settings, attachments_dir=Path(run_dir)), days, authorized_history, use_model,
+            register=register, include_review_items=include_review_items,
+            candidate_text=candidate_text,
+        )
+
+
+def _simulate_classification(
+    settings: MailSettings, days: int, authorized_history: list[str], use_model: bool,
+    *, register: bool = False,
+    include_review_items: bool = False,
+    candidate_text: str | None = None,
 ) -> dict:
     """Suggest destinations and verify Excel read-only. No move command is invoked."""
     from mail_invoices.workflow import _build_ocr, _extract_file, _prefer_xml_candidates
@@ -52,7 +74,10 @@ def simulate_classification(
             folders = [folder.path for folder in discover_folders(page)]
             history = read_history(page, authorized_history)
             reopen_outlook(page, MESSAGE_SELECTOR)
-            messages = scan_inbox(page, days, date.today())[:settings.batch_limit]
+            messages = scan_inbox(page, days, date.today())
+            if candidate_text is not None:
+                messages = filter_inbox_messages(messages, candidate_text)
+            messages = messages[:settings.batch_limit]
             for index, message in enumerate(messages, 1):
                 result = {
                     "sender": "", "subject": "", "invoices": [],
@@ -160,8 +185,7 @@ def simulate_classification(
 
 
 def _with_archive_path(candidate: InvoiceCandidate, path: Path) -> InvoiceCandidate:
-    from dataclasses import replace
-
+    source = f"{path.parent.name}/{path.name}"
     if ":" in candidate.source:
-        return replace(candidate, source=f"{path}:{candidate.source.split(':', 1)[1]}")
-    return candidate
+        source = f"{source}:{candidate.source.split(':', 1)[1]}"
+    return replace(candidate, source=source)

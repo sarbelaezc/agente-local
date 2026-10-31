@@ -1,7 +1,9 @@
 from datetime import date
 from unittest.mock import MagicMock
 
-from mail_invoices.inbox import MESSAGE_SELECTOR, _find_message, is_candidate, parse_label
+from mail_invoices.inbox import (
+    MESSAGE_SELECTOR, _find_message, filter_inbox_messages, is_candidate, parse_label,
+)
 
 TODAY = date(2026, 10, 31)
 NARROW = "\u202f"
@@ -61,6 +63,22 @@ def test_candidate_needs_attachment_and_invoice_term():
 def test_candidate_respects_days_window():
     assert is_candidate(parse_label(FACTURA_OLD, TODAY), TODAY, 7) is False
     assert is_candidate(parse_label(FACTURA_OLD, TODAY), TODAY, 30) is True
+
+
+def test_candidate_text_filter_matches_only_requested_preview():
+    messages = [
+        parse_label("Tiene datos adjuntos Proveedor Factura SYNTH-001", TODAY),
+        parse_label("Tiene datos adjuntos Otro proveedor Factura SYNTH-002", TODAY),
+    ]
+
+    assert filter_inbox_messages(messages, "synth-001") == [messages[0]]
+
+
+def test_candidate_text_filter_rejects_empty_query():
+    import pytest
+
+    with pytest.raises(ValueError, match="cannot be empty"):
+        filter_inbox_messages([], "  ")
 
 
 def test_undated_candidate_is_kept_for_review():

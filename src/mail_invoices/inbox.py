@@ -72,6 +72,13 @@ def is_candidate(message: InboxMessage, today: date, days: int) -> bool:
     return any(term in text for term in INVOICE_TERMS)
 
 
+def filter_inbox_messages(messages: list[InboxMessage], text: str) -> list[InboxMessage]:
+    query = _ascii_lower(text.strip())
+    if not query:
+        raise ValueError("Candidate text filter cannot be empty")
+    return [message for message in messages if query in _ascii_lower(message.label)]
+
+
 def scan_inbox(page, days: int, today: date, max_scrolls: int = 40) -> list[InboxMessage]:
     """Reads the message list only: never opens, downloads or moves a message."""
     seen: dict[str, InboxMessage] = {}

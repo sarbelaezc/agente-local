@@ -1,10 +1,11 @@
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from mail_invoices import main, workflow
+from mail_invoices import classification, main, workflow
 from mail_invoices.documents import DocumentError, InvoiceCandidate
 from mail_invoices.local_model import LocalModelError
 from mail_invoices.ocr import TesseractOcr
@@ -35,6 +36,8 @@ def test_cli_routes_to_workflow_with_unchanged_arguments(monkeypatch, settings, 
     if flag == "--analyze-file":
         arguments.append("invoice.xml")
     arguments.extend(["--days", "7", "--no-model"])
+    if flag == "--classify-invoices":
+        arguments.extend(["--candidate-text", "SYNTH-001"])
     monkeypatch.setattr("sys.argv", arguments)
     monkeypatch.setattr(main, "load_settings", lambda path: settings)
     calls = []
@@ -52,7 +55,7 @@ def test_cli_routes_to_workflow_with_unchanged_arguments(monkeypatch, settings, 
     elif flag == "--analyze-file":
         assert calls == [(settings, Path("invoice.xml"), False)]
     elif flag == "--classify-invoices":
-        assert calls == [(settings, 7, [], False)]
+        assert calls == [(settings, 7, [], False, "SYNTH-001")]
     else:
         assert calls == [(settings, 7, False)]
 
@@ -101,3 +104,83 @@ def test_failed_extraction_keeps_readonly_json_shape(monkeypatch, tmp_path):
     assert results == [{
         "source": "broken.pdf", "error": "Encrypted PDF", "requires_review": True,
     }]
+
+
+def test_classification_cleans_run_attachments(tmp_path, monkeypatch):
+    attachments = tmp_path / "attachments"
+    settings = MailSettings(
+        tmp_path / "opera.exe", tmp_path, tmp_path / "book.xlsx", tmp_path,
+        "Hoja1", 1, attachments_dir=attachments,
+    )
+    created = []
+
+    def simulate(run_settings, *args, **kwargs):
+        path = run_settings.attachments_dir / "classification-1" / "invoice.zip"
+        path.parent.mkdir()
+        path.write_bytes(b"synthetic")
+        created.append(path)
+        return {"messages": []}
+
+    monkeypatch.setattr(classification, "_simulate_classification", simulate)
+
+    assert classification.simulate_classification(settings, 30, [], False) == {"messages": []}
+    assert not created[0].exists()
+    assert list(attachments.iterdir()) == []
+
+
+def test_classification_report_uses_relative_archive_source(tmp_path):
+    candidate = InvoiceCandidate(
+        source="invoice.zip:invoice.xml", digest="synthetic", number="TEST-1",
+        legal_name="Synthetic SAS", issued=date(2026, 10, 31),
+        amount=Decimal("100"), currency="COP", method="xml",
+    )
+
+    result = classification._with_archive_path(
+        candidate, tmp_path / "classification-1" / "invoice.zip",
+    )
+
+    assert result.source == "classification-1/invoice.zip:invoice.xml"
+
+
+def test_download_analysis_cleans_only_its_run_files(tmp_path, monkeypatch, settings):
+    attachments = tmp_path / "attachments"
+    attachments.mkdir()
+    unrelated = attachments / "keep.txt"
+    unrelated.write_text("user file", encoding="utf-8")
+    actual_settings = replace(settings, attachments_dir=attachments)
+    created = []
+
+    def download(_settings, _days, target_dir):
+        path = target_dir / "invoice.xml"
+        path.write_bytes(b"synthetic")
+        created.append(path)
+        return [("synthetic message", path)], []
+
+    monkeypatch.setattr(workflow, "_download_batch", download)
+    monkeypatch.setattr(workflow, "_build_ocr", lambda _settings: None)
+    monkeypatch.setattr(workflow, "_summarize_file", lambda *args: [])
+
+    assert workflow.download_and_analyze(actual_settings, 30, False) == 0
+    assert not created[0].exists()
+    assert unrelated.read_text(encoding="utf-8") == "user file"
+    assert list(attachments.iterdir()) == [unrelated]
+
+
+def test_review_cancel_cleans_run_attachments(tmp_path, monkeypatch, settings):
+    attachments = tmp_path / "attachments"
+    actual_settings = replace(settings, attachments_dir=attachments)
+    created = []
+
+    def download(_settings, _days, target_dir):
+        path = target_dir / "invoice.xml"
+        path.write_bytes(b"synthetic")
+        created.append(path)
+        return [("synthetic message", path)], []
+
+    monkeypatch.setattr(workflow, "_download_batch", download)
+    monkeypatch.setattr(workflow, "_build_ocr", lambda _settings: None)
+    monkeypatch.setattr(workflow, "_extract_file", lambda *args: ([], []))
+
+    assert workflow.review_invoices(actual_settings, 30, False) == 1
+    assert not created[0].exists()
+    assert list(attachments.iterdir()) == []

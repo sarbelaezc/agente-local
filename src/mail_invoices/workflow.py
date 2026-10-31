@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from mail_invoices.assist import complete_candidate, describe, to_json
 from mail_invoices.browser import outlook_page, reopen_outlook
@@ -79,13 +80,16 @@ def process_one_invoice(settings: MailSettings, days: int, use_model: bool) -> i
 
 def classify_invoices(
     settings: MailSettings, days: int, authorized_history: list[str], use_model: bool,
+    candidate_text: str | None = None,
 ) -> int:
     """Simulate classification, review destinations, and print the read-only report."""
     from mail_invoices.classification import simulate_classification
     from mail_invoices.classification_ui import review_classification
     from mail_invoices.classification_decisions import ClassificationDecisionStore, decisions_path
 
-    report = simulate_classification(settings, days, authorized_history, use_model)
+    report = simulate_classification(
+        settings, days, authorized_history, use_model, candidate_text=candidate_text,
+    )
     review_classification(report, ClassificationDecisionStore(decisions_path()), settings.approver)
     for message in report["messages"]:
         message.pop("classification_context", None)
@@ -172,21 +176,25 @@ def analyze_file(settings: MailSettings, path: Path, use_model: bool) -> int:
 def download_and_analyze(settings: MailSettings, days: int, use_model: bool) -> int:
     """Downloads invoice attachments from candidate messages, then analyzes them read-only.
 
-    Opening a candidate marks it as read in Outlook. Files are kept in attachments_dir.
+    Opening a candidate marks it as read in Outlook. Downloaded files are temporary.
     """
-    downloads, skipped = _download_batch(settings, days)
-    model = OllamaJsonModel(settings.ollama_url, settings.ollama_model) if use_model else None
-    ocr = _build_ocr(settings)
-    results = list(skipped)
-    for label, path in downloads:
-        for item in _summarize_file(path, ocr, model):
-            item["message"] = label
-            results.append(item)
-    print(to_json(results))
+    settings.attachments_dir.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix="download-run-", dir=settings.attachments_dir) as run_dir:
+        downloads, skipped = _download_batch(settings, days, Path(run_dir))
+        model = OllamaJsonModel(settings.ollama_url, settings.ollama_model) if use_model else None
+        ocr = _build_ocr(settings)
+        results = list(skipped)
+        for label, path in downloads:
+            for item in _summarize_file(path, ocr, model):
+                item["message"] = label
+                results.append(item)
+        print(to_json(results))
     return 0
 
 
-def _download_batch(settings: MailSettings, days: int) -> tuple[list[tuple[str, Path]], list[dict]]:
+def _download_batch(
+    settings: MailSettings, days: int, target_dir: Path,
+) -> tuple[list[tuple[str, Path]], list[dict]]:
     """Downloads supported attachments while collecting per-message failures."""
     from datetime import date
 
@@ -195,6 +203,7 @@ def _download_batch(settings: MailSettings, days: int) -> tuple[list[tuple[str, 
 
     from mail_invoices.inbox import MESSAGE_SELECTOR, download_attachments, scan_inbox
 
+    target_dir.mkdir(parents=True, exist_ok=True)
     if not settings.executable.is_file():
         raise FileNotFoundError(OPERA_EXECUTABLE_ERROR)
     settings.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -215,7 +224,7 @@ def _download_batch(settings: MailSettings, days: int) -> tuple[list[tuple[str, 
                 reopen_outlook(page, MESSAGE_SELECTOR)
                 try:
                     paths = download_attachments(
-                        page, message.label, settings.attachments_dir
+                        page, message.label, target_dir
                     )
                 except (LookupError, PlaywrightError) as error:
                     skipped.append(
@@ -268,27 +277,29 @@ def _prefer_xml_candidates(items: list[ReviewItem]) -> list[ReviewItem]:
 
 def review_invoices(settings: MailSettings, days: int, use_model: bool) -> int:
     """Downloads, analyzes, and requests explicit approval before recording a batch."""
-    downloads, issues = _download_batch(settings, days)
-    model = OllamaJsonModel(settings.ollama_url, settings.ollama_model) if use_model else None
-    ocr = _build_ocr(settings)
-    review_items = []
-    for message, path in downloads:
-        extracted, file_issues = _extract_file(path, ocr, model)
-        for issue in file_issues:
-            issue["message"] = message
-        issues.extend(file_issues)
-        review_items.extend(
-            ReviewItem(candidate, message, rejected, model_error)
-            for candidate, rejected, model_error in extracted
-        )
-    review_items = _prefer_xml_candidates(review_items)
-    if not review_items:
-        print(to_json({"saved": False, "issues": issues}))
-        return 1
-    saved = run_invoice_review(review_items, issues, settings)
-    if not saved:
-        print(to_json({"saved": False, "message": "El lote se cerró sin modificar el Excel."}))
-    return 0 if saved else 1
+    settings.attachments_dir.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix="review-run-", dir=settings.attachments_dir) as run_dir:
+        downloads, issues = _download_batch(settings, days, Path(run_dir))
+        model = OllamaJsonModel(settings.ollama_url, settings.ollama_model) if use_model else None
+        ocr = _build_ocr(settings)
+        review_items = []
+        for message, path in downloads:
+            extracted, file_issues = _extract_file(path, ocr, model)
+            for issue in file_issues:
+                issue["message"] = message
+            issues.extend(file_issues)
+            review_items.extend(
+                ReviewItem(candidate, message, rejected, model_error)
+                for candidate, rejected, model_error in extracted
+            )
+        review_items = _prefer_xml_candidates(review_items)
+        if not review_items:
+            print(to_json({"saved": False, "issues": issues}))
+            return 1
+        saved = run_invoice_review(review_items, issues, settings)
+        if not saved:
+            print(to_json({"saved": False, "message": "El lote se cerró sin modificar el Excel."}))
+        return 0 if saved else 1
 
 
 def scan_inbox(settings: MailSettings, days: int) -> int:
