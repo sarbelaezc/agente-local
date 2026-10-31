@@ -1,6 +1,26 @@
 import subprocess
 import sys
 import textwrap
+import tkinter as tk
+
+import pytest
+from openpyxl import Workbook, load_workbook
+
+
+@pytest.mark.parametrize("iteration", range(12))
+def test_workbook_then_tk_in_same_process(tmp_path, iteration):
+    path = tmp_path / f"synthetic-{iteration}.xlsx"
+    workbook = Workbook()
+    workbook.save(path)
+    workbook.close()
+    loaded = load_workbook(path)
+    loaded.close()
+    root = tk.Tk()
+    try:
+        root.withdraw()
+        root.update_idletasks()
+    finally:
+        root.destroy()
 
 
 def test_real_review_window_in_isolated_process(tmp_path):

@@ -43,6 +43,13 @@ separada construye Tkinter y acciona los botones en un proceso aislado con un
 libro sintético; no requiere correo ni Excel real. Las pruebas de la CLI verifican
 sus argumentos y las del flujo conservan los errores informados.
 
+Pytest usa captura `sys` de stdout y stderr. En este entorno Windows, la captura
+`fd` reproduce fallos intermitentes al inicializar Tcl/Tk después de leer un XLSX,
+incluso fuera del código del agente. No fuerce `--capture=fd` para estas pruebas
+gráficas. Una regresión repite la lectura de XLSX y la apertura de Tkinter en el
+mismo proceso. Este ajuste corrige el modo de ejecución de las pruebas, no modifica
+la instalación de Python ni incorpora reintentos que oculten errores de la aplicación.
+
 Teams continúa separado en los paquetes `app`, `automation`, `ai`, `storage` y
 `config`; permanece pausado. Esta refactorización no cambia sus comandos ni lo activa.
 
