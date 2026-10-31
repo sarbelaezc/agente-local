@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 from mail_invoices.assist import complete_candidate, describe, to_json
@@ -24,7 +25,12 @@ def _login(settings: MailSettings) -> int:
             accept_downloads=True,
         )
         try:
-            page = context.pages[0] if context.pages else context.new_page()
+            # Restored tabs from earlier runs are closed so only one Outlook tab remains.
+            pages = [page for page in context.pages if page.url != "about:blank"]
+            page = pages[0] if pages else context.new_page()
+            for extra in context.pages:
+                if extra is not page:
+                    extra.close()
             page.goto("https://outlook.live.com/mail/0/", wait_until="domcontentloaded")
             print(
                 "Sign in to your personal Hotmail account manually. "
@@ -32,7 +38,8 @@ def _login(settings: MailSettings) -> int:
                 "No messages are opened or modified in login mode.",
                 flush=True,
             )
-            context.wait_for_event("close", timeout=0)
+            while context.pages:
+                time.sleep(1)
         finally:
             context.close()
     return 0
