@@ -6,7 +6,7 @@ implementa.
 
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
-| Facturas de Hotmail | En implementación | `src/mail_invoices/` | `python -m mail_invoices.main --login` / `--analyze-file` |
+| Facturas de Hotmail | En implementación | `src/mail_invoices/` | `python -m mail_invoices.main --login` / `--review-invoices` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
 
 ## Aviso
@@ -54,9 +54,9 @@ Reglas de seguridad de esta ampliación:
 - El XML y las reglas deterministas prevalecen; el modelo nunca reemplaza un
   valor existente. Toda factura que no venga completa de XML, o con campos
   propuestos por el modelo, queda marcada `requires_review`.
-- Ollama no registra datos, no mueve correos ni cambia carpetas. Se requerirá
-  aprobación explícita antes de registrar un lote en Excel, y un correo solo se
-  moverá después de verificar el registro o confirmar que es duplicado.
+- Ollama no registra datos, no mueve correos ni cambia carpetas. La interfaz exige
+  aprobación explícita antes de registrar un lote en Excel; un correo solo se moverá
+  después de verificar el registro o confirmar que es duplicado.
 - No se inventan valores ni se descargan enlaces externos.
 
 Pendiente: obtener del Outlook real las carpetas y el historial que alimentan
@@ -85,6 +85,21 @@ guarda sus adjuntos PDF, XML y ZIP en `attachments_dir` (por defecto `tmp\`) y l
 en solo lectura. Omite archivos mayores a 10 MB y no escribe en el Excel. Ten en cuenta
 que **abrir un correo lo marca como leído** en Outlook. Usa `--no-model` para no llamar a
 Ollama. Los candidatos que fallan se listan en el JSON con `requires_review`.
+
+### Revisar y registrar un lote
+
+```powershell
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\mail-invoices.yaml --review-invoices --days 30
+```
+
+Descarga y analiza los adjuntos como el modo anterior, y luego abre una ventana de
+revisión. Cada factura debe seleccionarse explícitamente; la columna `Empresa` se
+completa manualmente porque no se infiere del correo. La ventana muestra los campos
+extraídos y cualquier campo descartado por Ollama. Escriba quién aprueba y confirme
+el lote en el diálogo final para guardar; cerrar la ventana o cancelar no modifica el
+Excel. Las coincidencias históricas requieren confirmación explícita. El registro crea
+una copia de seguridad, verifica el archivo temporal y no mueve correos. Use
+`--no-model` para omitir Ollama.
 
 ### Analizar un adjunto local (solo lectura)
 
@@ -117,12 +132,11 @@ antes de reemplazar el Excel. Una coincidencia histórica sin número requiere
 confirmación; no se completa por inferencia. No se mezclan monedas: el esquema
 actual admite solo valores confirmados en COP.
 
-El Excel real no se ha modificado. El escaneo de Outlook, la lectura de sus
-carpetas e historial para las sugerencias, la interfaz de aprobación y el
-movimiento de correos siguen pendientes de validar la sesión y el DOM real de
-Outlook en Opera.
-No ejecutar escrituras sobre el Excel real desde código de prueba: la futura
-interfaz debe solicitar aprobación explícita del lote antes de llamar al registro.
+Las pruebas del escritor usan únicamente libros sintéticos en directorios temporales;
+nunca escriben en el Excel real. La interfaz solicita aprobación explícita antes de
+llamar al registro. El escaneo de carpetas e historial para las sugerencias y el
+movimiento de correos siguen pendientes de validar la sesión y el DOM real de Outlook
+en Opera.
 
 La configuración personal está en `config/mail-invoices.yaml`, excluida de Git.
 La plantilla es `config/mail-invoices.example.yaml`. El perfil de Opera y las
