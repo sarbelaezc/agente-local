@@ -1,0 +1,6 @@
+opera_executable: "%LOCALAPPDATA%\\Programs\\Opera\\opera.exe"
+profile_dir: "%LOCALAPPDATA%\\MailInvoiceAgent\\OperaProfile"
+workbook: "C:\\Documents\\Resumen_Facturas.xlsx"
+backup_dir: "%LOCALAPPDATA%\\MailInvoiceAgent\\Backups"
+sheet: Hoja1
+batch_limit: 20

@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.local/
+config/settings.yaml
+config/mail-invoices.yaml
+
+# Personal financial data, invoices and local audit databases
+*.xlsx
+*.xls
+*.csv
+*.pdf
+*.zip
+*.db
+*.sqlite
+*.sqlite3

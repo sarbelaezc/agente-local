@@ -1,0 +1,5 @@
+CHAT_SELECTOR = "[data-tid='chat-list-item']"
+CHAT_HEADER_SELECTOR = "[data-tid='chat-header-title']"
+MESSAGE_LIST_SELECTOR = "[data-tid='message-pane-list']"
+COMPOSE_SELECTOR = "[data-tid='ckeditor-replybox'], [role='textbox'][aria-label*='Mensaje']"
+SEND_BUTTON_SELECTOR = "[data-tid='newMessageControl'] button[type='button']"
