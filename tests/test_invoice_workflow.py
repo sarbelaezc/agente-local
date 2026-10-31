@@ -27,6 +27,7 @@ def settings(tmp_path):
         ("--download-attachments", "download_and_analyze"),
         ("--review-invoices", "review_invoices"),
         ("--analyze-file", "analyze_file"),
+        ("--classify-invoices", "classify_invoices"),
     ],
 )
 def test_cli_routes_to_workflow_with_unchanged_arguments(monkeypatch, settings, flag, handler):
@@ -50,6 +51,8 @@ def test_cli_routes_to_workflow_with_unchanged_arguments(monkeypatch, settings, 
         assert calls == [(settings, 7)]
     elif flag == "--analyze-file":
         assert calls == [(settings, Path("invoice.xml"), False)]
+    elif flag == "--classify-invoices":
+        assert calls == [(settings, 7, [], False)]
     else:
         assert calls == [(settings, 7, False)]
 

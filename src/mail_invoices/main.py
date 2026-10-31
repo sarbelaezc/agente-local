@@ -13,6 +13,10 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--login", action="store_true", help="Open Outlook for a manual sign-in")
     mode.add_argument(
+        "--classify-invoices", action="store_true",
+        help="Simulate folder classification and verify original Excel; never moves mail.",
+    )
+    mode.add_argument(
         "--analyze-file", type=Path, metavar="PATH",
         help="Extract invoice data from a local XML, PDF or ZIP (read-only)",
     )
@@ -30,6 +34,10 @@ def main() -> int:
         help="Download and analyze candidates, then require explicit human approval before saving to Excel.",
     )
     parser.add_argument(
+        "--history-folder", action="append", default=[],
+        help="Authorize metadata history from an exact folder path (classification only).",
+    )
+    parser.add_argument(
         "--days", type=int, default=30,
         help="How many days back inbox modes look (1-365, default 30)",
     )
@@ -39,7 +47,13 @@ def main() -> int:
     args = parser.parse_args()
     if not 1 <= args.days <= 365:
         parser.error("--days must be between 1 and 365")
+    if args.history_folder and not args.classify_invoices:
+        parser.error("--history-folder requires --classify-invoices")
     settings = load_settings(args.config)
+    if args.classify_invoices:
+        return workflow.classify_invoices(
+            settings, args.days, args.history_folder, not args.no_model,
+        )
     if args.login:
         return workflow.login(settings)
     if args.scan_inbox:

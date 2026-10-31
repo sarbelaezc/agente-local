@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -110,9 +111,19 @@ def _find_message(page, label: str, max_pages: int = 60):
             label,
         )
         if index >= 0:
-            item = page.locator(MESSAGE_SELECTOR).nth(index)
+            # Scrolling can change row indexes in Outlook's virtualized list.
+            item = page.get_by_role("option", name=label, exact=True)
+            if item.count() != 1:
+                raise LookupError("Candidate message label is ambiguous")
             item.evaluate("item => item.scrollIntoView({ block: 'center' })")
             page.wait_for_timeout(300)
+            conversation = item.get_attribute("data-convid")
+            if conversation:
+                item = page.locator(
+                    f'{MESSAGE_SELECTOR}[data-convid={json.dumps(conversation)}]'
+                )
+                if item.count() != 1:
+                    raise LookupError("Candidate message identifier is ambiguous")
             return item
         before = page.locator(MESSAGE_SELECTOR).count()
         page.locator(MESSAGE_SELECTOR).last.evaluate(
@@ -166,7 +177,7 @@ def _attachment_text_names(page) -> list[str]:
           for (const el of document.querySelectorAll('body *')) {
             if (el.children.length > 0) continue;
             const text = (el.textContent || '').trim();
-            if (!/^[^\s\\/:*?"<>|]+\.(pdf|xml|zip)$/i.test(text)) continue;
+            if (!/^[^\\/:*?"<>|\r\n]+\.(pdf|xml|zip)$/i.test(text)) continue;
             const option = el.closest('[role="option"]');
             if (option && !(option.getAttribute('aria-label') || '').startsWith(text)) continue;
             names.add(text);

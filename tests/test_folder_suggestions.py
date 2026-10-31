@@ -56,3 +56,38 @@ def test_model_suggestion_must_be_an_existing_folder():
 def test_without_model_unknown_sender_has_no_suggestion():
     result = suggest_folder(IncomingMessage("n@new.example", "Factura"), FOLDERS, HISTORY)
     assert result.folder is None
+
+
+def test_invoice_content_overrides_sender_rules_and_history():
+    import json
+
+    class InspectingModel(FakeModel):
+        def complete_json(self, system, user):
+            payload = json.loads(user)
+            assert payload["correo_nuevo"]["cuerpo"] == "Consulta hospitalaria"
+            assert payload["correo_nuevo"]["facturas"][0]["conceptos"] == "Consulta general"
+            assert payload["correo_nuevo"]["facturas"][1]["proveedor"] == "Otra clinica"
+            return super().complete_json(system, user)
+
+    model = InspectingModel({"folder": "Personal", "reason": "Servicios de salud"})
+    result = suggest_folder(
+        IncomingMessage(
+            "facturas@energia.example", "Factura", body="Consulta hospitalaria",
+            invoices=(
+                {"supplier": "Hospital", "descriptions": "Consulta general"},
+                {"supplier": "Otra clinica", "evidence": "Laboratorio"},
+            ),
+        ),
+        FOLDERS, HISTORY, {"@energia.example": "Facturas/Energía"}, model,
+    )
+    assert result.folder == "Personal"
+    assert result.source == "model"
+    assert model.calls == 1
+
+
+def test_content_without_model_does_not_fall_back_to_sender():
+    result = suggest_folder(
+        IncomingMessage("facturas@energia.example", "Factura", body="Consulta medica"),
+        FOLDERS, HISTORY, {"@energia.example": "Facturas/Energía"},
+    )
+    assert result.folder is None

@@ -1,6 +1,7 @@
 from datetime import date
+from unittest.mock import MagicMock
 
-from mail_invoices.inbox import is_candidate, parse_label
+from mail_invoices.inbox import MESSAGE_SELECTOR, _find_message, is_candidate, parse_label
 
 TODAY = date(2026, 10, 31)
 NARROW = "\u202f"
@@ -65,3 +66,19 @@ def test_candidate_respects_days_window():
 def test_undated_candidate_is_kept_for_review():
     undated = f"Tiene datos adjuntos Proveedor Factura nueva oct 15 3:00{NARROW}PM hola"
     assert is_candidate(parse_label(undated, TODAY), TODAY, 30) is True
+
+
+def test_virtualized_message_is_bound_to_identity_not_row_index():
+    page = MagicMock()
+    options = MagicMock()
+    stable = MagicMock()
+    stable.count.return_value = 1
+    row = page.get_by_role.return_value
+    row.count.return_value = 1
+    row.get_attribute.return_value = "synthetic-conversation"
+    options.evaluate_all.return_value = 4
+    page.locator.side_effect = lambda selector: options if selector == MESSAGE_SELECTOR else stable
+    result = _find_message(page, "Synthetic invoice label")
+    assert result is stable
+    page.get_by_role.assert_called_once_with("option", name="Synthetic invoice label", exact=True)
+    options.nth.assert_not_called()

@@ -125,6 +125,36 @@ class InvoiceWorkbook:
         finally:
             workbook.close()
 
+    def registration_status(
+        self, number: str, legal_name: str, issued: date | None,
+        amount: Decimal | None, currency: str,
+    ) -> str:
+        """Read-only evidence for classification; historical matches do not authorize moves."""
+        if not number.strip() or not legal_name.strip() or issued is None or amount is None:
+            return "incomplete"
+        if currency != "COP" or not amount.is_finite() or amount <= 0:
+            return "incomplete"
+        workbook = load_workbook(self.path)
+        try:
+            sheet = self._sheet(workbook)
+            matches = [
+                row for row in range(3, sheet.max_row + 1)
+                if _normalized(sheet.cell(row, 3).value) == _normalized(legal_name)
+                and _normalized(sheet.cell(row, 6).value) == _normalized(number)
+            ]
+            if len(matches) > 1:
+                return "conflict"
+            invoice = ReviewedInvoice(legal_name, legal_name, issued, amount, number, currency)
+            if matches:
+                return "registered" if _matches_row(sheet, matches[0], invoice) else "conflict"
+            historical = any(
+                sheet.cell(row, 6).value is None and _matches_row(sheet, row, invoice)
+                for row in range(3, sheet.max_row + 1)
+            )
+            return "historical_review" if historical else "not_registered"
+        finally:
+            workbook.close()
+
     def record(self, invoices: list[ReviewedInvoice]) -> list[RecordResult]:
         """Commit only reviewed records, with backup, conflict detection and verification."""
         if not invoices:

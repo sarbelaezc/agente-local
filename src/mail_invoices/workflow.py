@@ -20,6 +20,22 @@ from mail_invoices.settings import MailSettings
 OPERA_EXECUTABLE_ERROR = "Configured Opera executable does not exist"
 
 
+def classify_invoices(
+    settings: MailSettings, days: int, authorized_history: list[str], use_model: bool,
+) -> int:
+    """Simulate classification, review destinations, and print the read-only report."""
+    from mail_invoices.classification import simulate_classification
+    from mail_invoices.classification_ui import review_classification
+    from mail_invoices.classification_decisions import ClassificationDecisionStore, decisions_path
+
+    report = simulate_classification(settings, days, authorized_history, use_model)
+    review_classification(report, ClassificationDecisionStore(decisions_path()), settings.approver)
+    for message in report["messages"]:
+        message.pop("classification_context", None)
+    print(to_json(report))
+    return 1 if any(item["errors"] for item in report["messages"]) else 0
+
+
 def login(settings: MailSettings) -> int:
     from playwright.sync_api import sync_playwright
 

@@ -6,7 +6,8 @@ implementa.
 
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
-| Facturas de Hotmail | En implementación | `src/mail_invoices/` | `python -m mail_invoices.main --login` / `--review-invoices` |
+| Facturas de Hotmail | En implementación | `src/mail_invoices/` | `python -m mail_invoices.main --login` / `--review-invoices` / `--classify-invoices` |
+| Contexto de carpetas confirmado | Implementado; probado con datos sintéticos | `src/mail_invoices/classification_decisions.py`, `classification_ui.py` | `python -m mail_invoices.main --classify-invoices` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
 
 ## Aviso
@@ -37,6 +38,7 @@ El código ejecutable vive en `src/` y las pruebas en `tests/`.
 - `documents.py`, `ocr.py`, `assist.py` y `local_model.py`: extracción y asistencia local.
 - `workbook.py`: validación, duplicados, respaldo y escritura verificada del Excel.
 - `settings.py`: lectura de la sección de facturas de la configuración unificada.
+- `classification_decisions.py`: decisiones confirmadas y extractos de contexto en SQLite local.
 
 Los controles de aprobación se prueban sin abrir ventanas. Una prueba gráfica
 separada construye Tkinter y acciona los botones en un proceso aislado con un
@@ -74,7 +76,11 @@ Implementado y probado con datos sintéticos (aún no con facturas ni correos re
   `folder_rules` (remitente exacto o `@dominio`), luego historial unánime del
   mismo remitente o dominio y, por último, Ollama con la lista de carpetas
   existentes y ejemplos mínimos (remitente, asunto y carpeta, sin cuerpos de
-  correo). La sugerencia debe ser una carpeta existente; nunca se crean carpetas.
+  correo). Este orden se conserva para consultas de metadatos solamente.
+  En la clasificación de facturas se prioriza el contenido: proveedor, conceptos
+  y partidas del XML o texto del PDF/OCR, seguido del asunto y cuerpo del correo.
+  Las reglas por remitente y el historial por dominio no imponen el destino.
+  La sugerencia debe ser una carpeta existente; nunca se crean carpetas.
 
 Reglas de seguridad de esta ampliación:
 
@@ -88,9 +94,80 @@ Reglas de seguridad de esta ampliación:
   después de verificar el registro o confirmar que es duplicado.
 - No se inventan valores ni se descargan enlaces externos.
 
-Pendiente: obtener del Outlook real las carpetas y el historial que alimentan
-la sugerencia de carpetas, y conectar estas sugerencias con la interfaz de
-aprobación y el movimiento de correos.
+La simulación de clasificación obtiene las carpetas reales y permite revisar
+destinos. El lector de historial requiere autorización por carpeta. Se revisaron localmente
+63 carpetas y se guardaron 291 ejemplos de remitente/asunto, excluyendo una fila
+sin dirección verificable; esos ejemplos no incluyen cuerpos o facturas históricas
+ni se cargan automáticamente. Son contexto, no entrenamiento de pesos. El movimiento de correos todavía
+no está implementado.
+
+### Simular clasificación de facturas (sin mover)
+
+```powershell
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --classify-invoices --days 30
+```
+
+Lee las carpetas existentes de Outlook, abre hasta `invoices.batch_limit` correos
+candidatos y descarga sus adjuntos en subdirectorios `classification-N` de
+`invoices.attachments_dir`. Abrir un correo puede marcarlo como leído. Verifica
+número, proveedor, fecha y valor contra el Excel configurado **sin escribirlo**.
+Una coincidencia histórica sin número no equivale a registro confirmado.
+Tras abrir cada candidato, lee exclusivamente su cuerpo identificado en Outlook,
+no los textos de otras filas. El análisis con Ollama se hace localmente, sin proxy:
+hasta 6000 caracteres de cuerpo y hasta 10 facturas, con proveedor y extractos
+acotados de conceptos/texto (1000 caracteres por campo y factura). Los textos se
+tratan como datos no confiables, nunca como instrucciones. Más de 10 facturas
+requiere revisión manual. Si se omite Ollama, no se sustituye este análisis por
+una decisión basada solo en el remitente. No se persisten cuerpos en el informe;
+los adjuntos descargados permanecen bajo la política de archivos temporales.
+Los errores y las facturas pendientes bloquean la aptitud para un movimiento
+posterior. La ventana muestra el estado de cada factura, el destino propuesto
+y el motivo; puede cambiar la carpeta o dejarla vacía. **Cerrar la simulación
+no mueve correos**. El informe se imprime en JSON sin los extractos de contexto.
+Una sugerencia de Ollama no es una aprobación.
+
+#### Guardar correcciones y reutilizarlas
+
+1. Elija la carpeta correcta en cada desplegable.
+2. Marque **«Confirmo esta carpeta como ejemplo para futuras sugerencias»**
+   solo en los correos que haya revisado; las casillas empiezan desmarcadas.
+3. Verifique **«Confirmado por»**, precargado con `invoices.approver`.
+4. Pulse **«Guardar decisiones confirmadas»**. Guardar no mueve correos ni
+   registra facturas; el destino puede confirmarse aunque siga pendiente en Excel.
+   Una selección sin carpeta o sin nombre de confirmador se rechaza.
+
+Las decisiones se guardan en
+`%LOCALAPPDATA%\MailInvoiceAgent\classification-decisions.sqlite3`, fuera del
+repositorio, con carpeta, confirmador y fecha UTC. Se retienen remitente (120
+caracteres), asunto y proveedor (200), un extracto del cuerpo (1000) y hasta
+10 facturas con proveedor (200), conceptos y texto (500 por campo).
+No se guardan adjuntos, rutas de archivos ni importes en esta base.
+Contiene datos personales: no la sincronice ni la suba a Git. Se conserva hasta
+que la elimine manualmente, con el agente cerrado, para reiniciar este contexto.
+
+Las próximas simulaciones cargan estas decisiones automáticamente y envían a
+Ollama hasta 6 ejemplos relacionados por contenido (presupuesto de 6000 caracteres
+de ejemplos, extractos más cortos que los guardados), excluyendo carpetas que
+ya no existen. Las decisiones de otros correos se conservan; volver a confirmar
+el mismo contexto sustituye su carpeta anterior. Son ejemplos para el contexto,
+no entrenamiento de pesos ni reglas automáticas por remitente. Las sugerencias
+siguen requiriendo revisión humana; `--no-model` no usa estos ejemplos para decidir.
+Cerrar la ventana sin guardar no confirma nada. Los errores de almacenamiento
+se muestran y no se notifican como éxito.
+
+El historial de correos archivados no se lee por defecto. Autorice carpetas
+con su ruta exacta (solo remitente y asunto de hasta 5 filas visibles, sin abrir
+mensajes), por ejemplo:
+
+```powershell
+.\.venv\Scripts\python.exe -m mail_invoices.main --classify-invoices --history-folder "Compras/Recibos"
+```
+
+`--no-model` omite Ollama. La prueba real sin historial encontró las carpetas
+y facturas pendientes en el Excel original; por ello no se efectuó ningún
+movimiento. Pendiente: validar historial autorizado y, después, implementar
+una prueba de movimiento de un único correo con registro verificado y
+aprobación explícita de su destino.
 
 ### Escanear la bandeja (solo lectura)
 
@@ -172,9 +249,8 @@ actual admite solo valores confirmados en COP.
 
 Las pruebas del escritor usan únicamente libros sintéticos en directorios temporales;
 nunca escriben en el Excel real. La interfaz solicita aprobación explícita antes de
-llamar al registro. El escaneo de carpetas e historial para las sugerencias y el
-movimiento de correos siguen pendientes de validar la sesión y el DOM real de Outlook
-en Opera.
+llamar al registro. La simulación de carpetas ya se probó con Outlook real;
+el historial autorizado y el movimiento siguen pendientes, como se indica arriba.
 
 La configuración personal está en `config/settings.yaml`, excluida de Git.
 Ambos módulos usan este archivo: `teams` contiene los ajustes de Teams,
