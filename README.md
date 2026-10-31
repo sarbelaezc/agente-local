@@ -74,6 +74,18 @@ o vista previa mencionan factura, invoice, recibo, CFDI o comprobante. Usa `--da
 para la ventana (1 a 365, por defecto 30). No abre, descarga ni mueve correos. Los
 correos sin fecha reconocible se muestran para revisión.
 
+### Descargar y analizar adjuntos
+
+```powershell
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\mail-invoices.yaml --download-attachments --days 30
+```
+
+Escanea la bandeja igual que `--scan-inbox`, abre cada candidato (máximo `batch_limit`),
+guarda sus adjuntos PDF, XML y ZIP en `attachments_dir` (por defecto `tmp\`) y los analiza
+en solo lectura. Omite archivos mayores a 10 MB y no escribe en el Excel. Ten en cuenta
+que **abrir un correo lo marca como leído** en Outlook. Usa `--no-model` para no llamar a
+Ollama. Los candidatos que fallan se listan en el JSON con `requires_review`.
+
 ### Analizar un adjunto local (solo lectura)
 
 Extrae los datos de un XML, PDF o ZIP guardado en el equipo y los muestra en
