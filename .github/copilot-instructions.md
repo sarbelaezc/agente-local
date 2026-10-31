@@ -175,6 +175,24 @@ Cuando se implemente el proyecto:
 - Añadir docstrings a funciones públicas importantes.
 - Mantener funciones relacionadas con UI separadas de la lógica de dominio.
 
+## Control de versiones (GitFlow)
+
+El repositorio sigue GitFlow:
+
+- `main`: solo código estable y publicado. Cada merge se etiqueta con su versión.
+- `develop`: rama de integración. Recibe los features terminados.
+- `feature/<nombre-corto>`: nace de `develop` y vuelve a `develop` mediante merge con `--no-ff`.
+- `release/<versión>`: nace de `develop` para preparar una versión. Solo admite correcciones menores y se fusiona en `main` y en `develop`.
+- `hotfix/<nombre-corto>`: nace de `main` para corregir errores urgentes en producción. Se fusiona en `main` y en `develop`.
+
+Reglas:
+
+- No commitear directamente en `main` ni en `develop`, salvo el arranque inicial del repositorio.
+- Un cambio por commit, con mensaje descriptivo en español, en modo imperativo.
+- Antes de fusionar un feature, ejecutar `pytest`.
+- Los mensajes de commit incluyen el trailer `Co-authored-by` de Copilot, salvo que el usuario lo pida sin él.
+- No reescribir historia de ramas compartidas (`main`, `develop`) ni usar `push --force` sobre ellas.
+
 ## Pruebas
 
 Antes de finalizar cualquier cambio importante, ejecutar la menor prueba relevante.
