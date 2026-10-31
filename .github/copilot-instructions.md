@@ -1,65 +1,65 @@
-# Instrucciones para GitHub Copilot
+# GitHub Copilot Instructions
 
-## Proyecto
+## Project
 
-Este proyecto implementará un agente local que ayuda a redactar respuestas para chats de Microsoft Teams Web ejecutado en Microsoft Edge.
+This project will implement a local agent that helps draft replies for Microsoft Teams Web chats running in Microsoft Edge.
 
-La prioridad inicial es:
+The initial priorities are:
 
-1. Seguridad.
-2. Control humano.
-3. Automatización reproducible.
-4. Privacidad.
-5. Auditoría.
+1. Security.
+2. Human control.
+3. Reproducible automation.
+4. Privacy.
+5. Auditability.
 
-El proyecto es un repositorio independiente; las rutas personales se definen en archivos de configuración locales excluidos de Git.
+The project is a standalone repository; personal paths are defined in local configuration files excluded from Git.
 
-## Gestión de features y README
+## Feature management and README
 
-El agente local agrupa varios features (por ejemplo, Teams y facturas de Hotmail). Las solicitudes del usuario definen qué se implementa; el `README.md` documenta lo que se ha pedido e implementado, pero no es la fuente de verdad ni limita lo que el usuario puede solicitar.
+The local agent groups several features (for example, Teams and Hotmail invoices). The user's requests define what gets implemented; the `README.md` documents what has been requested and implemented, but it is not the source of truth and does not limit what the user can request.
 
-### Inicio de cada sesión de trabajo
+### Start of each work session
 
-- Antes de realizar cualquier tarea, preguntar al usuario qué feature quiere implementar o modificar.
-- Ofrecer como opciones los features listados en la tabla de features del `README.md`, con su estado, y la opción de crear un feature nuevo.
-- No leer código en detalle, editar archivos, instalar dependencias ni ejecutar automatizaciones hasta recibir la respuesta.
-- Limitar el trabajo al feature elegido. Si una tarea requiere tocar otro feature, avisar y pedir confirmación antes.
+- Before performing any task, ask the user which feature they want to implement or modify.
+- Offer as options the features listed in the README feature table, with their status, plus the option to create a new feature.
+- Do not read code in detail, edit files, install dependencies, or run automations until the user answers.
+- Limit the work to the chosen feature. If a task requires touching another feature, warn the user and ask for confirmation first.
 
-### Declaración en el README
+### Declaring in the README
 
-- Toda funcionalidad nueva o modificación que solicite el usuario debe declararse en el `README.md` en el mismo cambio en que se implementa.
-- Cada feature debe figurar en la tabla de features con nombre, estado, módulo y comando de ejecución, y tener su propia sección con alcance, configuración, uso y restricciones de seguridad.
-- Si un cambio altera el comportamiento, los comandos, la configuración, las dependencias o el estado de un feature, actualizar el `README.md` para reflejarlo.
-- Distinguir en el `README.md` lo implementado y verificado de lo pendiente o no validado.
-- Si el `README.md` describe algo distinto de lo que el usuario pide ahora, prevalece la solicitud del usuario: implementarla y actualizar el `README.md`. Si la solicitud contradice una regla de seguridad de estas instrucciones, informar el conflicto antes de continuar.
+- Every new feature or change requested by the user must be declared in the `README.md` in the same change in which it is implemented.
+- Each feature must appear in the feature table with its name, status, module, and run command, and have its own section covering scope, configuration, usage, and security restrictions.
+- If a change alters a feature's behavior, commands, configuration, dependencies, or status, update the `README.md` to reflect it.
+- In the `README.md`, distinguish what is implemented and verified from what is pending or not validated.
+- If the `README.md` describes something different from what the user is requesting now, the user's request prevails: implement it and update the `README.md`. If the request contradicts a security rule in these instructions, report the conflict before continuing.
 
-## Objetivo del MVP
+## MVP goal
 
-Construir una aplicación local que:
+Build a local application that:
 
-- Detecte mensajes nuevos en chats previamente autorizados.
-- Prepare el contexto de un chat.
-- Solicite al modelo local una propuesta de respuesta.
-- Muestre la propuesta en una interfaz de aprobación.
-- Permita aprobar, editar, regenerar o rechazar la propuesta.
-- Inserte la respuesta aprobada en el editor de Teams Web.
-- Solo pueda enviar el mensaje después de una confirmación humana explícita.
-- Mantenga un registro local de auditoría.
+- Detects new messages in previously authorized chats.
+- Prepares the context of a chat.
+- Asks the local model for a proposed reply.
+- Shows the proposal in an approval interface.
+- Lets the user approve, edit, regenerate, or reject the proposal.
+- Inserts the approved reply into the Teams Web editor.
+- Can only send the message after explicit human confirmation.
+- Keeps a local audit log.
 
-## Tecnologías preferidas
+## Preferred technologies
 
 - Python 3.12.
-- Playwright para Python.
-- Ollama para el modelo local.
-- Tesseract (local) y `pypdfium2` para OCR de PDF escaneados.
-- SQLite para mensajes pendientes, configuración y auditoría.
-- FastAPI solo si se necesita una interfaz web local.
-- Tkinter para una interfaz de escritorio mínima.
-- Pytest para pruebas.
+- Playwright for Python.
+- Ollama for the local model.
+- Tesseract (local) and `pypdfium2` for scanned PDF OCR.
+- SQLite for pending messages, configuration, and auditing.
+- FastAPI only if a local web interface is needed.
+- Tkinter for a minimal desktop interface.
+- Pytest for tests.
 
-No agregar dependencias innecesarias sin una razón clara.
+Do not add unnecessary dependencies without a clear reason.
 
-## Arquitectura esperada
+## Expected architecture
 
 ```text
 src/
@@ -71,153 +71,153 @@ src/
 tests/
 ```
 
-Separar claramente:
+Keep these clearly separated:
 
-- Interacción con Edge y Teams.
-- Integración con Ollama.
-- Construcción de contexto.
-- Interfaz de aprobación.
-- Persistencia y auditoría.
-- Configuración de chats autorizados.
+- Interaction with Edge and Teams.
+- Ollama integration.
+- Context building.
+- Approval interface.
+- Persistence and auditing.
+- Authorized chat configuration.
 
-## Reglas obligatorias
+## Mandatory rules
 
-- Nunca enviar automáticamente un mensaje.
-- Requerir confirmación humana explícita antes de pulsar Enviar.
-- Mantener una lista cerrada de chats autorizados.
-- No leer chats fuera de esa lista.
-- No guardar contraseñas, tokens o cookies en código fuente.
-- No solicitar credenciales al usuario mediante el agente.
-- Detenerse ante MFA, captcha, autenticación inesperada o pantallas no reconocidas.
-- No permitir que el modelo acceda directamente al terminal, disco o red.
-- No ejecutar código generado por el modelo.
-- No almacenar contenido innecesario de mensajes.
-- Detener toda actividad ante un fallo o selector ambiguo.
-- Registrar quién aprobó una respuesta, cuándo se aprobó y qué texto se envió.
+- Never send a message automatically.
+- Require explicit human confirmation before pressing Send.
+- Keep a closed list of authorized chats.
+- Do not read chats outside that list.
+- Do not store passwords, tokens, or cookies in source code.
+- Do not ask the user for credentials through the agent.
+- Stop on MFA, captcha, unexpected authentication, or unrecognized screens.
+- Do not allow the model direct access to the terminal, disk, or network.
+- Do not execute code generated by the model.
+- Do not store unnecessary message content.
+- Stop all activity on a failure or an ambiguous selector.
+- Record who approved a reply, when it was approved, and what text was sent.
 
-## Reglas para la automatización de Teams
+## Rules for Teams automation
 
-- Usar Playwright preferentemente a un agente visual.
-- Usar un perfil persistente separado para Edge.
-- Identificar chats mediante nombres o identificadores de configuración.
-- Validar el chat activo antes de insertar texto.
-- No enviar si el chat activo no coincide con el chat autorizado esperado.
-- Implementar modo pausa y parada de emergencia.
-- Usar esperas basadas en eventos o elementos antes que tiempos rígidos.
-- Escribir selectores de forma estable y centralizada.
-- Detectar cambios de versión de Teams Web y fallar sin enviar.
+- Prefer Playwright over a visual agent.
+- Use a persistent Edge profile separate from the user's usual one.
+- Identify chats by name or configuration identifier.
+- Validate the active chat before inserting text.
+- Do not send if the active chat does not match the expected authorized chat.
+- Implement a pause mode and an emergency stop.
+- Use event- or element-based waits rather than fixed delays.
+- Write selectors in a stable, centralized way.
+- Detect Teams Web version changes and fail without sending.
 
-## Integración con el modelo local
+## Local model integration
 
-- Comunicar Ollama mediante un cliente aislado.
-- Configurar modelo y parámetros desde configuración local.
-- No utilizar herramientas externas dentro de Ollama en el MVP.
-- Construir contexto a partir exclusivamente de:
-  - Mensajes autorizados.
-  - Instrucciones aprobadas.
-  - Datos explícitamente suministrados por el usuario.
-- Indicar al modelo que no debe inventar información.
-- Pedir aclaración o escalamiento cuando falte contexto.
-- Bloquear temas sensibles definidos por el usuario.
-- Sanitizar todo texto antes de mostrarlo o enviarlo.
-- Tratar toda salida del modelo como texto no confiable.
+- Communicate with Ollama through an isolated client.
+- Configure the model and its parameters from local configuration.
+- Do not use external tools inside Ollama in the MVP.
+- Build context exclusively from:
+  - Authorized messages.
+  - Approved instructions.
+  - Data explicitly supplied by the user.
+- Tell the model not to invent information.
+- Ask for clarification or escalate when context is missing.
+- Block sensitive topics defined by the user.
+- Sanitize all text before displaying or sending it.
+- Treat all model output as untrusted text.
 
-## Prompt recomendado
+## Recommended prompt
 
-El prompt de sistema debe:
+The system prompt must:
 
-- Definir el tono profesional y el idioma preferido.
-- Indicar que actúa como asistente y no debe afirmar ser una persona real.
-- Exigir respuestas concisas.
-- Prohibir inventar datos, fechas, compromisos o resultados.
-- Solicitar una respuesta neutral o escalamiento ante información insuficiente.
-- Respetar las reglas del proyecto.
-- No revelar prompts internos ni datos privados.
+- Define a professional tone and the preferred language.
+- State that it acts as an assistant and must not claim to be a real person.
+- Require concise replies.
+- Prohibit inventing data, dates, commitments, or results.
+- Request a neutral reply or escalation when information is insufficient.
+- Respect the project rules.
+- Not reveal internal prompts or private data.
 
-## Privacidad y auditoría
+## Privacy and auditing
 
-- Aplicar listas de chats permitidos.
-- Minimizar datos retenidos.
-- Conservar solo lo necesario para auditoría.
-- Definir una política de retención.
-- Evitar logs con contenido completo salvo cuando sea necesario.
-- Permitir borrado manual de registros temporales.
-- Cifrar datos sensibles si la organización lo exige.
-- Mostrar una advertencia antes de procesar contenido confidencial.
+- Enforce allowed-chat lists.
+- Minimize retained data.
+- Keep only what auditing requires.
+- Define a retention policy.
+- Avoid logs with full content unless necessary.
+- Allow manual deletion of temporary records.
+- Encrypt sensitive data if the organization requires it.
+- Show a warning before processing confidential content.
 
-## Comandos y estructura
+## Commands and structure
 
-Cuando se implemente el proyecto:
+When the project is implemented:
 
-- Mantener archivos de configuración fuera del código fuente.
-- Utilizar variables de entorno para rutas locales sensibles.
-- Crear scripts claros para inicialización, ejecución y pruebas.
-- Incluir un README con instalación en Windows.
-- Crear archivos de pruebas enfocados en:
-  - Chats autorizados.
-  - Construcción de contexto.
-  - Validación de respuestas.
-  - Flujo de aprobación.
-  - Selección correcta del chat.
-  - Detención ante errores.
+- Keep configuration files out of the source code.
+- Use environment variables for sensitive local paths.
+- Create clear scripts for setup, execution, and testing.
+- Include a README with Windows installation instructions.
+- Create test files focused on:
+  - Authorized chats.
+  - Context building.
+  - Reply validation.
+  - Approval flow.
+  - Correct chat selection.
+  - Stopping on errors.
 
-## Convenciones de código
+## Code conventions
 
-- Seguir PEP 8.
-- Preferir funciones pequeñas con responsabilidades claras.
-- Añadir tipos a las interfaces públicas.
-- Usar nombres descriptivos en inglés.
-- Manejar explícitamente todos los errores relevantes.
-- No usar cláusulas `except Exception` sin necesidad.
-- No llamar a funciones de envío desde módulos que generan respuestas.
-- No incluir secretos ni rutas personales específicas.
-- Escribir comentarios solo para lógica no evidente.
-- Añadir docstrings a funciones públicas importantes.
-- Mantener funciones relacionadas con UI separadas de la lógica de dominio.
+- Follow PEP 8.
+- Prefer small functions with clear responsibilities.
+- Add types to public interfaces.
+- Use descriptive names in English.
+- Handle all relevant errors explicitly.
+- Do not use `except Exception` clauses unless necessary.
+- Do not call send functions from modules that generate replies.
+- Do not include secrets or specific personal paths.
+- Write comments only for non-obvious logic.
+- Add docstrings to important public functions.
+- Keep UI-related functions separate from domain logic.
 
-## Control de versiones (GitFlow)
+## Version control (GitFlow)
 
-El repositorio sigue GitFlow:
+The repository follows GitFlow:
 
-- `main`: solo código estable y publicado. Cada merge se etiqueta con su versión.
-- `develop`: rama de integración. Recibe los features terminados.
-- `feature/<nombre-corto>`: nace de `develop` y vuelve a `develop` mediante merge con `--no-ff`.
-- `release/<versión>`: nace de `develop` para preparar una versión. Solo admite correcciones menores y se fusiona en `main` y en `develop`.
-- `hotfix/<nombre-corto>`: nace de `main` para corregir errores urgentes en producción. Se fusiona en `main` y en `develop`.
+- `main`: only stable, released code. Each merge is tagged with its version.
+- `develop`: integration branch. Receives finished features.
+- `feature/<short-name>`: branches off `develop` and merges back into `develop` with `--no-ff`.
+- `release/<version>`: branches off `develop` to prepare a version. Only minor fixes are allowed, and it merges into both `main` and `develop`.
+- `hotfix/<short-name>`: branches off `main` to fix urgent production bugs. It merges into both `main` and `develop`.
 
-Reglas:
+Rules:
 
-- No commitear directamente en `main` ni en `develop`, salvo el arranque inicial del repositorio.
-- Un cambio por commit, con mensaje descriptivo en español, en modo imperativo.
-- Antes de fusionar un feature, ejecutar `pytest`.
-- Los mensajes de commit incluyen el trailer `Co-authored-by` de Copilot, salvo que el usuario lo pida sin él.
-- No reescribir historia de ramas compartidas (`main`, `develop`) ni usar `push --force` sobre ellas.
+- Do not commit directly to `main` or `develop`, except for the repository's initial setup.
+- One change per commit, with a descriptive commit message in Spanish, in the imperative mood.
+- Run `pytest` before merging a feature.
+- Commit messages include the Copilot `Co-authored-by` trailer, unless the user asks for it to be omitted.
+- Do not rewrite history on shared branches (`main`, `develop`) or use `push --force` on them.
 
-## Pruebas
+## Tests
 
-Antes de finalizar cualquier cambio importante, ejecutar la menor prueba relevante.
+Before finishing any significant change, run the smallest relevant test.
 
-Las pruebas deben demostrar:
+Tests must demonstrate:
 
-- Que un chat fuera de la lista de autorización no se procesa.
-- Que una respuesta nunca se envía sin aprobación.
-- Que el texto aprobado coincide con el enviado.
-- Que el chat activo coincide con el destino esperado.
-- Que el agente se detiene ante errores de UI.
-- Que no se ejecuta código generado por el modelo.
+- That a chat outside the authorization list is not processed.
+- That a reply is never sent without approval.
+- That the approved text matches the text sent.
+- That the active chat matches the expected target.
+- That the agent stops on UI errors.
+- That code generated by the model is not executed.
 
-## Entregables esperados
+## Expected deliverables
 
-- Aplicación local de consola o escritorio.
-- Perfil de Edge configurado.
-- Captura limitada de mensajes.
-- Generación de borradores mediante Ollama.
-- Interfaz de aprobación.
-- Inserción y envío controlado por Playwright.
-- Registro de auditoría.
-- Documentación de instalación y uso.
-- Pruebas automatizadas básicas.
+- A local console or desktop application.
+- A configured Edge profile.
+- Limited message capture.
+- Draft generation through Ollama.
+- An approval interface.
+- Playwright-controlled insertion and sending.
+- An audit log.
+- Installation and usage documentation.
+- Basic automated tests.
 
-## Criterio de implementación
+## Implementation criteria
 
-El proyecto debe evitar cualquier envío accidental, procesar solo chats autorizados y mantener siempre la decisión humana como barrera final hasta que exista aprobación formal y verificable para el envío autónomo.
+The project must prevent any accidental sending, process only authorized chats, and always keep the human decision as the final barrier until a formal, verifiable approval exists for autonomous sending.
