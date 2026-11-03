@@ -8,6 +8,7 @@ htmlcov/
 .local/
 config/settings.yaml
 config/mail-invoices.yaml
+tmp/
 
 # Personal financial data, invoices and local audit databases
 *.xlsx
@@ -18,3 +19,4 @@ config/mail-invoices.yaml
 *.db
 *.sqlite
 *.sqlite3
+.vscode/settings.json

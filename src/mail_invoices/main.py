@@ -3,90 +3,91 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from mail_invoices.assist import complete_candidate, describe, to_json
-from mail_invoices.documents import MAX_FILE_BYTES, DocumentError, parse_document
-from mail_invoices.local_model import LocalModelError, OllamaJsonModel
-from mail_invoices.ocr import TesseractOcr
-from mail_invoices.settings import MailSettings, load_settings
-
-
-def _login(settings: MailSettings) -> int:
-    from playwright.sync_api import sync_playwright
-
-    if not settings.executable.is_file():
-        raise FileNotFoundError("Configured Opera executable does not exist")
-    settings.profile_dir.mkdir(parents=True, exist_ok=True)
-    with sync_playwright() as playwright:
-        context = playwright.chromium.launch_persistent_context(
-            str(settings.profile_dir),
-            executable_path=str(settings.executable),
-            headless=False,
-            accept_downloads=True,
-        )
-        try:
-            page = context.pages[0] if context.pages else context.new_page()
-            page.goto("https://outlook.live.com/mail/0/", wait_until="domcontentloaded")
-            print(
-                "Sign in to your personal Hotmail account manually. "
-                "Close this Opera window when the inbox is available. "
-                "No messages are opened or modified in login mode.",
-                flush=True,
-            )
-            context.wait_for_event("close", timeout=0)
-        finally:
-            context.close()
-    return 0
-
-
-def _analyze_file(settings: MailSettings, path: Path, use_model: bool) -> int:
-    """Read-only analysis of a local attachment: never writes Excel or touches mail."""
-    if not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
-        raise SystemExit("The attachment must be an existing file of at most 10 MB")
-    ocr = TesseractOcr(
-        settings.tesseract_executable, settings.tessdata_dir, settings.ocr_languages
-    )
-    try:
-        candidates = parse_document(path.read_bytes(), path.name, ocr)
-    except DocumentError as exc:
-        print(to_json({"source": path.name, "error": str(exc), "requires_review": True}))
-        return 1
-    model = OllamaJsonModel(settings.ollama_url, settings.ollama_model) if use_model else None
-    results = []
-    for candidate in candidates:
-        rejected: tuple[str, ...] = ()
-        model_error = None
-        if model is not None:
-            try:
-                assisted = complete_candidate(candidate, model)
-                candidate, rejected = assisted.candidate, assisted.rejected
-            except LocalModelError as exc:
-                model_error = str(exc)
-        summary = describe(candidate)
-        summary["rejected_model_fields"] = list(rejected)
-        if model_error:
-            summary["model_error"] = model_error
-        results.append(summary)
-    print(to_json(results))
-    return 0
+from mail_invoices import workflow
+from mail_invoices.settings import load_settings
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Human-reviewed Hotmail invoice organizer")
-    parser.add_argument("--config", type=Path, default=Path("config") / "mail-invoices.yaml")
+    parser.add_argument("--config", type=Path, default=Path("config") / "settings.yaml")
     mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--process-invoice-batch", action="store_true", help="Review and approve a small E2E batch.")
+    mode.add_argument("--resume-invoice-batch", action="store_true", help="Resume local pending batches without rescanning.")
+    mode.add_argument(
+        "--process-one-invoice", action="store_true",
+        help="Controlled one-email test: approve Excel registration, then approve a real move.",
+    )
     mode.add_argument("--login", action="store_true", help="Open Outlook for a manual sign-in")
+    mode.add_argument(
+        "--classify-invoices", action="store_true",
+        help="Simulate folder classification and verify original Excel; never moves mail.",
+    )
     mode.add_argument(
         "--analyze-file", type=Path, metavar="PATH",
         help="Extract invoice data from a local XML, PDF or ZIP (read-only)",
+    )
+    mode.add_argument(
+        "--scan-inbox", action="store_true",
+        help="List invoice candidates in the inbox list (read-only, opens no message)",
+    )
+    mode.add_argument(
+        "--download-attachments", action="store_true",
+        help="Download candidate invoice attachments to a temporary directory and analyze them. "
+        "Opening a message marks it as read.",
+    )
+    mode.add_argument(
+        "--review-invoices", action="store_true",
+        help="Download and analyze candidates, then require explicit human approval before saving to Excel.",
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=3, help="Controlled E2E batch size (1-5, default 3)",
+    )
+    parser.add_argument(
+        "--history-folder", action="append", default=[],
+        help="Authorize metadata history from an exact folder path (classification only).",
+    )
+    parser.add_argument(
+        "--candidate-text",
+        help="Only classify inbox candidates whose list preview contains this text.",
+    )
+    parser.add_argument(
+        "--days", type=int, default=30,
+        help="How many days back inbox modes look (1-365, default 30)",
     )
     parser.add_argument(
         "--no-model", action="store_true", help="Skip the local Ollama field completion"
     )
     args = parser.parse_args()
+    if not 1 <= args.days <= 365:
+        parser.error("--days must be between 1 and 365")
+    if not 1 <= args.batch_size <= 5:
+        parser.error("--batch-size must be between 1 and 5")
+    if args.history_folder and not args.classify_invoices:
+        parser.error("--history-folder requires --classify-invoices")
+    if args.candidate_text is not None and not args.classify_invoices:
+        parser.error("--candidate-text requires --classify-invoices")
     settings = load_settings(args.config)
+    if args.process_invoice_batch or args.resume_invoice_batch:
+        from mail_invoices.batch_workflow import process_invoice_batch
+
+        return process_invoice_batch(
+            settings, args.days, not args.no_model, args.batch_size, resume=args.resume_invoice_batch,
+        )
+    if args.process_one_invoice:
+        return workflow.process_one_invoice(settings, args.days, not args.no_model)
+    if args.classify_invoices:
+        return workflow.classify_invoices(
+            settings, args.days, args.history_folder, not args.no_model, args.candidate_text,
+        )
     if args.login:
-        return _login(settings)
-    return _analyze_file(settings, args.analyze_file, not args.no_model)
+        return workflow.login(settings)
+    if args.scan_inbox:
+        return workflow.scan_inbox(settings, args.days)
+    if args.download_attachments:
+        return workflow.download_and_analyze(settings, args.days, not args.no_model)
+    if args.review_invoices:
+        return workflow.review_invoices(settings, args.days, not args.no_model)
+    return workflow.analyze_file(settings, args.analyze_file, not args.no_model)
 
 
 if __name__ == "__main__":
