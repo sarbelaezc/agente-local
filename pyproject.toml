@@ -16,6 +16,7 @@ dependencies = [
   "defusedxml>=0.7.1",
   "pypdfium2>=4.30",
   "pillow>=10.4",
+  "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]
@@ -24,9 +25,13 @@ dev = ["pytest>=8.3"]
 [project.scripts]
 teams-agent = "app.main:main"
 mail-invoices = "mail_invoices.main:main"
+monthly-close = "monthly_close.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+monthly_close = ["dashboard.html"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -14,6 +14,13 @@ The initial priorities are:
 
 The project is a standalone repository; personal paths are defined in local configuration files excluded from Git.
 
+## Evidence and clarification
+
+- Do not assume missing facts, requirements, user intent, or the cause of a failure.
+- Verify technical facts with the repository, tests, or direct runtime evidence before changing behavior or claiming success.
+- If anything remains unclear or requires a user decision, ask the user first and wait for an answer before proceeding with the affected action.
+- Never replace an unanswered question with an implicit default or an unverified assumption.
+
 ## Feature management and README
 
 The local agent groups several features (for example, Teams and Hotmail invoices). The user's requests define what gets implemented; the `README.md` documents what has been requested and implemented, but it is not the source of truth and does not limit what the user can request.
