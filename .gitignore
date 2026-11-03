@@ -19,3 +19,4 @@ tmp/
 *.db
 *.sqlite
 *.sqlite3
+.vscode/settings.json

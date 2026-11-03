@@ -45,6 +45,7 @@ class InvoiceCandidate:
     evidence: str = ""
     method: str = ""
     assisted_fields: tuple[str, ...] = ()
+    descriptions: tuple[str, ...] = ()
 
     @property
     def requires_review(self) -> bool:
@@ -131,9 +132,16 @@ def _xml_invoice(data: bytes, source: str) -> InvoiceCandidate:
     if amount is not None and (not amount.is_finite() or amount < 0):
         raise DocumentError("Invalid XML invoice amount")
     currency = payable.attrib.get("currencyID", "") if payable is not None else ""
+    descriptions = tuple(
+        " ".join(node.text.split())[:500]
+        for node in root.findall("cac:InvoiceLine/cac:Item/cbc:Description", ns)
+        + root.findall("cac:InvoiceLine/cac:Item/cbc:Name", ns)
+        if node.text and node.text.strip()
+    )[:30]
     return InvoiceCandidate(
         source, hashlib.sha256(data).hexdigest(), number, legal, issued, amount,
         currency, "UBL Invoice: supplier, IssueDate and PayableAmount", "xml",
+        descriptions=descriptions,
     )
 
 

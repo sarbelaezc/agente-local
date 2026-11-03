@@ -41,6 +41,16 @@ def test_zip_xml_is_read_without_extracting_files():
     assert parse_document(stream.getvalue(), "invoice.zip")[0].number == "TEST-001"
 
 
+def test_xml_extracts_invoice_line_concepts_without_customer_data():
+    line = b"""<cac:InvoiceLine><cac:Item>
+    <cbc:Description>Consulta  medicina general</cbc:Description>
+    <cbc:Name>Servicio medico</cbc:Name></cac:Item></cac:InvoiceLine>"""
+    xml = XML.replace(b"</Invoice>", line + b"</Invoice>")
+    invoice = parse_document(xml, "invoice.xml")[0]
+    assert invoice.descriptions == ("Consulta medicina general", "Servicio medico")
+    assert invoice.number == "TEST-001"
+
+
 def test_unsafe_archive_path_is_rejected():
     stream = BytesIO()
     with ZipFile(stream, "w") as archive:

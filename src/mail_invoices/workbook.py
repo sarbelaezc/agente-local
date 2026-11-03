@@ -71,6 +71,14 @@ def _matches_row(sheet: Worksheet, row: int, invoice: ReviewedInvoice) -> bool:
     )
 
 
+def _previous_amount_format(sheet: Worksheet, row: int) -> str:
+    for previous in range(row - 1, 2, -1):
+        cell = sheet.cell(previous, 5)
+        if cell.value is not None and cell.data_type == "n":
+            return cell.number_format
+    return "#,##0.00"
+
+
 class InvoiceWorkbook:
     def __init__(self, path: Path, backup_dir: Path, sheet_name: str = "Hoja1") -> None:
         self.path = path
@@ -125,7 +133,42 @@ class InvoiceWorkbook:
         finally:
             workbook.close()
 
-    def record(self, invoices: list[ReviewedInvoice]) -> list[RecordResult]:
+    def registration_status(
+        self, number: str, legal_name: str, issued: date | None,
+        amount: Decimal | None, currency: str,
+        *, company: str | None = None,
+    ) -> str:
+        """Read-only evidence for classification; historical matches do not authorize moves."""
+        if not number.strip() or not legal_name.strip() or issued is None or amount is None:
+            return "incomplete"
+        if currency != "COP" or not amount.is_finite() or amount <= 0:
+            return "incomplete"
+        workbook = load_workbook(self.path)
+        try:
+            sheet = self._sheet(workbook)
+            matches = [
+                row for row in range(3, sheet.max_row + 1)
+                if _normalized(sheet.cell(row, 3).value) == _normalized(legal_name)
+                and _normalized(sheet.cell(row, 6).value) == _normalized(number)
+            ]
+            if len(matches) > 1:
+                return "conflict"
+            invoice = ReviewedInvoice(legal_name, legal_name, issued, amount, number, currency)
+            if matches:
+                if company is not None and _normalized(sheet.cell(matches[0], 2).value) != _normalized(company):
+                    return "conflict"
+                return "registered" if _matches_row(sheet, matches[0], invoice) else "conflict"
+            historical = any(
+                sheet.cell(row, 6).value is None and _matches_row(sheet, row, invoice)
+                for row in range(3, sheet.max_row + 1)
+            )
+            return "historical_review" if historical else "not_registered"
+        finally:
+            workbook.close()
+
+    def record(
+        self, invoices: list[ReviewedInvoice], *, restore_amount_format: bool = False,
+    ) -> list[RecordResult]:
         """Commit only reviewed records, with backup, conflict detection and verification."""
         if not invoices:
             raise WorkbookError("No approved invoices were supplied")
@@ -150,6 +193,7 @@ class InvoiceWorkbook:
             sheet.cell(2, 6, "N\u00famero de factura")
             sheet.cell(2, 6)._style = copy(sheet.cell(2, 5)._style)
             results = []
+            expected_formats: dict[int, str] = {}
             for invoice in invoices:
                 exact = [
                     row for row in range(3, sheet.max_row + 1)
@@ -162,8 +206,16 @@ class InvoiceWorkbook:
                     row = exact[0]
                     if not _matches_row(sheet, row, invoice):
                         raise WorkbookError("Invoice number matches but its date or amount conflicts")
+                    if _normalized(sheet.cell(row, 2).value) != _normalized(invoice.company):
+                        raise WorkbookError("Invoice number matches but its approved company conflicts")
+                    if restore_amount_format:
+                        previous_format = _previous_amount_format(sheet, row)
+                        sheet.cell(row, 5).number_format = previous_format
+                        expected_formats[row] = previous_format
                     results.append(RecordResult(invoice.number, row, False))
                     continue
+                if restore_amount_format:
+                    raise WorkbookError("Format restoration requires an existing exact invoice match")
                 legacy = [
                     row for row in range(3, sheet.max_row + 1)
                     if sheet.cell(row, 6).value is None and _matches_row(sheet, row, invoice)
@@ -172,6 +224,8 @@ class InvoiceWorkbook:
                     if invoice.legacy_row not in legacy:
                         raise WorkbookError("Confirmed historical row no longer matches the invoice")
                     row = invoice.legacy_row
+                    if _normalized(sheet.cell(row, 2).value) != _normalized(invoice.company):
+                        raise WorkbookError("Historical row matches but its approved company conflicts")
                     sheet.cell(row, 6, invoice.number).data_type = "s"
                     results.append(RecordResult(invoice.number, row, False))
                     continue
@@ -191,7 +245,9 @@ class InvoiceWorkbook:
                     if isinstance(value, str):
                         cell.data_type = "s"
                 sheet.cell(row, 4).number_format = "yyyy-mm-dd"
-                sheet.cell(row, 5).number_format = '#,##0.00'
+                amount_format = _previous_amount_format(sheet, row)
+                sheet.cell(row, 5).number_format = amount_format
+                expected_formats[row] = amount_format
                 results.append(RecordResult(invoice.number, row, True))
             with tempfile.NamedTemporaryFile(
                 suffix=".xlsx", prefix=".invoices-", dir=self.path.parent, delete=False
@@ -211,6 +267,13 @@ class InvoiceWorkbook:
                         != _normalized(invoice.number)
                     ):
                         raise WorkbookError("Save verification failed for an approved invoice")
+                    if (
+                        _normalized(verified_sheet.cell(result.row, 2).value) != _normalized(invoice.company)
+                    ):
+                        raise WorkbookError("Save verification failed for the approved company")
+                for row, number_format in expected_formats.items():
+                    if verified_sheet.cell(row, 5).number_format != number_format:
+                        raise WorkbookError("Save verification failed for the amount format")
             finally:
                 verification.close()
             if hashlib.sha256(self.path.read_bytes()).hexdigest() != original_hash:

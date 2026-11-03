@@ -1,55 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import date
-from decimal import Decimal
+from dataclasses import replace
 
-from mail_invoices.documents import InvoiceCandidate, parse_money
+from mail_invoices.review import (
+    ReviewItem,
+    record_approved_batch,
+    reviewed_invoice_from_fields,
+    suggested_company,
+)
 from mail_invoices.settings import MailSettings
-from mail_invoices.workbook import InvoiceWorkbook, RecordResult, ReviewedInvoice
-
-
-@dataclass(frozen=True)
-class ReviewItem:
-    candidate: InvoiceCandidate
-    message: str
-    rejected_model_fields: tuple[str, ...] = ()
-    model_error: str | None = None
-
-
-def reviewed_invoice_from_fields(fields: dict[str, str]) -> ReviewedInvoice:
-    try:
-        issued = date.fromisoformat(fields["issued"].strip())
-        amount: Decimal = parse_money(fields["amount"])
-    except ValueError as error:
-        raise ValueError(f"Fecha o valor inválido: {error}") from error
-    invoice = ReviewedInvoice(
-        company=fields["company"].strip(),
-        legal_name=fields["legal_name"].strip(),
-        issued=issued,
-        amount=amount,
-        number=fields["number"].strip(),
-        currency=fields["currency"].strip().upper(),
-    )
-    invoice.validate()
-    return invoice
-
-
-def suggested_company(suggestions: dict[str, str], legal_name: str) -> str:
-    """Uses a unique historical company or falls back to the document legal name."""
-    normalized_name = " ".join(legal_name.split())
-    return suggestions.get(normalized_name.casefold(), "") or normalized_name
-
-
-def record_approved_batch(
-    store: InvoiceWorkbook,
-    invoices: list[ReviewedInvoice],
-    *,
-    approved: bool,
-) -> list[RecordResult] | None:
-    if not approved:
-        return None
-    return store.record(invoices)
+from mail_invoices.workbook import InvoiceWorkbook, ReviewedInvoice
 
 
 class InvoiceReviewWindow:
@@ -67,6 +27,7 @@ class InvoiceReviewWindow:
         self.settings = settings
         self.store = InvoiceWorkbook(settings.workbook, settings.backup_dir, settings.sheet)
         self.saved = False
+        self.approved_invoices: list[ReviewedInvoice] = []
         self.forms: list[dict] = []
         try:
             self.company_suggestions = self.store.company_suggestions()
@@ -96,7 +57,8 @@ class InvoiceReviewWindow:
             self.root,
             text=(
                 "Revise y edite cada factura. Seleccione explícitamente las filas "
-                "que autoriza; no se guardará nada hasta confirmar el lote."
+                "que autoriza; pulsar «Aprobar y guardar lote» autoriza la escritura "
+                "sin otro diálogo de confirmación."
             ),
             wraplength=1080,
             padding=12,
@@ -125,6 +87,7 @@ class InvoiceReviewWindow:
         self.canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
+        self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
         self.cards = ttk.Frame(self.canvas)
         self.canvas_window = self.canvas.create_window(
             (0, 0), window=self.cards, anchor="nw"
@@ -143,6 +106,14 @@ class InvoiceReviewWindow:
         )
         for index, item in enumerate(items, start=1):
             self._build_card(index, item)
+
+    def _on_mousewheel(self, event):
+        left, top = self.canvas.winfo_rootx(), self.canvas.winfo_rooty()
+        right, bottom = left + self.canvas.winfo_width(), top + self.canvas.winfo_height()
+        if not (left <= event.x_root < right and top <= event.y_root < bottom):
+            return None
+        self.canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        return "break"
 
     def _build_card(self, index: int, item: ReviewItem) -> None:
         tk = self.tk
@@ -227,6 +198,15 @@ class InvoiceReviewWindow:
         ttk = self.ttk
         approval = ttk.Frame(self.root, padding=12)
         approval.pack(fill="x")
+        ttk.Label(
+            approval,
+            text=f"Archivo de destino: {self.settings.workbook}\n"
+            "Se creará una copia de seguridad antes de guardar.",
+            wraplength=1080,
+        ).pack(fill="x", pady=(0, 8))
+        ttk.Button(
+            approval, text="Seleccionar todas", command=self.select_all
+        ).pack(side="left", padx=(0, 8))
         ttk.Label(approval, text="Aprobado por:").pack(side="left")
         self.approver = tk.StringVar(value=self.settings.approver)
         ttk.Entry(approval, textvariable=self.approver, width=32).pack(
@@ -242,6 +222,10 @@ class InvoiceReviewWindow:
     def run(self) -> bool:
         self.root.mainloop()
         return self.saved
+
+    def select_all(self) -> None:
+        for form in self.forms:
+            form["selected"].set(True)
 
     def approve_and_save(self) -> None:
         from tkinter import messagebox
@@ -276,19 +260,9 @@ class InvoiceReviewWindow:
             messagebox.showerror("No se pudo validar el lote", str(error), parent=self.root)
             return
 
-        approved = messagebox.askyesno(
-            "Confirmar escritura",
-            (
-                f"¿Autoriza guardar {len(invoices)} factura(s) en este archivo?\n\n"
-                f"{self.settings.workbook}\n\n"
-                "Se creará una copia de seguridad antes de reemplazarlo."
-            ),
-            default=messagebox.NO,
-            parent=self.root,
-        )
         try:
             results = record_approved_batch(
-                self.store, invoices, approved=approved
+                self.store, invoices, approved=True
             )
         except (OSError, ValueError) as error:
             messagebox.showerror("No se pudo guardar el lote", str(error), parent=self.root)
@@ -306,6 +280,7 @@ class InvoiceReviewWindow:
             parent=self.root,
         )
         self.saved = True
+        self.approved_invoices = invoices
         self.root.destroy()
 
     def _resolve_legacy_matches(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -71,6 +72,13 @@ def is_candidate(message: InboxMessage, today: date, days: int) -> bool:
     return any(term in text for term in INVOICE_TERMS)
 
 
+def filter_inbox_messages(messages: list[InboxMessage], text: str) -> list[InboxMessage]:
+    query = _ascii_lower(text.strip())
+    if not query:
+        raise ValueError("Candidate text filter cannot be empty")
+    return [message for message in messages if query in _ascii_lower(message.label)]
+
+
 def scan_inbox(page, days: int, today: date, max_scrolls: int = 40) -> list[InboxMessage]:
     """Reads the message list only: never opens, downloads or moves a message."""
     seen: dict[str, InboxMessage] = {}
@@ -110,18 +118,29 @@ def _find_message(page, label: str, max_pages: int = 60):
             label,
         )
         if index >= 0:
-            item = page.locator(MESSAGE_SELECTOR).nth(index)
+            # Scrolling can change row indexes in Outlook's virtualized list.
+            item = page.get_by_role("option", name=label, exact=True)
+            if item.count() != 1:
+                raise LookupError("Candidate message label is ambiguous")
             item.evaluate("item => item.scrollIntoView({ block: 'center' })")
             page.wait_for_timeout(300)
+            conversation = item.get_attribute("data-convid")
+            if conversation:
+                item = page.locator(
+                    f'{MESSAGE_SELECTOR}[data-convid={json.dumps(conversation)}]'
+                )
+                if item.count() != 1:
+                    raise LookupError("Candidate message identifier is ambiguous")
             return item
-        before = page.locator(MESSAGE_SELECTOR).count()
-        page.locator(MESSAGE_SELECTOR).last.evaluate(
+        changed = page.locator(MESSAGE_SELECTOR).last.evaluate(
             "item => { let box = item.parentElement; "
             "while (box && box.scrollHeight <= box.clientHeight) box = box.parentElement; "
-            "if (box) box.scrollTop += box.clientHeight; }"
+            "if (!box) return false; "
+            "const before = box.scrollTop; box.scrollTop += box.clientHeight; "
+            "return box.scrollTop !== before; }"
         )
         page.wait_for_timeout(800)
-        if page.locator(MESSAGE_SELECTOR).count() == before and index < 0:
+        if not changed:
             break
     return None
 
@@ -166,7 +185,7 @@ def _attachment_text_names(page) -> list[str]:
           for (const el of document.querySelectorAll('body *')) {
             if (el.children.length > 0) continue;
             const text = (el.textContent || '').trim();
-            if (!/^[^\s\\/:*?"<>|]+\.(pdf|xml|zip)$/i.test(text)) continue;
+            if (!/^[^\\/:*?"<>|\r\n]+\.(pdf|xml|zip)$/i.test(text)) continue;
             const option = el.closest('[role="option"]');
             if (option && !(option.getAttribute('aria-label') || '').startsWith(text)) continue;
             names.add(text);
