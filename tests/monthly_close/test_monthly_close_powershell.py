@@ -29,7 +29,7 @@ def test_powershell_launcher_reuses_service_and_preserves_scan_result(
     root = tmp_path / "project with spaces"
     scripts = root / "scripts"
     scripts.mkdir(parents=True)
-    original = Path(__file__).parents[1] / "scripts" / "import-monthly-close.ps1"
+    original = Path(__file__).parents[2] / "scripts" / "import-monthly-close.ps1"
     script = scripts / original.name
     script.write_text(
         original.read_text().replace(".venv\\Scripts\\python.exe", ".venv\\Scripts\\python.ps1")

@@ -566,7 +566,7 @@ por correo ni garantía de ejecución si el equipo está apagado.
 Pruebas reproducibles sin credenciales ni correo personal:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests\test_monthly_close.py tests\test_monthly_close_outlook.py tests\test_monthly_close_dashboard.py
+.\.venv\Scripts\python.exe -m pytest tests\monthly_close\test_monthly_close.py tests\monthly_close\test_monthly_close_outlook.py tests\monthly_close\test_monthly_close_dashboard.py
 ```
 
 Se validan reglas, importes, zona horaria, decisiones persistentes, exclusión de
@@ -638,7 +638,7 @@ el piloto, no activa una alternativa silenciosa.
 Pruebas del nuevo adaptador y de la CLI controlada:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests\test_monthly_close_folders.py tests\test_monthly_close_source.py tests\test_monthly_close_outlook.py tests\test_monthly_close.py tests\test_monthly_close_dashboard.py
+.\.venv\Scripts\python.exe -m pytest tests\monthly_close\test_monthly_close_folders.py tests\monthly_close\test_monthly_close_source.py tests\monthly_close\test_monthly_close_outlook.py tests\monthly_close\test_monthly_close.py tests\monthly_close\test_monthly_close_dashboard.py
 ```
 
 **Prueba controlada posterior (2026-11-02): resultado parcial, escaneo bloqueado.**
@@ -838,6 +838,13 @@ existente; hay un núcleo probado, pero el flujo completo aún no está disponib
 ### Organización del código
 
 El código ejecutable vive en `src/` y las pruebas en `tests/`.
+Las pruebas se agrupan por feature: `tests/mail_invoices/` para facturas de
+Hotmail, `tests/monthly_close/` para cierre mensual y `tests/teams/` para Teams.
+`tests/shared/` contiene las pruebas de configuración compartida entre features.
+Esta organización no cambia el comportamiento de las funciones ni activa Teams.
+Ejecuta todas con `.\.venv\Scripts\python.exe -m pytest`, o solo una feature con
+`.\.venv\Scripts\python.exe -m pytest tests\monthly_close` (sustituye la carpeta
+para probar otra feature).
 `mail_invoices` agrupa la funcionalidad de facturas:
 
 - `main.py`: argumentos y selección del modo de ejecución; conserva los comandos.
