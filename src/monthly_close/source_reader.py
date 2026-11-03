@@ -437,7 +437,7 @@ class OutlookSourceReader:
         if self.page.get_by_role("dialog").count() or self.page.get_by_role("menu").count():
             raise OutlookError("Hay un dialogo o menu previo; se detiene para evitar contenido obsoleto.")
         row = self._row(candidate)
-        row.click(button="right")
+        row.locator(SUBJECT).click(button="right")
         self.page.wait_for_function(
             """({selector,id}) => {
               const rows = [...document.querySelectorAll(selector)]

@@ -159,6 +159,22 @@ def test_dom_row_identity_is_escaped_without_using_conversation_id(page):
     assert reader.read(candidate).body.strip() == "Compraste en Tienda $ 1.234,56."
 
 
+def test_context_menu_requires_subject_not_empty_row_area(page):
+    page.locator("[data-convid]").evaluate(
+        """el => {
+          el.style.width='900px';
+          el.oncontextmenu=event=>{
+            event.preventDefault();
+            if(!event.target.closest('.TtcXM'))return;
+            el.setAttribute('aria-selected','true');
+            document.querySelector('#context').hidden=false;
+          };
+        }"""
+    )
+    reader = OutlookSourceReader(page, URL, [CANDIDATE.sender])
+    assert reader.read(reader.candidate()).body.strip() == "Compraste en Tienda $ 1.234,56."
+
+
 def test_unapproved_row_never_opens_context_menu(page):
     reader = OutlookSourceReader(page, URL, ["other@example.test"])
     with pytest.raises(OutlookError, match="No hay avisos"):

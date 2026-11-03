@@ -541,6 +541,13 @@ de fila independientes de la conversación. No se importaron movimientos nuevos;
 la decisión Familiar y cero dudas siguen intactas. La importación masiva real,
 la conciliación histórica y la tarea programada permanecen pendientes.
 
+**Primer intento de importación masiva real:** se detuvo de forma segura cuando
+Outlook no abrió el menú contextual al pulsar una zona vacía de una fila.
+Se corrigió el clic derecho para apuntar al asunto previamente validado.
+La repetición acotada leyó 15 orígenes autorizados y superó la fila que fallaba,
+sin llamar al modelo ni importar movimientos. No se relajan las comprobaciones
+de remitente, selección ni identidad MIME.
+
 ## Skill de revisión: Ponytail
 
 Instalada para este proyecto en
