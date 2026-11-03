@@ -8,7 +8,7 @@ implementa.
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/run-invoice-batch.ps1` / `-Resume` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
-| Cierre mensual de gastos de Outlook con Ollama local | Piloto implementado; pruebas sintéticas; buzón real y tarea instalada pendientes de validar | `src/monthly_close/` | `scripts/run-monthly-close.ps1` |
+| Cierre mensual de gastos de Outlook con Ollama local | Piloto con Ollama y recorrido de Entrada, Spam, Eliminados y árbol Dinero verificados; importación masiva y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
 
 ## Stack tecnológico
 
@@ -170,28 +170,37 @@ duplicados de la misma compra antes de aprobarlos.
    Solo este comando permite la preparación manual del perfil. El agente no
    resuelve MFA, captcha ni autenticación. En lecturas posteriores se detiene si
    encuentra esos estados. No reutilices el perfil de facturas o el perfil habitual.
-4. **Calibra los selectores antes de leer correos reales.** La plantilla centraliza
-   los selectores y viene con `selectors_verified: false`. Es un contrato de DOM
-   orientativo, **no una afirmación de que los `data-testid` de ejemplo existan
-   en tu versión de Outlook**. Inspecciona la interfaz y adapta los selectores.
-   Deben identificar un único resultado, remitente, asunto, cuerpo y fecha con
-   zona; la fila y el panel deben exponer el mismo `data-itemid`. Desactiva la
-   agrupación por conversaciones. Los hilos agrupados se rechazan, no se leen
-   parcialmente ni se consideran completos.
-   Verifica que la búsqueda indica Todas las carpetas y prueba avisos conocidos
-   en Bandeja, Spam y Eliminados; solo entonces marca `selectors_verified: true`.
-   Si Outlook no expone esos datos de forma comprobable, **no actives el escaneo**:
-   se necesita adaptar el lector a esa versión, no relajar sus comprobaciones.
-5. Si necesitas descubrir remitentes, ejecuta explícitamente una búsqueda acotada:
+4. **Valida el recorrido antes de importar.** Desactiva la agrupación por
+   conversaciones y la vista Prioritarios/Otros. El lector de origen MIME usa
+   selectores centralizados en `source_reader.py`, observados en Outlook español;
+   no depende de la búsqueda global ni del panel de lectura antiguo.
+
+   ```powershell
+   .\scripts\run-monthly-close.ps1 -Command scan -ReadOnly -Start 2026-10-01 -End 2026-11-01
+   ```
+
+   Comprueba explícitamente Bandeja de entrada, Correo no deseado, Elementos
+   eliminados y **Dinero con todas sus subcarpetas**, incluidas las anidadas y
+   todas sus páginas virtuales. Expande únicamente el árbol Dinero; identifica
+   cada subcarpeta por su ruta completa, no solo por su nombre. Esta variante solo examina
+   metadatos: no abre mensajes, no usa Ollama y no escribe cobertura ni decisiones.
+   Las fechas no reducen este recorrido de metadatos. Tras verificarlo y validar
+   el piloto MIME de abajo, establece `folder_scan_verified: true` en el archivo
+   local. La plantilla lo deja en `false`; un cambio de DOM exige recalibración,
+   nunca relajar controles ni omitir una carpeta que falle.
+5. Aprueba direcciones exactas de tus avisos bancarios en el panel. El comando
+   antiguo de descubrimiento global sigue disponible, pero **no está calibrado
+   para este buzón**:
 
    ```powershell
    .\scripts\run-monthly-close.ps1 -Command discover -Start 2026-10-01 -End 2026-11-01
    ```
 
-   `discover` autoriza la lectura de metadatos de resultados de todas las carpetas
-   en ese rango: remitente y asunto, no cuerpos. Muestra los hallazgos en la
-   configuración del panel. Revisa cuáles son avisos de tus bancos y aprueba
-   sus direcciones exactas. No se aprueban automáticamente.
+   `discover` exige su propia calibración de `selectors` y
+   `selectors_verified: true`; activar `folder_scan_verified` no lo habilita.
+   Los `data-testid` de la plantilla son orientativos, no controles reales
+   garantizados. Ese descubrimiento lee remitente y asunto, no cuerpos, y
+   muestra hallazgos en el panel; nunca aprueba direcciones automáticamente.
 6. Inicia una tercera instancia de Ollama, separada de facturas (`11434`) y
    Teams (`11435`). En otra terminal:
 
@@ -211,17 +220,76 @@ duplicados de la misma compra antes de aprobarlos.
    .\scripts\run-monthly-close.ps1 -Command scan -Start 2026-01-01 -End 2026-11-01
    ```
 
-   El límite predeterminado es 200 resultados por búsqueda; si se alcanza, se
-   detiene con error. Reduce el rango y repite. Los mensajes ya importados no se
-   duplican por identificador. Pulsa Actualizar en el panel para ver los cambios.
+   El límite predeterminado es **200 filas en total entre todas las carpetas del alcance**,
+   incluidas las de remitentes no autorizados. Se permite completar exactamente
+   ese total; si falta otra fila, se detiene con error, sin saltarse carpetas.
+   Reducir las fechas no reduce estas filas: revisa `max_messages` (máximo 10000)
+   tras comprobar el volumen. Solo se abre el origen de remitentes aprobados;
+   la fecha RFC de recepción se convierte a la zona local y luego se aplica el
+   rango. Las carpetas personalizadas fuera del árbol Dinero no se recorren.
+   Si falta Dinero, falla una expansión o cambia su árbol durante el recorrido,
+   se detiene sin declarar cobertura completa ni omitir subcarpetas.
+   Los mensajes ya importados no se duplican por `Message-ID`, incluso si aparecen
+   en otra carpeta. Si una ejecución falla, conserva lo ya importado como parcial;
+   puedes repetirla sin sobrescribir decisiones. Pulsa Actualizar en el panel.
    Para el mes vivo, incluye sus fechas explícitamente.
+
+### Importación masiva desde una terminal de Windows
+
+Desde la raíz del proyecto, en **PowerShell**:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.\scripts\import-monthly-close.ps1 -Start 2026-01-01 -End 2026-11-01
+```
+
+El cambio de política solo afecta a esa terminal y desaparece al cerrarla.
+No requiere permisos de administrador ni modifica la política del equipo;
+una política de organización puede impedirlo y debe respetarse.
+No hay un lanzador Python adicional ni dependencia de Bash.
+
+Desde **CMD**, puedes ejecutar el mismo script:
+
+```cmd
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File scripts\import-monthly-close.ps1 -Start 2026-01-01 -End 2026-11-01
+```
+
+Desde **Git Bash**:
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File scripts/import-monthly-close.ps1 -Start 2026-01-01 -End 2026-11-01
+```
+
+El fin es exclusivo. Sin fechas importa desde enero del año local hasta el mes
+anterior. Usa `-End 2026-11-03` para incluir el 2 de noviembre.
+El script usa la configuración privada predeterminada de MonthlyCloseAgent,
+su entorno `.venv` de Windows y el perfil exclusivo de Edge. Comprueba la
+configuración y el modelo instalado antes de importar. Si Ollama no responde,
+inicia la instalación local del usuario con el puerto configurado y el directorio
+de modelos exclusivo; no descarga modelos. Al terminar o fallar cierra únicamente
+la instancia de Ollama que él inició. Una instancia preexistente queda abierta.
+No inicia el panel ni instala tareas. No interactúes con el perfil de Edge durante
+la importación. Los movimientos nuevos requieren revisión humana.
+
+Para comprobar solo el recorrido, añade `-ReadOnly`; no importa ni usa el
+modelo para inferencia, aunque este lanzador también verifica su disponibilidad.
+Si se interrumpe, puedes repetir el mismo comando sin sobrescribir decisiones.
+Mantén la terminal abierta hasta que termine. Las primeras importaciones masivas
+con Ollama siguen pendientes de validación real.
+
+El script restaura las variables de entorno que modificó al terminar.
+Se validó el arranque y cierre reales de Ollama con un rango deliberadamente
+inválido, sin abrir correos. Las pruebas con un servicio simulado cubren la
+reutilización de instancias, argumentos, código de salida y modelo ausente.
+La importación masiva con correos reales no forma parte de estas pruebas.
 
 ### Cobertura, cierre y tarea persistente
 
-Cada mes buscado se marca **parcial/sin conciliar**, aunque no haya avisos. Nunca
-se certifica completitud contando correos. Outlook puede excluir Spam o Eliminados
-de su búsqueda global, cambiar sus selectores o haber borrado mensajes por
-retención. Compara los totales con extractos: el sistema no tiene una API bancaria
+Cada mes importado se marca **parcial/sin conciliar**, aunque no haya avisos. Nunca
+se certifica completitud contando correos. Se recorren Entrada, Spam, Eliminados y
+Dinero con todos sus descendientes directamente; no se afirma cobertura de otras carpetas ni de mensajes ya borrados
+por retención. Outlook puede cambiar sus controles. Compara los totales con
+extractos: el sistema no tiene una API bancaria
 ni puede saber cuánto cobró una tarjeta sin datos adicionales.
 La revisión manual del panel conserva una nota de conciliación. Movimientos
 nuevos invalidan esa revisión; repetir la misma importación no borra decisiones.
@@ -260,9 +328,11 @@ por correo ni garantía de ejecución si el equipo está apagado.
 
 ### Privacidad, límites y validación
 
-- Solo `discover`, solicitado expresamente, lee metadatos de remitentes aún no
-  aprobados. `scan` comprueba el remitente antes de abrir el cuerpo y antes de
-  mandarlo a Ollama. No transmite mensajes a servicios de IA externos.
+- `scan` inspecciona remitente, identificador y posición de todas las filas para
+  verificar el recorrido. Solo lee asunto y origen MIME de remitentes aprobados;
+  los demás no se abren ni se mandan a Ollama. `discover`, solicitado expresamente,
+  puede leer también asuntos de remitentes aún no aprobados. No se transmiten
+  mensajes a servicios de IA externos.
 - El navegador sí se comunica con Microsoft. El modelo no dispone de terminal,
   disco, red ni herramientas; sus respuestas JSON se validan y jamás se ejecutan.
 - No se guardan cuerpos en SQLite ni en logs. Se retienen los hechos financieros,
@@ -292,7 +362,184 @@ gráficos. Se revisaron capturas a 1440 y 390 píxeles, en modo claro y oscuro.
 Las pruebas gráficas usan Chromium instalado por `bootstrap.ps1`.
 **Pendiente de validar con el usuario:** selectores de su Outlook, cobertura real
 de Spam/Eliminados, resultados del modelo local y ejecución de la tarea instalada.
-No se ha accedido al buzón ni configurado una tarea real durante la implementación.
+Durante la implementación inicial no se accedió al buzón ni se configuró una
+tarea real. Las validaciones posteriores con Outlook se detallan abajo.
+
+### Piloto controlado con el Outlook real
+
+El comando `pilot` permite validar **como máximo un aviso visible de un remitente
+autorizado**, sin habilitar el lector general ni afirmar cobertura de carpetas.
+Requiere el paso 0 completo, sesión manual y `runtime.json`. Prioriza el orden de
+los remitentes configurados y elige su primera fila visible. No busca mensajes
+adicionales ni lee cuerpos de remitentes fuera de esa lista.
+
+```powershell
+.\scripts\run-monthly-close.ps1 -Command pilot -ReadOnly
+.\scripts\run-monthly-close.ps1 -Command pilot
+```
+
+La primera variante verifica lectura e identidad en memoria, sin Ollama ni
+importación. La segunda comprueba primero que la instancia exclusiva tiene el
+modelo configurado y luego propone movimientos para revisión humana. Repetirla
+no duplica el mismo `Message-ID` ni reemplaza decisiones. Los avisos de dinero
+recibido y otros conceptos no contables deben devolver cero propuestas. Una
+propuesta sin evidencia literal o fuera de las categorías autorizadas se rechaza:
+el piloto se detiene, no rellena ni acepta datos inventados.
+
+En equipos que bloqueen scripts de PowerShell, puede usarse la entrada Python
+equivalente, sin modificar la política de ejecución:
+
+```powershell
+.\.venv\Scripts\python.exe -m monthly_close.main serve
+.\.venv\Scripts\python.exe -m monthly_close.main pilot --read-only
+.\.venv\Scripts\python.exe -m monthly_close.main pilot
+.\.venv\Scripts\python.exe -m monthly_close.main scan --read-only --start 2026-10-01 --end 2026-11-01
+```
+
+El adaptador del piloto, `source_reader.py`, usa selectores centrales observados
+en la interfaz española: el `id` único del elemento **solo para identificar la fila**
+y `span.TtcXM` para su asunto. `data-convid` identifica conversaciones y puede
+repetirse entre mensajes individuales: no se usa como identidad única.
+Valida nuevamente remitente y asunto antes de abrir
+el menú contextual **Ver > Ver origen del mensaje**. Espera la selección y la
+carga del origen por eventos del DOM, sin retardos fijos. No depende del panel
+de lectura, que puede ocultar la lista o mantener contenido anterior.
+
+El diálogo de origen debe ser único y nuevo. Se cotejan su remitente y asunto
+RFC con la fila autorizada. El identificador persistido deriva del `Message-ID`
+RFC, no de la conversación. La fecha de recepción se toma del primer encabezado
+`Received`, con zona explícita; también se valida la zona de `Date`. No se
+interpreta la fecha visual localizada ni se presupone UTC.
+
+El origen MIME completo se carga temporalmente en memoria (máximo 2 MB). Se
+decodifica solo su parte de texto, o HTML convertido a texto sin scripts, estilos
+ni recursos remotos. No se decodifican ni guardan adjuntos. Se rechazan orígenes
+defectuosos, encabezados críticos duplicados, identidades contradictorias y filas
+con señales de conversación agrupada. Un fallo de Playwright no imprime su
+registro de localizadores, porque puede incluir contenido financiero en
+`aria-label`. El formato de estos controles depende de Outlook: un cambio detiene
+el piloto, no activa una alternativa silenciosa.
+
+Pruebas del nuevo adaptador y de la CLI controlada:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_monthly_close_folders.py tests\test_monthly_close_source.py tests\test_monthly_close_outlook.py tests\test_monthly_close.py tests\test_monthly_close_dashboard.py
+```
+
+**Prueba controlada posterior (2026-11-02): resultado parcial, escaneo bloqueado.**
+Se confirmó la sesión manual en el perfil exclusivo. El buscador real usa
+`#topSearchInput[role="combobox"]`; las filas usan `data-convid`, no `data-itemid`,
+y exponen el remitente en un `span[title]`. Se abrió un solo aviso después de
+verificar su remitente exacto contra la lista autorizada y la unicidad de su
+identificador. No se extrajo el cuerpo, llamó a Ollama ni importaron movimientos.
+Abrirlo puede haberlo marcado como leído.
+
+El panel abierto mostró un único elemento `role="document"`, pero no se verificó
+un identificador compartido con la fila, un remitente exacto dentro del panel ni
+una fecha con zona explícita. Tampoco se verificó el alcance de Todas las carpetas.
+Estos datos no permiten activar el lector actual: necesita adaptación y nuevas
+pruebas, sin sustituir el identificador de mensaje por uno de conversación sin
+validar los hilos. `selectors_verified` sigue en `false`; no se instaló una tarea.
+
+**Corrección y repetición del piloto (2026-11-02):** se verificó un aviso real
+mediante origen MIME, remitente/asunto concordantes, `Message-ID` y recepción con
+zona horaria. La prueba de solo lectura terminó correctamente. Se levantó la
+instancia exclusiva de Ollama en `11436` y se descargó el modelo configurado en
+su directorio separado (aproximadamente 4,7 GB para `qwen2.5:7b`).
+La primera salida del modelo se rechazó por falta de evidencia literal; no se
+importó. Se aclaró el prompt para omitir ingresos y copiar los montos exactamente.
+La repetición completa terminó correctamente con **cero propuestas**, porque
+el aviso era de dinero recibido. No se contaron gastos ni se aprobaron decisiones.
+Además, una compra sintética procesada por esa misma instancia real de Ollama
+produjo una propuesta con importe exacto en centavos, sin aprobación ni escritura
+en la base personal. Las 98 pruebas de cierre mensual pasaron tras estos cambios.
+Este resultado no valida aún la extracción de una compra real, la cobertura de
+Spam/Eliminados ni la tarea programada. El escaneo general permanece bloqueado.
+
+**Validación posterior de una compra real (2026-11-02):** entre las filas visibles
+se identificó un posible aviso de compra únicamente después de verificar su
+remitente exacto contra la lista autorizada. Se procesó un solo aviso mediante
+el adaptador de origen MIME y la instancia local de Ollama. Se obtuvo una
+propuesta de compra con comercio y monto respaldados literalmente por el correo.
+El importe se persistió en centavos y se comprobó su coincidencia entre SQLite
+y la API del panel, junto con categoría y decisión.
+La propuesta quedó **pendiente**, sin sumar a los totales confirmados ni registrar
+aprobación humana. El mes se marcó parcial; esta prueba no representa el gasto
+mensual completo. Se abrió el panel para que el usuario revise la propuesta.
+Falta su comprobación manual de comercio, cuenta, categoría e importe; la
+validación automática no sustituye esa decisión. No se verificaron cobertura de
+Spam/Eliminados ni tareas programadas y el escaneo general continúa bloqueado.
+No se incluyen datos financieros personales en este registro de validación.
+
+**Persistencia y navegación de carpetas (2026-11-02):** después de que el usuario
+eligió Familiar, se releyó el mismo aviso real y se reconoció su `Message-ID`.
+No se llamó nuevamente al modelo ni se reimportó el mensaje. Se verificó que
+movimiento, importe, categoría, decisión y cantidad de registros de aprobación
+permanecieron intactos. La API del panel mantiene un movimiento y cero dudas.
+
+Se verificó la navegación mediante controles únicos de Outlook a Correo no
+deseado y Elementos eliminados, comprobando `aria-selected="true"` y el origen
+esperado. Sus atributos observados son
+`data-folder-name="correo no deseado"` y
+`data-folder-name="elementos eliminados"` dentro de `NavigationPane`.
+No se abrieron mensajes de esas carpetas ni se importaron movimientos nuevos.
+Esto valida únicamente navegación: **no demuestra que la búsqueda global incluya
+esas carpetas ni que se hayan leído todos sus avisos**. Tampoco se verificó la
+cobertura histórica o una tarea programada. `selectors_verified` sigue en `false`.
+
+**Recorrido explícito posterior de las tres carpetas:** `scan --read-only`
+completó 48 filas de Entrada (14 de remitentes autorizados), 0 de Spam y 54 de
+Eliminados (0 autorizadas). Se excluyó el acceso duplicado de Favoritos y se
+verificó que los tres controles pertenecieran al mismo buzón. El lector compara
+el total anunciado por cada carpeta con todos los índices virtuales recorridos:
+los atributos ARIA de las filas no enfocadas permanecen en cero en esta versión
+de Outlook y no sirven como posición. Se detiene ante huecos, cambios de orden,
+cambios de total, límite, carpeta ausente, vista filtrada o controles ambiguos.
+
+En este recorrido no se abrieron mensajes, no se llamó a Ollama ni se importaron
+movimientos. Las 117 pruebas de cierre mensual pasaron. Las pruebas con interfaz
+sintética cubren lectura MIME durante
+paginación, avisos en las tres carpetas, rango por fecha local, duplicados y
+conservación de la decisión Familiar. La lectura real de un aviso desde Spam
+o Eliminados y la importación masiva con Ollama siguen pendientes; Spam estaba
+vacío y Eliminados no contenía remitentes autorizados. No se ha validado cobertura
+histórica ni instalado una tarea. La búsqueda global antigua permanece bloqueada
+con `selectors_verified: false`. Se habilitó `folder_scan_verified` únicamente en
+la configuración local tras validar el recorrido; la plantilla lo conserva
+desactivado. La decisión Familiar y cero dudas quedaron intactas.
+
+**Ampliación solicitada: Dinero y todas sus subcarpetas.** El recorrido incluye
+ahora la carpeta Dinero y sus descendientes a cualquier profundidad. Despliega
+los nodos contraídos mediante su control de expansión y verifica jerarquía,
+identidad por ruta y pertenencia al mismo buzón. Permite nombres iguales en
+ramas distintas, pero no hermanos ambiguos. Repite el inventario al terminar
+para detectar cambios del árbol. No abre carpetas ajenas a este alcance.
+
+La inspección real encontró 11 subcarpetas de Dinero y 8.194 filas anunciadas
+entre las 15 carpetas del alcance (8.092 dentro de Dinero). Por ese volumen se
+amplió el máximo configurable de `max_messages` a 10000 y se ajustó el límite
+local a ese valor; la plantilla conserva 200. Las fechas siguen aplicándose
+después de validar el origen de cada aviso autorizado, no reducen el recorrido
+de metadatos. Un recorrido o una importación de este tamaño puede tardar varios
+minutos. La verificación local se desactivó durante la recalibración y se
+restableció tras completar el recorrido ampliado.
+
+Se adaptaron los totales con separador de miles de Outlook español y el estado
+vacío de carpetas personalizadas, siempre cotejado con total cero y selección
+exacta. En listas grandes, la cantidad de filas virtuales puede cambiar durante
+la iteración: se captura una instantánea de identidades y posiciones y se exige
+verificar todos los índices, sin declarar éxito si desaparecen filas sin cubrir.
+La identidad de fila usa el `id` del elemento; el `Message-ID` MIME sigue siendo
+la única identidad persistida para deduplicar y conservar decisiones.
+
+La validación real de solo metadatos completó las **15 carpetas y 8.194 filas**,
+incluidas las 11 subcarpetas y 8.092 filas de Dinero. Encontró 1.683 filas de
+remitentes autorizados, sin abrir sus mensajes ni llamar a Ollama. Pasaron
+**137 pruebas** de cierre mensual, incluidas expansión recursiva, ramas con
+nombres iguales, límites, cambios del árbol, instantáneas virtuales e identidades
+de fila independientes de la conversación. No se importaron movimientos nuevos;
+la decisión Familiar y cero dudas siguen intactas. La importación masiva real,
+la conciliación histórica y la tarea programada permanecen pendientes.
 
 ## Skill de revisión: Ponytail
 

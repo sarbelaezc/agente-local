@@ -42,6 +42,17 @@ def validate_url(url: str) -> str:
     return url
 
 
+def guard_page(page: Page, origin: str) -> None:
+    """Stop if the browser leaves the expected mailbox or requests authentication."""
+    parsed = urlparse(page.url)
+    if parsed.scheme != "https" or parsed.netloc != origin or not parsed.path.startswith("/mail/"):
+        raise OutlookError("Autenticacion o pantalla inesperada. Detenido; inicia sesion manualmente.")
+    if page.locator(
+        "input[type='password'], iframe[src*='captcha'], input[name='otc'], #idDiv_SAOTCS_Proofs"
+    ).count():
+        raise OutlookError("Autenticacion, MFA o captcha detectado. Detenido.")
+
+
 class OutlookReader:
     """Read only visible Outlook DOM; never send, move or download messages."""
 
@@ -55,13 +66,7 @@ class OutlookReader:
         self.selectors = selectors
 
     def guard(self) -> None:
-        parsed = urlparse(self.page.url)
-        if parsed.scheme != "https" or parsed.netloc != self.origin or not parsed.path.startswith("/mail/"):
-            raise OutlookError("Autenticacion o pantalla inesperada. Detenido; inicia sesion manualmente.")
-        if self.page.locator(
-            "input[type='password'], iframe[src*='captcha'], input[name='otc'], #idDiv_SAOTCS_Proofs"
-        ).count():
-            raise OutlookError("Autenticacion, MFA o captcha detectado. Detenido.")
+        guard_page(self.page, self.origin)
 
     def unique(self, name: str, parent: Locator | None = None) -> Locator:
         self.guard()

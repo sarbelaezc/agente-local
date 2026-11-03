@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright
 
 from monthly_close import main as app
 from monthly_close.domain import CATEGORIES, Preferences
-from monthly_close.outlook import OutlookError, OutlookReader
+from monthly_close.outlook import Candidate, OutlookError, OutlookReader
 from monthly_close.store import Store
 
 URL = "https://outlook.live.com/mail/0/"
@@ -128,10 +128,6 @@ def test_scan_rejects_sender_before_opening_body(page, tmp_path, monkeypatch):
         "Prueba", "America/Bogota", "COP", ["Tarjeta A"], [], "Familiar",
         True, True, ["avisos@example.test"], CATEGORIES, True,
     )
-    page.locator("#results [email]").evaluate(
-        "el => el.setAttribute('email','other@example.test')"
-    )
-
     @contextmanager
     def fake_browser(data_dir, settings):
         yield page
@@ -145,8 +141,16 @@ def test_scan_rejects_sender_before_opening_body(page, tmp_path, monkeypatch):
 
     monkeypatch.setattr(app, "browser", fake_browser)
     monkeypatch.setattr(app, "OllamaJsonModel", NoModel)
+    monkeypatch.setattr(
+        app.OutlookSourceReader, "walk_folders",
+        lambda reader, limit, visit: visit(Candidate("message-1", "other@example.test", "Compra")),
+    )
+    monkeypatch.setattr(
+        app.OutlookSourceReader, "read",
+        lambda *args: pytest.fail("No debe abrirse el cuerpo no autorizado."),
+    )
     settings = {
-        "selectors_verified": True, "outlook_url": URL, "selectors": SELECTORS,
+        "folder_scan_verified": True, "outlook_url": URL,
         "ollama_url": "http://127.0.0.1:11436", "ollama_model": "fake", "max_messages": 10,
     }
     store = Store(tmp_path / "test.sqlite3")

@@ -12,14 +12,16 @@ from typing import Iterator
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import httpx
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, sync_playwright
 
 from mail_invoices.local_model import LocalModelError, OllamaJsonModel, validate_local_url
 from monthly_close.domain import Preferences, received_local
 from monthly_close.extraction import extract
-from monthly_close.outlook import Candidate, OutlookError, OutlookReader, sender_query, validate_url
+from monthly_close.outlook import Candidate, OutlookError, OutlookReader, validate_url
 from monthly_close.server import create_server
+from monthly_close.source_reader import OutlookSourceReader
 from monthly_close.store import Store
 
 
@@ -52,8 +54,8 @@ def runtime(data_dir: Path) -> dict:
     if "%" in executable or not Path(executable).is_file():
         raise ValueError("No se encuentra el ejecutable del navegador configurado.")
     raw["browser_executable"] = executable
-    if type(raw.get("max_messages")) is not int or not 1 <= raw["max_messages"] <= 1000:
-        raise ValueError("max_messages debe estar entre 1 y 1000.")
+    if type(raw.get("max_messages")) is not int or not 1 <= raw["max_messages"] <= 10000:
+        raise ValueError("max_messages debe estar entre 1 y 10000.")
     if not isinstance(raw.get("ollama_model"), str) or not raw["ollama_model"].strip():
         raise ValueError("Configura ollama_model.")
     if not isinstance(raw.get("selectors"), dict):
@@ -101,47 +103,105 @@ def scheduled_month(now: datetime, timezone: str) -> str | None:
 
 def scan(
     store: Store, data_dir: Path, settings: dict, preferences: Preferences,
-    start: date, end: date, discover: bool = False,
+    start: date, end: date, discover: bool = False, read_only: bool = False,
 ) -> None:
-    if settings.get("selectors_verified") is not True:
-        raise ValueError(
-            "Selectores no verificados. Calibra con Outlook y marca selectors_verified "
-            "solo despues de validar Todas las carpetas, Spam, Eliminados y mensajes sin agrupar."
-        )
-    if not discover and not preferences.approved_senders:
-        raise ValueError("Aprueba primero los remitentes exactos en el panel.")
-    for month in months(start, end):
-        store.coverage(
-            month, "partial",
-            "Sin conciliar. Outlook puede omitir Spam, Eliminados, avisos borrados o hilos. "
-            "Compara con extractos antes de marcar revisado.",
-        )
-    model = OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
-    with browser(data_dir, settings) as page:
-        reader = OutlookReader(page, settings["outlook_url"], settings["selectors"])
-        if discover:
-            # Discovery is explicitly requested and reads result metadata, never bodies.
+    if discover:
+        if settings.get("selectors_verified") is not True:
+            raise ValueError("El descubrimiento global requiere selectores verificados; sigue bloqueado.")
+        if read_only:
+            raise ValueError("Usa scan --read-only para validar las carpetas sin descubrimiento.")
+        with browser(data_dir, settings) as page:
+            reader = OutlookReader(page, settings["outlook_url"], settings["selectors"])
             query = f"received:>={start.isoformat()} received:<{end.isoformat()}"
             reader.walk(query, settings["max_messages"], lambda row: store.discover(row.sender, row.subject))
-            return
-        for sender in preferences.approved_senders:
-            def visit(candidate: Candidate) -> None:
-                if candidate.sender != sender:
-                    raise OutlookError("La busqueda devolvio un remitente no autorizado. Detenido.")
-                mail = reader.read(candidate)
-                if store.seen(mail.id):
-                    return
-                local_day = received_local(mail.received, preferences.timezone).date()
-                if not start <= local_day < end:
-                    return
-                proposals = extract(mail, preferences, model)
-                store.import_message(mail.id, proposals)
-
-            # Widen query boundaries for Outlook's UI timezone; filter exact local dates above.
-            reader.walk(
-                sender_query(sender, start - timedelta(days=1), end + timedelta(days=1)),
-                settings["max_messages"], visit,
+        return
+    if not read_only and settings.get("folder_scan_verified") is not True:
+        raise ValueError(
+            "Recorrido de carpetas no verificado. Ejecuta scan --read-only y valida "
+            "Entrada, Spam, Eliminados y Dinero con todas sus subcarpetas antes de habilitarlo."
+        )
+    if not preferences.approved_senders:
+        raise ValueError("Aprueba primero los remitentes exactos en el panel.")
+    if start >= end:
+        raise ValueError("El inicio debe ser anterior al fin exclusivo.")
+    if not read_only:
+        for month in months(start, end):
+            store.coverage(
+                month, "partial",
+                "Recorrido explicito de Bandeja de entrada, Correo no deseado y Elementos "
+                "eliminados y Dinero con todas sus subcarpetas; sin conciliar. "
+                "Otras carpetas y avisos borrados no estan cubiertos.",
             )
+    model = None if read_only else OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
+    received_ids: set[str] = set()
+    with browser(data_dir, settings) as page:
+        reader = OutlookSourceReader(page, settings["outlook_url"], preferences.approved_senders)
+
+        def visit(candidate: Candidate) -> None:
+            if candidate.sender not in preferences.approved_senders:
+                raise OutlookError("La carpeta devolvio un remitente no autorizado. Detenido.")
+            if read_only:
+                return
+            mail = reader.read(candidate)
+            if mail.id in received_ids or store.seen(mail.id):
+                return
+            local_day = received_local(mail.received, preferences.timezone).date()
+            if not start <= local_day < end:
+                return
+            assert model is not None
+            proposals = extract(mail, preferences, model)
+            store.import_message(mail.id, proposals)
+            received_ids.add(mail.id)
+
+        reports = reader.walk_folders(settings["max_messages"], visit)
+    for report in reports:
+        print(
+            f"{report['folder']}: {report['rows']} filas verificadas; "
+            f"{report['authorized']} de remitentes autorizados."
+        )
+    if read_only:
+        print("Solo metadatos: sin abrir mensajes, Ollama, importaciones ni cambios de decisiones.")
+
+
+def run_pilot(store: Store, data_dir: Path, settings: dict, read_only: bool) -> None:
+    """Validate or import at most one visible authorized notice, without a broad scan."""
+    preferences = store.preferences()
+    if not read_only:
+        try:
+            with httpx.Client(timeout=10, trust_env=False) as client:
+                response = client.get(settings["ollama_url"] + "/api/tags")
+                response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise LocalModelError("El piloto requiere la instancia exclusiva de Ollama activa.") from exc
+        models = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(models, list) or not any(
+            isinstance(model, dict) and model.get("name") == settings["ollama_model"]
+            for model in models
+        ):
+            raise LocalModelError("El modelo configurado no esta instalado en Ollama del cierre mensual.")
+    with browser(data_dir, settings) as page:
+        reader = OutlookSourceReader(page, settings["outlook_url"], preferences.approved_senders)
+        mail = reader.read(reader.candidate())
+    received_local(mail.received, preferences.timezone)
+    if read_only:
+        print(
+            "Piloto: 1 aviso autorizado validado por origen MIME, Message-ID y fecha con zona. "
+            "Sin Ollama ni importacion. El escaneo general sigue bloqueado."
+        )
+        return
+    if store.seen(mail.id):
+        print("Piloto: aviso ya importado; se conservan las decisiones existentes.")
+        return
+    model = OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
+    proposals = extract(mail, preferences, model)
+    store.import_message(mail.id, proposals)
+    for month in {event["day"][:7] for event in proposals}:
+        store.coverage(month, "partial", "Piloto de un solo aviso; no representa el gasto del mes.")
+    print(
+        f"Piloto: 1 aviso procesado; {len(proposals)} propuestas. "
+        "Revisa las decisiones en el panel. El escaneo general sigue bloqueado."
+    )
 
 
 def run(args: argparse.Namespace) -> None:
@@ -166,6 +226,9 @@ def run(args: argparse.Namespace) -> None:
     if args.command == "scheduled" and closing_month is None:
         return
     settings = runtime(data_dir)
+    if args.command == "pilot":
+        run_pilot(store, data_dir, settings, args.read_only)
+        return
     if args.command == "login":
         with browser(data_dir, settings):
             input(
@@ -174,8 +237,8 @@ def run(args: argparse.Namespace) -> None:
             )
         return
     if args.command == "check-config":
-        if not preferences.approved_senders or settings.get("selectors_verified") is not True:
-            raise ValueError("Faltan remitentes aprobados o selectores verificados.")
+        if not preferences.approved_senders or settings.get("folder_scan_verified") is not True:
+            raise ValueError("Faltan remitentes aprobados o recorrido de carpetas verificado.")
         print("Paso 0, remitentes y configuracion presentes. El buzon aun requiere validacion real.")
         return
     if args.command == "scheduled":
@@ -192,31 +255,49 @@ def run(args: argparse.Namespace) -> None:
     end = date.fromisoformat(args.end) if args.end else now.date().replace(day=1)
     if start >= end:
         raise ValueError("Usa --start y --end (fin exclusivo); el rango debe contener dias.")
-    scan(store, data_dir, settings, preferences, start, end, discover=args.command == "discover")
+    scan(
+        store, data_dir, settings, preferences, start, end,
+        discover=args.command == "discover", read_only=args.read_only,
+    )
     if args.command == "discover":
         print("Remitentes y asuntos visibles en el panel. Aprueba solo avisos financieros.")
-    else:
+    elif not args.read_only:
         print("Importacion terminada. Revisa movimientos, meses parciales y decisiones en el panel.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Cierre mensual local: Outlook Web + Ollama.")
     parser.add_argument(
-        "command", choices=["serve", "login", "discover", "scan", "summary", "scheduled", "check-config"],
+        "command",
+        choices=["serve", "login", "pilot", "discover", "scan", "summary", "scheduled", "check-config"],
     )
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--start", help="YYYY-MM-DD")
     parser.add_argument("--end", help="YYYY-MM-DD, exclusivo")
     parser.add_argument("--month", help="YYYY-MM")
+    parser.add_argument(
+        "--read-only", action="store_true",
+        help="Con pilot valida un aviso; con scan recorre las carpetas autorizadas solo con metadatos.",
+    )
     args = parser.parse_args()
+    if args.read_only and args.command not in {"pilot", "scan"}:
+        parser.error("--read-only solo se permite con pilot o scan.")
     try:
         run(args)
     except KeyboardInterrupt:
         print("Detenido por el usuario.", file=sys.stderr)
         raise SystemExit(130)
+    except PlaywrightError:
+        # Playwright call logs can embed financial text from Outlook's aria-labels.
+        print(
+            "Detenido: Outlook no confirmo la interfaz esperada. "
+            "No se continua ni se imprime contenido de los mensajes.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from None
     except (
-        ValueError, OSError, KeyError, ZoneInfoNotFoundError, PlaywrightError,
+        ValueError, OSError, KeyError, ZoneInfoNotFoundError,
         OutlookError, LocalModelError,
     ) as exc:
         # No message bodies or model payloads in terminal/task diagnostics.
