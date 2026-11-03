@@ -423,14 +423,21 @@
       function decisionOptions(tx) {
         const kind = typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "";
         if (nonExpenseKinds.has(kind)) return [["exclude", "No cuenta"]];
-        if (kind === "own_transfer" || isExcludedAccount(tx)) return [["family", "Familiar"], ["exclude", "No cuenta"]];
-        return [["personal", "Gasto personal"], ["family", "Familiar"], ["exclude", "No cuenta"]];
+        if (isExcludedAccount(tx)) return kind === "investment" ? [["exclude", "No cuenta"]] : [["family", "Familiar"], ["exclude", "No cuenta"]];
+        const separate = [["investment", "Inversión"], ["investment_withdrawal", "Retiro de inversión"], ["exclude", "No cuenta"]];
+        if (kind === "investment") return separate;
+        if (kind === "own_transfer") return [["family", "Familiar"], ...separate];
+        return [["personal", "Gasto personal"], ["family", "Familiar"], ...separate];
+      }
+      function netInvestments(items) {
+        return sum(items.filter(tx => tx.decision === "investment"))
+          - sum(items.filter(tx => tx.decision === "investment_withdrawal"));
       }
       function counted(items) {
         return items.filter(tx =>
-          (tx.decision === "personal" || tx.decision === "family") &&
+          (tx.decision === "personal" || tx.decision === "cash_withdrawal" || tx.decision === "family") &&
           !nonExpenseKinds.has(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "") &&
-          !(tx.decision === "personal" && (
+          !(["personal", "cash_withdrawal"].includes(tx.decision) && (
             (typeof tx.kind === "string" && tx.kind.trim().toLowerCase() === "own_transfer") ||
             isExcludedAccount(tx)
           ))
@@ -736,8 +743,11 @@
       function renderDashboard() {
         const inMonth = transactions().filter(tx => monthOf(tx) === state.month);
         const decisions = counted(inMonth);
-        const personal = decisions.filter(tx => tx.decision === "personal");
+        const personal = decisions.filter(tx => ["personal", "cash_withdrawal"].includes(tx.decision));
         const family = decisions.filter(tx => tx.decision === "family");
+        const investments = inMonth.filter(tx => tx.decision === "investment");
+        const withdrawals = inMonth.filter(tx => tx.decision === "investment_withdrawal");
+        const cash = decisions.filter(tx => tx.category === "Retiro en efectivo");
         const pending = inMonth.filter(tx => tx.decision == null);
         const monthDate = new Date(Number(state.month.slice(0, 4)), Number(state.month.slice(5, 7)) - 1, 1);
         const total = sum(decisions);
@@ -745,6 +755,9 @@
         metrics.replaceChildren(
           makeMetric("Personal", formatMoney(sum(personal)), `${personal.length} movimientos`),
           makeMetric("Familiar", formatMoney(sum(family)), `${family.length} movimientos`),
+          makeMetric("Inversiones", formatMoney(netInvestments(inMonth)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo`),
+          makeMetric("Retiros de inversión", formatMoney(sum(withdrawals)), "Fuera de gastos"),
+          makeMetric("Retiro en efectivo", formatMoney(sum(cash)), "Incluido en gastos"),
           makeMetric("Total decidido", formatMoney(total), "Personal + familiar; moneda seleccionada"),
           makeMetric("Pendiente", formatMoney(sum(pending)), `${pending.length} movimientos · no incluido en total`)
         );
@@ -935,12 +948,20 @@
         Array.from(groups).sort((a, b) => a[0].localeCompare(b[0], "es")).forEach(([category, rows]) => {
           const detail = el("details", "category-detail");
           const decided = counted(rows);
-          const summary = el("summary", "", `${category} · ${formatMoney(sum(decided))} decidido · ${rows.length} movimientos`);
+          const investments = rows.filter(tx => tx.decision === "investment");
+          const withdrawals = rows.filter(tx => tx.decision === "investment_withdrawal");
+          const cash = rows.filter(tx => tx.decision === "cash_withdrawal");
+          const total = investments.length
+            ? `${formatMoney(sum(investments))} en inversiones`
+            : withdrawals.length ? `${formatMoney(sum(withdrawals))} retirado de inversiones`
+              : cash.length ? `${formatMoney(sum(decided))} decidido · gasto en efectivo`
+                : `${formatMoney(sum(decided))} decidido`;
+          const summary = el("summary", "", `${category} · ${total} · ${rows.length} movimientos`);
           detail.append(summary);
           const body = el("div", "detail-rows");
           rows.sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
             const row = el("div", "detail-row");
-            const status = tx.decision === "personal" ? "Personal" : tx.decision === "family" ? "Familiar" : tx.decision === "exclude" ? "Excluido" : "Pendiente";
+            const status = tx.decision === "personal" ? "Personal" : tx.decision === "family" ? "Familiar" : tx.decision === "investment" ? "Inversión" : tx.decision === "investment_withdrawal" ? "Retiro de inversión" : tx.decision === "cash_withdrawal" ? "Retiro en efectivo" : tx.decision === "exclude" ? "Excluido" : "Pendiente";
             row.append(el("span", "", `${tx.day || "Sin fecha"} · ${itemText(tx.merchant)} · ${status}`), el("strong", "", formatMoney(tx.amount_minor)));
             body.append(row);
           });
@@ -951,13 +972,15 @@
 
       function renderYear() {
         const items = transactions().filter(tx => monthOf(tx).startsWith(`${state.year}-`));
-        const buckets = Array.from({ length: 12 }, (_, index) => ({ month: `${state.year}-${String(index + 1).padStart(2, "0")}`, personal: [], family: [], pending: [], categories: new Map() }));
+        const buckets = Array.from({ length: 12 }, (_, index) => ({ month: `${state.year}-${String(index + 1).padStart(2, "0")}`, personal: [], family: [], investments: [], cash: [], pending: [], categories: new Map() }));
         items.forEach(tx => {
           const index = Number(tx.day.slice(5, 7)) - 1;
           if (index < 0 || index > 11) return;
           if (tx.decision == null) buckets[index].pending.push(tx);
+          else if (["investment", "investment_withdrawal"].includes(tx.decision)) buckets[index].investments.push(tx);
           else if (counted([tx]).length) {
-            if (tx.decision === "personal") buckets[index].personal.push(tx);
+            if (tx.category === "Retiro en efectivo") buckets[index].cash.push(tx);
+            if (["personal", "cash_withdrawal"].includes(tx.decision)) buckets[index].personal.push(tx);
             else buckets[index].family.push(tx);
             const category = itemText(tx.category);
             buckets[index].categories.set(category, (buckets[index].categories.get(category) || 0) + tx.amount_minor);
@@ -978,7 +1001,10 @@
           makeMetric("Promedio mensual", formatMoney(average), `${available.length} meses con importaciones`),
           makeMetric("Mes más alto", highest ? formatMoney(sum(highest.personal) + sum(highest.family)) : "—", highest ? monthLabel(highest.month) : "Sin datos"),
           makeMetric("Categoría principal", leadingCategory ? leadingCategory[0] : "—", leadingCategory ? formatMoney(leadingCategory[1]) : "Sin decisiones"),
-          makeMetric("Total decidido", formatMoney(completedTotals.reduce((a, b) => a + b, 0)), `${counted(items).length} movimientos`)
+          makeMetric("Total decidido", formatMoney(completedTotals.reduce((a, b) => a + b, 0)), `${counted(items).length} movimientos`),
+          makeMetric("Inversiones", formatMoney(netInvestments(items)), "Aportes menos retiros · neto, no saldo"),
+          makeMetric("Retiros de inversión", formatMoney(sum(items.filter(tx => tx.decision === "investment_withdrawal"))), "Fuera de gastos"),
+          makeMetric("Retiro en efectivo", formatMoney(sum(counted(items).filter(tx => tx.category === "Retiro en efectivo"))), "Incluido en gastos")
         );
         renderYearChart(buckets);
         renderYearTable(buckets);
@@ -1060,8 +1086,8 @@
         const table = document.createElement("table");
         const head = document.createElement("thead");
         const header = document.createElement("tr");
-        ["Mes", "Personal", "Familiar", "Pendiente", "Cobertura"].forEach((label, index) => {
-          const th = el("th", index > 0 && index < 4 ? "numeric" : "", label);
+        ["Mes", "Personal", "Familiar", "Inversiones", "Retiro en efectivo", "Pendiente", "Cobertura"].forEach((label, index) => {
+          const th = el("th", index > 0 && index < 6 ? "numeric" : "", label);
           header.append(th);
         });
         head.append(header);
@@ -1080,6 +1106,8 @@
             el("td", "", monthLabel(bucket.month)),
             el("td", "numeric", formatMoney(sum(bucket.personal))),
             el("td", "numeric", formatMoney(sum(bucket.family))),
+            el("td", "numeric", formatMoney(netInvestments(bucket.investments))),
+            el("td", "numeric", formatMoney(sum(bucket.cash))),
             el("td", "numeric", formatMoney(sum(bucket.pending))),
             el("td", "", status)
           );
@@ -1099,7 +1127,7 @@
         host.replaceChildren();
         if (!pending.length) host.append(el("div", "empty-state", "No hay movimientos pendientes para esta moneda."));
         pending.forEach(tx => host.append(makeDecisionCard(tx, false)));
-        const previous = all.filter(tx => tx.decision === "personal" || tx.decision === "family" || tx.decision === "exclude")
+        const previous = all.filter(tx => ["personal", "family", "investment", "investment_withdrawal", "cash_withdrawal", "exclude"].includes(tx.decision))
           .sort((a, b) => String(b.day || "").localeCompare(String(a.day || "")));
         $("#decision-history").hidden = previous.length === 0;
         const history = $("#history-list");
@@ -1122,6 +1150,7 @@
         categorySelect.name = "category";
         categorySelect.setAttribute("aria-label", `Categoría para ${itemText(tx.merchant)}`);
         const categories = safeArray(state.data.categories).filter(category => typeof category === "string");
+        if (!categories.includes("Retiro en efectivo")) categories.push("Retiro en efectivo");
         if (typeof tx.category === "string" && tx.category && !categories.includes(tx.category)) categories.unshift(tx.category);
         categories.forEach(category => {
           const option = el("option", "", category);
@@ -1134,15 +1163,17 @@
         const options = decisionOptions(tx);
         if (nonExpenseKinds.has(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "")) {
           card.append(el("p", "hint", "Este tipo no se cuenta como gasto; solo puedes marcarlo «No cuenta»."));
-        } else if (options.length === 2) {
+        } else if (tx.kind === "investment") {
+          card.append(el("p", "hint", "Aporte de inversión: se suma aparte, no como gasto personal o familiar."));
+        } else if (tx.kind === "own_transfer" || isExcludedAccount(tx)) {
           card.append(el("p", "hint", "Transferencia propia o cuenta excluida: no puede marcarse Personal."));
         }
-        card.append(el("p", "hint", "Al elegir una decisión, también se guarda la categoría seleccionada."));
+        card.append(el("p", "hint", "Inversión suma aportes; Retiro de inversión los resta y asignan su categoría automáticamente. Para efectivo, selecciona Retiro en efectivo en Categoría y confirma Gasto personal o Familiar."));
         const actions = el("div", "decision-actions");
         options.forEach(([decision, label]) => {
           const button = el("button", `button small${decision === "exclude" ? " danger" : ""}`, label);
           button.type = "button";
-          button.setAttribute("aria-pressed", String(tx.decision === decision));
+          button.setAttribute("aria-pressed", String(tx.decision === decision || (tx.decision === "cash_withdrawal" && decision === "personal")));
           button.addEventListener("click", async () => {
             await postJson("/api/decision", { id: tx.id, decision, category: categorySelect.value }, isPrevious ? "Decisión actualizada." : "Decisión guardada.");
           });

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from email import policy
 from email.message import EmailMessage
@@ -12,6 +13,7 @@ from typing import Callable
 from urllib.parse import urlparse
 
 from playwright.sync_api import Locator, Page
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from monthly_close.domain import EMAIL, clean_text
 from monthly_close.extraction import Mail
@@ -296,12 +298,12 @@ class OutlookSourceReader:
         item_id = row.get_attribute("id")
         if not item_id:
             raise OutlookError("Falta identificador de fila.")
-        return Candidate(item_id, emails[0], clean_text(subject.inner_text(), 300))
+        return Candidate(item_id, emails[0], clean_text(subject.text_content(), 300))
 
     def walk_folders(
-        self, limit: int, visit: Callable[[Candidate], None],
+        self, limit: int, visit: Callable[[Candidate], bool | None],
     ) -> list[dict]:
-        """Visit the standard folders and Dinero tree; fail on gaps or limits."""
+        """Visit folders; False ends only the current verified newest-first folder."""
         if type(limit) is not int or limit < 1:
             raise ValueError("El limite de filas debe ser positivo.")
         reports: list[dict] = []
@@ -315,6 +317,7 @@ class OutlookSourceReader:
             if total is None:
                 raise OutlookError("Cantidad de carpeta no verificada.")
             authorized = 0
+            stopped_before_start = False
             while True:
                 self.guard()
                 rows = self.page.locator(ROWS)
@@ -361,9 +364,22 @@ class OutlookSourceReader:
                     positions[pos] = item_id
                     ids.add(item_id)
                     if candidate is not None:
-                        visit(candidate)
+                        keep_reading = visit(candidate)
                         authorized += 1
                         self.guard()
+                        if keep_reading is False:
+                            newest = self.page.locator(MESSAGE_LIST).get_by_role(
+                                "button", name="Ordenado: Más recientes en la parte superior",
+                                exact=True,
+                            )
+                            if newest.count() != 1 or not newest.is_visible():
+                                raise OutlookError("No se confirma el orden de fecha descendente.")
+                            if set(positions) != set(range(pos + 1)):
+                                raise OutlookError("Hay posiciones sin verificar antes del corte por fecha.")
+                            stopped_before_start = True
+                            break
+                if stopped_before_start:
+                    break
                 if len(positions) == total:
                     if set(positions) != set(range(total)):
                         raise OutlookError("Hay posiciones sin verificar en la carpeta.")
@@ -379,7 +395,10 @@ class OutlookSourceReader:
                       return JSON.stringify(now) !== JSON.stringify(before);
                     }""", arg={"rows": ROWS, "before": page_ids},
                 )
-            reports.append({"folder": label, "rows": len(positions), "authorized": authorized})
+            report = {"folder": label, "rows": len(positions), "authorized": authorized}
+            if stopped_before_start:
+                report["stopped_before_start"] = True
+            reports.append(report)
         if self.folders() != folders:
             raise OutlookError("El arbol de subcarpetas cambio durante el recorrido.")
         return reports
@@ -422,7 +441,7 @@ class OutlookSourceReader:
             candidate.sender not in self.approved_senders
             or emails != [candidate.sender]
             or subject.count() != 1
-            or clean_text(subject.inner_text(), 300) != candidate.subject
+            or clean_text(subject.text_content(), 300) != candidate.subject
         ):
             raise OutlookError("El resultado cambio antes de abrir el origen.")
         return row
@@ -432,12 +451,107 @@ class OutlookSourceReader:
             raise OutlookError("Identificador de fila no valido.")
         return self.page.locator(ROWS + "[id=" + json.dumps(item_id, ensure_ascii=False) + "]")
 
-    def read(self, candidate: Candidate) -> Mail:
+    def checkpoint_key(self, candidate: Candidate) -> str:
+        """Hash folder and exact row metadata; never persist message text."""
         self.guard()
-        if self.page.get_by_role("dialog").count() or self.page.get_by_role("menu").count():
+        row = self._row(candidate)
+        metadata = row.evaluate(
+            """el => ({
+              label: el.getAttribute('aria-label'),
+              titles: [...el.querySelectorAll('[title]')].map(n=>n.getAttribute('title')),
+              dates: [...el.querySelectorAll('time')].map(n=>({
+                datetime:n.getAttribute('datetime'),text:n.textContent
+              }))
+            })"""
+        )
+        return hashlib.sha256(json.dumps(
+            [self.active_folder, candidate.item_id, candidate.sender, candidate.subject, metadata],
+            sort_keys=True, ensure_ascii=False,
+        ).encode()).hexdigest()
+
+    def _open_source_menu(self, candidate: Candidate) -> Locator:
+        for attempt in range(2):
+            self.guard()
+            row = self._row(candidate)
+            if row.get_attribute("aria-selected") != "true":
+                raise OutlookError("La seleccion cambio al abrir el menu.")
+            if self.page.locator('[role="dialog"]').count():
+                raise OutlookError("Hay un dialogo previo al abrir el menu.")
+            try:
+                if attempt:
+                    row.click(button="right")
+                else:
+                    row.press("Shift+F10")
+                self.guard()
+                if self._row(candidate).get_attribute("aria-selected") != "true":
+                    raise OutlookError("La seleccion cambio al abrir el menu.")
+                view = self.page.get_by_role("menuitem", name="Ver", exact=True)
+                view.wait_for(state="visible")
+                if view.count() != 1:
+                    raise OutlookError("Menu Ver ambiguo.")
+                view.press("ArrowRight")
+                source = self.page.get_by_role(
+                    "menuitem", name="Ver origen del mensaje", exact=True,
+                )
+                source.wait_for(state="visible")
+                if source.count() != 1:
+                    raise OutlookError("Accion de origen ambigua.")
+                self.guard()
+                if self._row(candidate).get_attribute("aria-selected") != "true":
+                    raise OutlookError("La seleccion cambio al abrir el submenu.")
+                return source
+            except PlaywrightTimeoutError:
+                self.guard()
+                if attempt or self.page.locator(
+                    '[role="dialog"], [role="menu"]:visible',
+                ).count():
+                    raise
+                if self._row(candidate).get_attribute("aria-selected") != "true":
+                    raise OutlookError("La seleccion cambio; no se reabre el menu.") from None
+                logging.getLogger(__name__).warning(
+                    "El menu de origen se cerro; un unico reintento reabriendo el mismo aviso autorizado.",
+                )
+                self._select_message(candidate)
+        raise AssertionError("El menu debe abrirse o detenerse.")
+
+    def _close_message_view(self, candidate: Candidate) -> None:
+        self.guard()
+        row = self._row(candidate)
+        if row.get_attribute("aria-selected") != "true":
+            raise OutlookError("La seleccion cambio antes de cerrar la vista del mensaje.")
+        close_message = self.page.get_by_role("button", name="Cerrar", exact=True)
+        if close_message.count() == 0 and row.locator(SUBJECT).inner_text().strip():
+            return
+        if close_message.count() != 1 or self.page.locator('[role="dialog"]').count():
+            raise OutlookError("No se reconoce el cierre de la vista del mensaje.")
+        actions = self.page.get_by_role("button", name="More items", exact=True)
+        actions.wait_for(state="visible", timeout=30000)
+        if actions.count() != 1:
+            raise OutlookError("Barra de acciones del mensaje ambigua.")
+        self.guard()
+        if self._row(candidate).get_attribute("aria-selected") != "true":
+            raise OutlookError("La seleccion cambio al cargar la vista del mensaje.")
+        close_message.click()
+        close_message.wait_for(state="hidden")
+        self.page.wait_for_function(
+            """({selector,id,subject}) => {
+              const rows = [...document.querySelectorAll(selector)].filter(el=>el.id===id);
+              return rows.length===1 && rows[0].innerText.includes(subject);
+            }""", arg={"selector": ROWS, "id": candidate.item_id, "subject": candidate.subject},
+        )
+        self.guard()
+        if self._row(candidate).get_attribute("aria-selected") != "true":
+            raise OutlookError("La seleccion cambio al cerrar la vista del mensaje.")
+
+    def _select_message(self, candidate: Candidate) -> None:
+        self.guard()
+        if self.page.locator('[role="dialog"]').count() or self.page.get_by_role("menu").count():
             raise OutlookError("Hay un dialogo o menu previo; se detiene para evitar contenido obsoleto.")
         row = self._row(candidate)
-        row.locator(SUBJECT).click(button="right")
+        if self.page.get_by_role("button", name="Cerrar", exact=True).count():
+            self._close_message_view(candidate)
+            row = self._row(candidate)
+        row.locator(SUBJECT).click()
         self.page.wait_for_function(
             """({selector,id}) => {
               const rows = [...document.querySelectorAll(selector)]
@@ -449,18 +563,16 @@ class OutlookSourceReader:
         row = self._row(candidate)
         if row.get_attribute("aria-selected") != "true":
             raise OutlookError("La fila autorizada no quedo seleccionada.")
-        view = self.page.get_by_role("menuitem", name="Ver", exact=True)
-        view.wait_for(state="visible")
-        if view.count() != 1:
-            raise OutlookError("Menu Ver ambiguo.")
-        view.hover()
-        source = self.page.get_by_role("menuitem", name="Ver origen del mensaje", exact=True)
-        source.wait_for(state="visible")
-        if source.count() != 1:
-            raise OutlookError("Accion de origen ambigua.")
-        self.guard()
-        source.click()
-        dialog = self.page.get_by_role("dialog")
+        if row.locator(SUBJECT).inner_text().strip():
+            self.page.get_by_role("button", name="Cerrar", exact=True).wait_for(state="visible")
+        self._close_message_view(candidate)
+
+    def read(self, candidate: Candidate) -> Mail:
+        self._select_message(candidate)
+        source = self._open_source_menu(candidate)
+        source.press("Enter")
+        # Outlook can toggle aria-hidden while the source dialog remains on screen.
+        dialog = self.page.locator('[role="dialog"]')
         dialog.wait_for(state="visible")
         if dialog.count() != 1:
             raise OutlookError("Dialogo de origen ambiguo.")
@@ -484,10 +596,10 @@ class OutlookSourceReader:
         if raw is None:
             raise OutlookError("Origen vacio.")
         mail = parse_source(raw, candidate, self.origin)
-        close = dialog.get_by_role("button", name="Cerrar", exact=True)
+        close = dialog.get_by_role("button", name="Cerrar", exact=True, include_hidden=True)
         if close.count() != 1:
             raise OutlookError("Cierre del dialogo ambiguo.")
         close.click()
         dialog.wait_for(state="hidden")
-        self.guard()
+        self._close_message_view(candidate)
         return mail

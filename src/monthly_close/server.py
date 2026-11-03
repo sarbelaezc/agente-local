@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from importlib.resources import files
 from zoneinfo import ZoneInfoNotFoundError
 
@@ -96,6 +96,6 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                 return
             self.json_response(200, {"ok": True})
 
-    server = HTTPServer(("127.0.0.1", port), Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.timeout = 1
     return server

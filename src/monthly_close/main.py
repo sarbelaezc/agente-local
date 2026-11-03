@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import calendar
+import hashlib
 import json
 import os
 import sys
+import traceback
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -16,7 +18,8 @@ import httpx
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, sync_playwright
 
-from mail_invoices.local_model import LocalModelError, OllamaJsonModel, validate_local_url
+from mail_invoices.local_model import LocalModelError, validate_local_url
+from monthly_close.model import OllamaJsonModel
 from monthly_close.domain import Preferences, received_local
 from monthly_close.extraction import extract
 from monthly_close.outlook import Candidate, OutlookError, OutlookReader, validate_url
@@ -133,31 +136,53 @@ def scan(
                 "Otras carpetas y avisos borrados no estan cubiertos.",
             )
     model = None if read_only else OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
+    scope = hashlib.sha256(json.dumps(
+        [start.isoformat(), end.isoformat(), settings, preferences.to_dict()],
+        sort_keys=True, ensure_ascii=False,
+    ).encode()).hexdigest()
     received_ids: set[str] = set()
     with browser(data_dir, settings) as page:
         reader = OutlookSourceReader(page, settings["outlook_url"], preferences.approved_senders)
 
-        def visit(candidate: Candidate) -> None:
+        def visit(candidate: Candidate) -> bool | None:
             if candidate.sender not in preferences.approved_senders:
                 raise OutlookError("La carpeta devolvio un remitente no autorizado. Detenido.")
             if read_only:
                 return
-            mail = reader.read(candidate)
-            if mail.id in received_ids or store.seen(mail.id):
+            checkpoint = reader.checkpoint_key(candidate)
+            status = store.scan_status(scope, checkpoint)
+            if status == "complete":
                 return
+            if status == "pending":
+                print("Reintentando aviso pendiente desde el punto de reanudacion.", flush=True)
+            store.scan_checkpoint(scope, checkpoint, "pending")
+            mail = reader.read(candidate)
             local_day = received_local(mail.received, preferences.timezone).date()
-            if not start <= local_day < end:
+            if local_day < start:
+                return False
+            if local_day >= end:
+                store.scan_checkpoint(scope, checkpoint, "complete")
+                return
+            if mail.id in received_ids or store.seen(mail.id):
+                store.scan_checkpoint(scope, checkpoint, "complete")
                 return
             assert model is not None
             proposals = extract(mail, preferences, model)
             store.import_message(mail.id, proposals)
             received_ids.add(mail.id)
+            store.scan_checkpoint(scope, checkpoint, "complete")
 
         reports = reader.walk_folders(settings["max_messages"], visit)
+    if not read_only:
+        store.clear_scan_progress(scope)
     for report in reports:
+        cutoff = (
+            "; corte al encontrar un aviso anterior al inicio"
+            if report.get("stopped_before_start") else ""
+        )
         print(
             f"{report['folder']}: {report['rows']} filas verificadas; "
-            f"{report['authorized']} de remitentes autorizados."
+            f"{report['authorized']} de remitentes autorizados{cutoff}."
         )
     if read_only:
         print("Solo metadatos: sin abrir mensajes, Ollama, importaciones ni cambios de decisiones.")
@@ -288,13 +313,20 @@ def main() -> None:
     except KeyboardInterrupt:
         print("Detenido por el usuario.", file=sys.stderr)
         raise SystemExit(130)
-    except PlaywrightError:
+    except PlaywrightError as exc:
         # Playwright call logs can embed financial text from Outlook's aria-labels.
         print(
             "Detenido: Outlook no confirmo la interfaz esperada. "
             "No se continua ni se imprime contenido de los mensajes.",
             file=sys.stderr,
         )
+        frames = [
+            frame for frame in traceback.extract_tb(exc.__traceback__)
+            if Path(frame.filename).parent.name == "monthly_close"
+        ]
+        if frames:
+            frame = frames[-1]
+            print(f"Punto de parada: {Path(frame.filename).name}:{frame.lineno}.", file=sys.stderr)
         raise SystemExit(1) from None
     except (
         ValueError, OSError, KeyError, ZoneInfoNotFoundError,
@@ -302,6 +334,12 @@ def main() -> None:
     ) as exc:
         # No message bodies or model payloads in terminal/task diagnostics.
         print(f"Detenido: {exc}", file=sys.stderr)
+        frames = [
+            frame for frame in traceback.extract_tb(exc.__traceback__)
+            if Path(frame.filename).parent.name == "monthly_close"
+        ]
+        for frame in frames[-2:]:
+            print(f"Punto de parada: {Path(frame.filename).name}:{frame.lineno}.", file=sys.stderr)
         raise SystemExit(1) from exc
 
 

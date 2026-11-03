@@ -32,7 +32,7 @@ DATA = {
 
 
 def folder_html() -> str:
-    return """<!doctype html><html><body>
+    return """<!doctype html><html><meta charset="utf-8"><body>
 <input id="topSearchInput" role="combobox">
 <div data-app-section="NavigationPane">
  <div role="group">
@@ -107,6 +107,9 @@ window.openFolder = key => {
   pane.replaceChildren();
   const heading=document.createElement('span');heading.setAttribute('aria-label',names[key]);
   heading.textContent=names[key];pane.append(heading);
+  const sort=document.createElement('button');
+  sort.setAttribute('aria-label','Ordenado: Más recientes en la parte superior');
+  pane.append(sort);
   if (!data[key].length) {
     const empty=document.createElement('span');empty.className='ksePc';
     empty.textContent=['bandeja de entrada','correo no deseado','elementos eliminados'].includes(key)
@@ -204,6 +207,8 @@ def test_source_dialog_reading_works_during_virtual_traversal(page):
           const source=document.createElement('button');source.setAttribute('role','menuitem');
           source.textContent='Ver origen del mensaje';source.hidden=true;menu.append(source);
           view.onmouseover=()=>source.hidden=false;
+          view.tabIndex=0;
+          view.onkeydown=event=>{if(event.key==='ArrowRight')source.hidden=false;};
           source.onclick=()=>{
             menu.hidden=true;
             const dialog=document.createElement('div');dialog.setAttribute('role','dialog');
@@ -213,6 +218,25 @@ def test_source_dialog_reading_works_during_virtual_traversal(page):
             close.onclick=()=>dialog.remove();dialog.append(content,close);document.body.append(dialog);
           };
           document.body.append(menu);
+          const actions=document.createElement('button');
+          actions.setAttribute('aria-label','More items');document.body.append(actions);
+          document.addEventListener('keydown',event=>{
+            const row=event.target.closest('[data-convid]');
+            if(row && event.shiftKey && event.key==='F10'){
+              event.preventDefault();
+              menu.hidden=false;
+            }
+          });
+          document.addEventListener('click',event=>{
+            const row=event.target.closest('[data-convid]');
+            if(!row)return;
+            row.tabIndex=0;
+            for(const e of document.querySelectorAll('[data-convid]')){
+              e.setAttribute('aria-selected',String(e===row));
+            }
+            const close=document.createElement('button');close.textContent='Cerrar';
+            close.onclick=()=>close.remove();document.body.append(close);
+          });
           document.addEventListener('contextmenu',event=>{
             const row=event.target.closest('[data-convid]');
             if(!row)return;
@@ -246,6 +270,121 @@ def test_normal_scan_requires_its_own_gate_before_starting_browser(tmp_path, mon
             store, tmp_path, {"selectors_verified": True}, prefs,
             date(2026, 2, 1), date(2026, 3, 1),
         )
+
+
+def test_date_cutoff_stops_only_current_folder_and_requires_newest_first(page):
+    reader = OutlookSourceReader(page, URL, [SENDER])
+    visited = []
+
+    def visit(candidate):
+        visited.append(candidate.item_id)
+        return False
+
+    reports = reader.walk_folders(5, visit)
+    assert visited == ["in-0", "del-0"]
+    assert [report["rows"] for report in reports] == [1, 0, 1, 0]
+    assert reports[0]["stopped_before_start"] is True
+    def wrong_order(candidate):
+        page.get_by_role("button", name="Ordenado: Más recientes en la parte superior").evaluate(
+            "el => el.setAttribute('aria-label','Ordenado: Más antiguos en la parte superior')",
+        )
+        return False
+
+    with pytest.raises(OutlookError, match="orden de fecha descendente"):
+        reader.walk_folders(5, wrong_order)
+
+
+def test_date_cutoff_does_not_hide_unvisited_positions(page):
+    reader = OutlookSourceReader(page, URL, [SENDER])
+    page.evaluate(
+        """() => {
+          document.querySelector('[data-item-index="0"] span[title]').title = 'other@example.test';
+          const next = document.querySelector('[data-item-index="1"]');
+          next.setAttribute('data-item-index','2');
+          next.querySelector('span[title]').title = 'avisos@example.test';
+        }"""
+    )
+    with pytest.raises(OutlookError, match="posiciones sin verificar"):
+        reader.walk_folders(5, lambda candidate: False)
+
+
+@pytest.mark.parametrize("processed_boundary", [False, True])
+def test_scan_skips_newer_mail_and_stops_before_start_in_each_folder(
+    page, tmp_path, monkeypatch, processed_boundary,
+):
+    store = Store(tmp_path / "date-range.sqlite3")
+    prefs = Preferences(
+        "Prueba", "America/Bogota", "COP", ["Tarjeta A"], [], "Familiar",
+        True, True, [SENDER], CATEGORIES, True,
+    )
+    store.configure(prefs.to_dict())
+    if processed_boundary:
+        store.import_message("older", [])
+    page.evaluate(
+        """() => {
+          data['bandeja de entrada'] = ['newer','end','inside','start','older','never']
+            .map(id => ({id,sender:'avisos@example.test'}));
+          for (const folder of document.querySelectorAll('#mailbox [data-folder-name]')) {
+            const key = folder.getAttribute('data-folder-name');
+            folder.title = names[key] + ' : Elementos ' + data[key].length + ' ';
+          }
+          openFolder('bandeja de entrada');
+          const list = pane.querySelector('[role="listbox"]');
+          const template = list.firstElementChild.cloneNode(true);
+          list.replaceChildren();
+          data['bandeja de entrada'].forEach((item, index) => {
+            const wrapper = template.cloneNode(true);
+            wrapper.setAttribute('data-item-index', String(index));
+            const row = wrapper.querySelector('[data-convid]');
+            row.id = item.id; row.setAttribute('data-convid', item.id);
+            list.append(wrapper);
+          });
+        }"""
+    )
+    received = {
+        "newer": "2026-03-02T12:00:00Z", "end": "2026-03-01T05:00:00Z",
+        "inside": "2026-03-01T04:59:00Z", "start": "2026-02-01T05:00:00Z",
+        "older": "2026-02-01T04:59:00Z", "del-0": "2026-02-15T12:00:00Z",
+    }
+    reads = []
+    model_calls = []
+
+    @contextmanager
+    def browser(*args):
+        yield page
+
+    def read(reader, candidate):
+        reader.guard()
+        reads.append(candidate.item_id)
+        return Mail(candidate.item_id, SENDER, "Tienda", received[candidate.item_id], "Tienda COP 10,05")
+
+    class Model:
+        def __init__(self, *args):
+            pass
+
+        def complete_json(self, system, user):
+            model_calls.append(user)
+            return {"events": [{
+                "merchant": "Tienda", "account": "Tarjeta A", "amount_text": "COP 10,05",
+                "currency": "COP", "date_text": "", "category": "Compras",
+                "kind": "purchase", "savings": False,
+            }]}
+
+    monkeypatch.setattr(app, "browser", browser)
+    monkeypatch.setattr(app.OutlookSourceReader, "read", read)
+    monkeypatch.setattr(app, "OllamaJsonModel", Model)
+    app.scan(
+        store, tmp_path, {
+            "outlook_url": URL, "ollama_url": "http://127.0.0.1:11436",
+            "ollama_model": "local-test", "max_messages": 7, "folder_scan_verified": True,
+        }, prefs, date(2026, 2, 1), date(2026, 3, 1),
+    )
+    assert reads == ["newer", "end", "inside", "start", "older", "del-0"]
+    assert len(model_calls) == 3
+    assert len(store.state()["transactions"]) == 3
+    assert not store.seen("newer")
+    assert not store.seen("end")
+    assert store.seen("older") is processed_boundary
 
 
 def test_real_scan_covers_spam_deleted_filters_dates_and_preserves_choices(page, tmp_path, monkeypatch):

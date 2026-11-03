@@ -8,7 +8,7 @@ implementa.
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/run-invoice-batch.ps1` / `-Resume` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
-| Cierre mensual de gastos de Outlook con Ollama local | Piloto con Ollama y recorrido de Entrada, Spam, Eliminados y árbol Dinero verificados; importación masiva y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
+| Cierre mensual de gastos de Outlook con Ollama local | Importación de octubre verificada con corte por fechas; panel e inversiones disponibles; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
 
 ## Stack tecnológico
 
@@ -109,7 +109,8 @@ directamente desde la raíz del repositorio:
 
 Nueva función separada de facturas y Teams. No requiere Microsoft Graph,
 credenciales de API ni conector de Gmail. Playwright lee Outlook Web en un perfil
-exclusivo. Reutiliza, sin modificarlo, el cliente JSON local de Ollama existente.
+exclusivo. Usa un cliente local de Ollama con JSON Schema propio de este feature,
+sin modificar las integraciones de facturas ni Teams.
 No descarga adjuntos, envía correos, mueve mensajes ni modifica libros de facturas.
 Abrir un mensaje puede marcarlo como leído en Outlook.
 
@@ -141,6 +142,56 @@ propias o cuentas excluidas solo permiten Familiar o No cuenta.
 humana, incluso si se eligió considerar transferencias personales por defecto.
 Una clasificación de Ollama no equivale a aprobación. Revisa posibles avisos
 duplicados de la misma compra antes de aprobarlos.
+
+### Aportes a inversiones
+
+En Decisión, el botón **Inversión** registra un aporte a un fondo u otra inversión
+propia. Asigna la categoría **Inversiones** automáticamente: no necesitas añadirla
+a las categorías de consumo ni reimportar un movimiento pendiente existente.
+El aporte solo suma después de tu confirmación, en un total separado en Mes,
+Año, la tabla mensual del año y el resumen de consola. No aumenta gastos
+personales, familiares, calendario de gastos, dona, rankings ni acumulados de
+consumo. Este total mide aportes menos retiros confirmados, no saldo del fondo, rendimientos,
+valor de mercado ni patrimonio.
+
+Ollama puede proponer el tipo `investment`, siempre pendiente de decisión humana.
+Ese tipo permite Inversión, Retiro de inversión, Retiro en efectivo o No cuenta,
+siempre mediante decisión humana, y no permite clasificarlo como consumo.
+Para avisos antiguos propuestos como
+compra o transferencia, también puedes elegir Inversión manualmente. El historial
+conserva la decisión y permite corregirla; para volver a un gasto en un aviso
+no tipado como inversión, selecciona una categoría de consumo antes de decidir.
+Reimportar no sobrescribe la elección. Ingresos, préstamos, pagos de tarjeta y
+cuentas excluidas no pueden sumarse a inversiones propias. No se convierte
+automáticamente ninguna decisión existente ni se modifica el aporte pendiente
+del usuario como parte de esta actualización.
+
+### Decisiones manuales sobre retiros
+
+En Decisión y en el historial se distinguen los retiros así:
+
+- **Retiro de inversión** asigna la categoría **Retiros de inversión** y resta
+  su monto de los aportes netos a inversiones del mes y del año. Puede dar un
+  neto negativo si se retira dinero aportado antes del periodo. No calcula el
+  saldo del fondo, rendimientos ni patrimonio y no suma gastos.
+- **Retiro en efectivo** es una opción del desplegable **Categoría**, no un
+  botón de decisión. Selecciónala y confirma **Gasto personal** o **Familiar**.
+  Cuenta como gasto confirmado en Mes, Año, calendario, dona, acumulados y rankings.
+  Su desglose en Mes, Año y tabla anual ya está incluido en el gasto, no se
+  suma de nuevo. No resta inversiones.
+  No registres de nuevo las compras pagadas con ese efectivo si eso duplica
+  el mismo gasto.
+
+No requieren modificar la configuración de categorías ni reimportar. Hasta
+que el usuario pulse uno de los botones, el movimiento permanece pendiente sin
+sumar ni restar. Se guardan en SQLite y auditoría y no se sobrescriben al
+reimportar. El historial permite corregir la decisión; para volver a consumo,
+elige una categoría de gasto antes de pulsar Gasto personal o Familiar.
+Ingresos, préstamos, pagos de tarjeta y cuentas excluidas conservan sus
+restricciones anteriores: estas opciones no sirven para saltarlas. No se
+reclasifican automáticamente decisiones existentes. Las decisiones ya guardadas
+como Retiro en efectivo ahora se contabilizan como gasto personal, conservando
+su registro y auditoría; no hace falta reimportar.
 
 ### Configuración y primer uso en Windows
 
@@ -223,10 +274,18 @@ duplicados de la misma compra antes de aprobarlos.
    El límite predeterminado es **200 filas en total entre todas las carpetas del alcance**,
    incluidas las de remitentes no autorizados. Se permite completar exactamente
    ese total; si falta otra fila, se detiene con error, sin saltarse carpetas.
-   Reducir las fechas no reduce estas filas: revisa `max_messages` (máximo 10000)
-   tras comprobar el volumen. Solo se abre el origen de remitentes aprobados;
-   la fecha RFC de recepción se convierte a la zona local y luego se aplica el
-   rango. Las carpetas personalizadas fuera del árbol Dinero no se recorren.
+   Solo se abre el origen de remitentes aprobados. Su fecha RFC de recepción se
+   convierte a la zona local: los avisos desde `End` en adelante se omiten, los
+   de `Start` hasta antes de `End` se procesan y el primer aviso anterior a
+   `Start` termina **esa carpeta**, no todo el recorrido. Se continúa con la
+   siguiente carpeta, incluidas las subcarpetas de Dinero. El corte exige confirmar
+   en Outlook el orden «Más recientes en la parte superior» y que no haya huecos
+   en las filas previas; si no se confirma, se detiene con error. No se envían a
+   Ollama avisos fuera del rango. Por tanto, las fechas sí acotan el recorrido
+   histórico; los avisos más recientes y los remitentes no autorizados previos
+   siguen consumiendo el límite. `--read-only` mantiene el recorrido completo de
+   metadatos, porque no abre orígenes para conocer sus fechas.
+   Las carpetas personalizadas fuera del árbol Dinero no se recorren.
    Si falta Dinero, falla una expansión o cambia su árbol durante el recorrido,
    se detiene sin declarar cobertura completa ni omitir subcarpetas.
    Los mensajes ya importados no se duplican por `Message-ID`, incluso si aparecen
@@ -235,6 +294,43 @@ duplicados de la misma compra antes de aprobarlos.
    Para el mes vivo, incluye sus fechas explícitamente.
 
 ### Importación masiva desde una terminal de Windows
+
+**Última validación:** el recorrido de octubre (`2026-10-01` a `2026-11-01`,
+fin exclusivo) terminó con código 0 tras incorporar el corte por fecha.
+Se verificaron 15 carpetas y 1517 filas de metadatos; Bancolombia, Dian e
+Inversiones terminaron al encontrar un aviso anterior al inicio. No se recorrió
+innecesariamente el resto de su histórico. Las carpetas sin remitentes aprobados
+solo se revisaron por metadatos, sin abrir sus correos.
+Octubre quedó con 41 movimientos y 2 decisiones pendientes. Las 39 decisiones
+confirmadas conservaron exactamente sus identificadores, categorías y valores;
+SQLite pasó su comprobación de integridad y se limpiaron los puntos de reanudación.
+El recorrido está validado, pero octubre sigue marcado parcial hasta conciliar
+contra extractos: no se afirma cobertura de otras carpetas ni de avisos inexistentes.
+Pasaron las 423 pruebas del repositorio, incluidas fechas locales, fin exclusivo,
+corte por carpeta, rechazo de orden no verificado y preservación de decisiones.
+Los resultados fallidos descritos más abajo son intentos anteriores.
+
+Las ejecuciones interrumpidas guardan un punto de reanudación en la tabla local
+`scan_progress`: huellas SHA-256 de carpeta, fila y metadatos exactos, con estado
+pendiente o completado, sin cuerpos ni asuntos en texto claro. Al repetir el
+mismo rango y configuración, se verifica nuevamente todo el árbol y las filas
+hasta el corte por fecha de cada carpeta,
+pero no se vuelve a abrir el origen de avisos completados cuyos metadatos no
+cambiaron. El aviso que falló queda pendiente antes de abrirlo y se vuelve a
+intentar al encontrarlo. Si cambian sus metadatos o identificador, se lee de nuevo,
+nunca se salta por posición o por la fecha de una decisión. Cambiar configuración
+o rango inicia otro ámbito. Al terminar el recorrido se borra su progreso.
+No se garantiza reanudar exactamente en la misma fila si Outlook cambia sus
+identificadores. No se deduce una fecha del aviso cuando no se pudo abrir su
+origen. Las decisiones existentes siguen protegidas por `Message-ID`.
+Los fallos anteriores a esta implementación no tienen punto retroactivo.
+Validación real: el primer intento guardó progreso y la segunda ejecución
+identificó y reintentó el aviso pendiente. Quedaron 71 avisos completados en el
+punto de reanudación y uno pendiente; octubre llegó a 39 movimientos, con dos
+decisiones pendientes. El reintento volvió a fallar en la interfaz de Outlook:
+el mecanismo de reanudación funciona, pero el recorrido continúa parcial.
+Pasaron las 412 pruebas del repositorio. La reanudación no corrige por sí sola
+un fallo persistente de apertura del menú.
 
 Desde la raíz del proyecto, en **PowerShell**:
 
@@ -262,26 +358,145 @@ powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File scripts/import-mon
 
 El fin es exclusivo. Sin fechas importa desde enero del año local hasta el mes
 anterior. Usa `-End 2026-11-03` para incluir el 2 de noviembre.
+Para importar solo desde octubre hasta esa fecha:
+
+```powershell
+.\scripts\import-monthly-close.ps1 -Start 2026-10-01 -End 2026-11-03
+```
+
+Cuando el correo contiene montos con símbolo monetario o el código configurado,
+el esquema de Ollama limita `amount_text` a esos textos literales. Esto no aprueba
+la interpretación: se mantiene la verificación posterior de evidencia y la
+decisión humana. Si falla, el diagnóstico indica el campo, nunca su contenido.
+Para el comercio se admite recuperar un único fragmento original que difiera
+solo en espacios, tabulaciones o saltos de línea: se guarda el texto literal del
+correo, no la versión reformateada por Ollama. No se corrigen letras, mayúsculas,
+acentos, montos ni coincidencias ambiguas; esos casos siguen deteniendo la
+importación. Esta recuperación evita rechazar nombres partidos por el formato
+MIME, pero no garantiza que cualquier correo pueda extraerse correctamente.
+Si aún falla la evidencia literal de comercio o monto, se registra una advertencia
+sin contenido financiero y se solicita **una sola corrección local** a Ollama con
+el campo inválido y la propuesta previa. Se vuelve a validar toda la respuesta;
+la corrección no puede eliminar movimientos ni cambiar otros campos. Nada se
+guarda hasta superar la validación. Si vuelve a fallar, se detiene y el correo
+queda sin marcar como procesado. No hay reintentos ilimitados ni omisión automática.
+El contexto de Ollama distingue los avisos «Pagaste [monto] en la tarjeta de
+crédito [tarjeta] desde la cuenta [cuenta]» como abonos a la deuda, no compras:
+deben producir `events: []` para evitar contar dos veces el gasto. La regla no
+depende del monto, marca ni terminación de tarjeta. Un aviso «Compraste … con tu
+tarjeta» sí se extrae; mencionar una tarjeta no basta para excluirlo. Los casos
+ambiguos siguen como `unknown` para revisión. Los ejemplos del código son
+ficticios, sin datos bancarios del usuario. Esto se aplica a nuevas extracciones:
+no cambia movimientos ya importados ni decisiones previas; en esos casos revisa
+el historial y elige **No cuenta** para los abonos ya identificados.
+Los ejemplos se envían como `approved_notice_examples`, separados de
+`untrusted_email`: son contexto aprobado, no evidencia ni movimientos a importar.
+Con Ollama local se verificaron dos abonos ficticios (con y sin tilde en
+«crédito») y una compra de control: los abonos devolvieron cero eventos y la
+compra produjo una propuesta pendiente. No se reprodujeron ni modificaron
+automáticamente los movimientos bancarios ya importados del usuario.
+La recuperación de espacios y la corrección dirigida se verificaron con correos
+reales que bloqueaban octubre. En la última validación se solicitó una corrección,
+se superó la validación y el recorrido continuó: se procesaron 14 correos adicionales
+y octubre pasó de 15 a 24 movimientos, con 2 decisiones pendientes al finalizar.
+Las 379 pruebas del repositorio pasaron. El recorrido completo no terminó:
+Outlook se detuvo al abrir el menú Ver (`source_reader.py:453`).
+Octubre y noviembre continúan parciales; no se declara terminada la importación.
+El diagnóstico posterior comprobó que Outlook puede mantener el origen visible
+con `aria-hidden="true"`. La lectura y la espera de cierre ahora usan el diálogo
+DOM único y su visibilidad física, sin perder las validaciones de selección,
+remitente, asunto y encabezados RFC. Un diálogo previo, incluso oculto a
+accesibilidad, bloquea una nueva apertura. El submenú de origen se activa con
+Enter tras abrirlo con ArrowRight, evitando mover el puntero para activarlo.
+Se añadieron regresiones del diálogo oculto a accesibilidad, cierre asíncrono
+y pérdida del submenú por movimiento del puntero. Una prueba real sin Ollama
+leyó 50 avisos consecutivos, pero las importaciones completas siguen deteniéndose
+por desaparición del menú y retorno del foco a la fila. Con autorización del
+usuario se habilitó seleccionar primero el asunto mediante clic normal, esperar
+la selección y revalidar la identidad antes de abrir el menú contextual.
+Esto puede marcar como leídos los avisos autorizados que se abran; el filtro de
+fechas ocurre después de leer el origen, por lo que también puede afectar avisos
+autorizados fuera del rango. No envía, mueve ni borra correos. Se mantienen los
+controles de remitente, selección y carpeta; no hay reintentos que oculten fallos.
+Con la vista de lectura completa, Outlook conserva el asunto en `textContent`
+aunque `innerText` quede vacío. Se verifica el asunto desde el DOM y se cierra
+esa vista solo si existe un único botón Cerrar y ningún diálogo; se espera la
+reaparición del asunto en la lista y se revalida la selección. El menú de la fila
+seleccionada se abre con Shift+F10 y el origen con ArrowRight y Enter.
+Si el menú desaparece antes de activar el origen, se permite una sola reapertura
+tras un timeout, con advertencia sin datos financieros. Solo se reintenta si no
+queda ningún menú visible ni diálogo, y se revalidan buzón, carpeta, remitente,
+asunto e identidad de la fila seleccionada. Se repite la selección del mismo aviso: si está abierta su vista completa,
+se cierra con su único botón Cerrar, se verifica que reaparezca en la lista,
+se vuelve a abrir y se restablece la lista antes de reabrir el menú.
+Ese segundo intento usa clic derecho sobre la misma fila verificada, en lugar de
+repetir Shift+F10.
+No se repite la extracción; no se reintentan la activación del origen, su lectura ni errores de
+autenticación o ambigüedad. Si el segundo intento falla, se detiene.
+La comprobación de menú abierto usa contenedores `role="menu"`, no cualquier
+`role="menuitem"` de la página: Outlook también usa este último para el calendario
+y las barras de herramientas. Esos controles no deben bloquear la recuperación.
+La vista completa se reconoce por su botón Cerrar, no solo por `innerText` del
+asunto: la lista puede seguir renderizada detrás de ella. Se espera el cierre
+físico y se restaura la lista también después de cerrar el origen, porque la
+vista de lectura puede aparecer con retraso durante la apertura del menú.
+Tras seleccionar el aviso se espera primero su botón Cerrar y después la barra
+de acciones cargada (`More items` en la interfaz verificada). No se da por abierta
+la vista solo porque la fila ya esté seleccionada. Un cambio de esa interfaz
+detiene el recorrido en vez de continuar con el menú sobre contenido oculto.
+La recuperación de cerrar y reabrir el aviso está cubierta con una prueba de
+vista completa que aparece al cerrarse el menú. Pasaron 413 pruebas del
+repositorio. El intento real posterior volvió a detenerse esperando Ver, sin
+activar la recuperación porque no cumplió sus condiciones de seguridad:
+no se considera solucionado el bloqueo de Outlook ni completado octubre.
+La validación real de octubre exclusivamente (`2026-10-01` a `2026-11-01`,
+fin exclusivo) activó esa única reapertura, pero el segundo intento volvió a
+fallar esperando Ver. El proceso terminó con código 1; octubre permanece
+parcial, con 37 movimientos y ninguna decisión pendiente al comprobarlo.
+Pasaron las 410 pruebas del repositorio y la base de datos conservó su integridad.
+No se creó commit ni se hizo push: la condición de completar el recorrido real
+todavía no se cumple.
+El intento real avanzó y alcanzó una nueva corrección de evidencia, pero volvió
+a detenerse esperando el menú Ver. El fallo intermitente no está resuelto ni
+la importación completa validada. Los errores de validación muestran solo
+archivo y línea de los dos últimos puntos internos, sin contenido financiero.
+
+Las instrucciones del proyecto incluyen ahora una regla explícita de no asumir
+hechos ni requisitos, verificar con evidencia y preguntar al usuario antes de
+actuar cuando quede una duda o se requiera una decisión.
 El script usa la configuración privada predeterminada de MonthlyCloseAgent,
 su entorno `.venv` de Windows y el perfil exclusivo de Edge. Comprueba la
 configuración y el modelo instalado antes de importar. Si Ollama no responde,
 inicia la instalación local del usuario con el puerto configurado y el directorio
 de modelos exclusivo; no descarga modelos. Al terminar o fallar cierra únicamente
 la instancia de Ollama que él inició. Una instancia preexistente queda abierta.
-No inicia el panel ni instala tareas. No interactúes con el perfil de Edge durante
-la importación. Los movimientos nuevos requieren revisión humana.
+Al terminar el intento de importación, incluso si el escaneo devuelve un error,
+inicia el panel en otra terminal y abre `http://127.0.0.1:8766` en el navegador
+predeterminado. Si ya está activo, lo reutiliza. Espera su respuesta antes de
+abrir la página y rechaza una página distinta en ese puerto. Mantén la terminal
+del panel abierta mientras revisas. Conserva el código de error de la importación;
+abrir el panel no significa que el recorrido haya terminado correctamente.
+No instala tareas. No interactúes con el perfil de Edge durante la importación.
+Los movimientos nuevos requieren revisión humana.
 
-Para comprobar solo el recorrido, añade `-ReadOnly`; no importa ni usa el
+Para comprobar solo el recorrido, añade `-ReadOnly`; no abre el panel, no importa ni usa el
 modelo para inferencia, aunque este lanzador también verifica su disponibilidad.
 Si se interrumpe, puedes repetir el mismo comando sin sobrescribir decisiones.
 Mantén la terminal abierta hasta que termine. Las primeras importaciones masivas
 con Ollama siguen pendientes de validación real.
 
 El script restaura las variables de entorno que modificó al terminar.
+La comprobación del panel usa HTTP local sin proxy. El servidor atiende
+conexiones concurrentes para que una conexión anticipada e inactiva del navegador
+no bloquee la página ni sus comprobaciones de disponibilidad.
 Se validó el arranque y cierre reales de Ollama con un rango deliberadamente
 inválido, sin abrir correos. Las pruebas con un servicio simulado cubren la
 reutilización de instancias, argumentos, código de salida y modelo ausente.
 La importación masiva con correos reales no forma parte de estas pruebas.
+La apertura automática del panel cuenta con siete casos verificados: importación
+exitosa o fallida, panel existente o iniciado por el script, puerto ocupado por
+otra página, modelo ausente y modo de solo lectura. Estas pruebas simulan la
+apertura del navegador; no vuelven a ejecutar la importación real.
 
 ### Cobertura, cierre y tarea persistente
 
@@ -559,6 +774,35 @@ no se completó el recorrido con inferencia ni se certificaron sus totales.
 Ollama y el navegador de la prueba quedaron cerrados. Es necesario validar la
 salida del modelo para ese aviso antes de repetir una importación completa;
 no se habilita saltar avisos inválidos para aparentar éxito.
+
+**Preparación de uso y repetición desde el lanzador:** se ejecutó
+`scripts\import-monthly-close.ps1` contra el buzón real. Se verificaron el
+arranque y cierre de su instancia de Ollama, la apertura real del panel y la
+reutilización de un panel existente. El panel queda disponible para revisión
+manual aunque el escaneo termine con error; no equivale a importación completa.
+
+La generación del cierre mensual usa ahora un cliente propio con JSON Schema:
+exige campos tipados (incluido `savings` booleano), tipos de movimiento válidos,
+categorías y cuentas configuradas, moneda configurada y fechas ISO o DD/MM/YYYY
+que estén literalmente presentes en el texto (o fecha vacía para la regla de
+fecha de recepción ya existente). No modifica el cliente de facturas ni el de
+Teams. Esto restringe la forma de la propuesta; **no garantiza que sea cierta**.
+Se siguen validando comercio, importe y fecha contra el aviso, y ninguna propuesta
+de gasto se aprueba automáticamente.
+
+La prueba real avanzó y guardó nuevas propuestas válidas, pero volvió a detenerse
+ante un importe o comercio sin evidencia literal. También se observó un fallo
+intermitente al recuperar el texto del diálogo de origen de Outlook.
+Se usa navegación de teclado para desplegar el submenú y los errores de interfaz
+indican solo archivo y línea del punto de parada, sin registros de localizadores
+que puedan contener información financiera. No se omiten avisos fallidos ni se
+marcan los meses como completos. **El lanzador y el panel son utilizables, pero
+la importación histórica masiva todavía no está validada de principio a fin.**
+Tras estas correcciones pasaron **152 pruebas** de cierre mensual. Se comprobó
+el panel real con una conexión inactiva adicional, su API y la integridad SQLite.
+La base contiene 13 avisos procesados y seis movimientos; las decisiones siguen
+bajo control humano. Los diez meses de enero a octubre continúan parciales.
+Ollama temporal quedó cerrado y el panel quedó abierto para revisión.
 
 ## Skill de revisión: Ponytail
 

@@ -13,7 +13,7 @@ CATEGORIES = [
 ]
 KINDS = {
     "purchase", "pse", "transfer", "own_transfer", "loan", "income",
-    "card_payment", "rejected", "promotion", "verification", "unknown",
+    "card_payment", "rejected", "promotion", "verification", "unknown", "investment",
 }
 NON_EXPENSES = {"loan", "income", "card_payment", "rejected", "promotion", "verification"}
 EMAIL = re.compile(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+")
@@ -136,6 +136,8 @@ def decision_reason(kind: str, account: str, savings: bool, preferences: Prefere
         return "No es gasto: " + kind
     if account in preferences.excluded_accounts or kind == "own_transfer":
         return "Revisar como " + preferences.transfer_label
+    if kind == "investment":
+        return "Confirmar aporte de inversion; no se suma al gasto de consumo."
     if savings and preferences.ask_savings:
         return "Confirmar si se paga con ahorros."
     if kind == "transfer" and preferences.ask_people:

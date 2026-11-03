@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     decision TEXT, reason TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS processed (message_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS scan_progress (
+    scope TEXT NOT NULL, item TEXT NOT NULL, status TEXT NOT NULL,
+    PRIMARY KEY (scope, item)
+);
 CREATE TABLE IF NOT EXISTS coverage (
     month TEXT PRIMARY KEY, status TEXT NOT NULL, note TEXT NOT NULL
 );
@@ -82,6 +86,27 @@ class Store:
                 "SELECT 1 FROM processed WHERE message_id=?", (message_id,),
             ).fetchone() is not None
 
+    def scan_status(self, scope: str, item: str) -> str | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT status FROM scan_progress WHERE scope=? AND item=?", (scope, item),
+            ).fetchone()
+        return row["status"] if row else None
+
+    def scan_checkpoint(self, scope: str, item: str, status: str) -> None:
+        if status not in {"pending", "complete"}:
+            raise ValueError("Estado de reanudacion invalido.")
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO scan_progress VALUES (?,?,?)
+                ON CONFLICT(scope,item) DO UPDATE SET status=excluded.status""",
+                (scope, item, status),
+            )
+
+    def clear_scan_progress(self, scope: str) -> None:
+        with self.connect() as db:
+            db.execute("DELETE FROM scan_progress WHERE scope=?", (scope,))
+
     def import_message(self, message_id: str, events: list[dict]) -> None:
         with self.connect() as db:
             if db.execute("SELECT 1 FROM processed WHERE message_id=?", (message_id,)).fetchone():
@@ -101,7 +126,9 @@ class Store:
             self._audit(db, "import", message_id, str(len(events)))
 
     def decide(self, event_id: str, decision: str, category: str | None = None) -> None:
-        if decision not in {"personal", "family", "exclude"}:
+        if decision not in {
+            "personal", "family", "exclude", "investment", "investment_withdrawal", "cash_withdrawal",
+        }:
             raise ValueError("Decision no reconocida.")
         with self.connect() as db:
             row = db.execute("SELECT * FROM transactions WHERE id=?", (event_id,)).fetchone()
@@ -111,15 +138,43 @@ class Store:
                 raise ValueError("Ingresos, prestamos y pagos de tarjeta no cuentan como gasto.")
             settings = db.execute("SELECT value FROM settings WHERE id=1").fetchone()
             preferences = Preferences.parse(json.loads(settings["value"])) if settings else None
-            if decision == "personal" and (
+            if row["kind"] == "investment" and decision not in {
+                "investment", "investment_withdrawal", "cash_withdrawal", "exclude",
+            }:
+                raise ValueError("Un aporte de inversion no cuenta como gasto personal ni familiar.")
+            special_categories = {
+                "investment": "Inversiones",
+                "investment_withdrawal": "Retiros de inversión",
+                "cash_withdrawal": "Retiro en efectivo",
+            }
+            if decision in special_categories:
+                if preferences and row["account"] in preferences.excluded_accounts:
+                    raise ValueError("Una cuenta excluida no se suma a inversiones propias.")
+                category = special_categories[decision]
+            if decision in {"personal", "cash_withdrawal"} and (
                 row["kind"] == "own_transfer"
                 or (preferences and row["account"] in preferences.excluded_accounts)
             ):
                 raise ValueError("Transferencias propias o a cuentas excluidas: Familiar o No cuenta.")
             if category is not None and (
-                not preferences or category not in preferences.categories
+                not preferences or (
+                    category not in preferences.categories
+                    and not (
+                        decision in {"personal", "family", "exclude"}
+                        and category == "Retiro en efectivo"
+                    )
+                    and not (
+                        decision in {*special_categories, "exclude"}
+                        and category in special_categories.values()
+                    )
+                )
             ):
                 raise ValueError("Categoria no autorizada.")
+            if (
+                decision in {"personal", "family"}
+                and (category or row["category"]) in {"Inversiones", "Retiros de inversión"}
+            ):
+                raise ValueError("Selecciona una categoria de gasto o la decision Inversion.")
             db.execute(
                 "UPDATE transactions SET decision=?,category=? WHERE id=?",
                 (decision, category or row["category"], event_id),
@@ -174,11 +229,27 @@ class Store:
         parts = []
         for currency in currencies:
             selected = [row for row in rows if row["currency"] == currency]
-            personal = sum(row["amount_minor"] for row in selected if row["decision"] == "personal")
+            personal = sum(
+                row["amount_minor"] for row in selected
+                if row["decision"] in {"personal", "cash_withdrawal"}
+            )
             family = sum(row["amount_minor"] for row in selected if row["decision"] == "family")
+            investment = sum(row["amount_minor"] for row in selected if row["decision"] == "investment")
+            withdrawals = sum(
+                row["amount_minor"] for row in selected
+                if row["decision"] == "investment_withdrawal"
+            )
+            cash = sum(
+                row["amount_minor"] for row in selected
+                if row["decision"] in {"personal", "family", "cash_withdrawal"}
+                and row["category"] == "Retiro en efectivo"
+            )
             parts.append(
                 f"{currency}: personal {Decimal(personal) / 100:.2f}; "
-                f"familiar {Decimal(family) / 100:.2f}"
+                f"familiar {Decimal(family) / 100:.2f}; "
+                f"inversiones {Decimal(investment - withdrawals) / 100:.2f} (fuera de gastos); "
+                f"retiros de inversion {Decimal(withdrawals) / 100:.2f}; "
+                f"retiro en efectivo {Decimal(cash) / 100:.2f} (incluido en gastos)"
             )
         pending = sum(row["decision"] is None for row in rows)
         return (
