@@ -14,7 +14,7 @@ implementa.
 
 - **Python 3.12 o posterior**; empaquetado con `setuptools` y dependencias declaradas en `pyproject.toml`.
 - **Playwright para Python** automatiza los navegadores. Facturas usa Opera; Teams usa un perfil separado de Microsoft Edge y permanece pausado.
-- **Dos instancias locales de Ollama**, una exclusiva por feature; `httpx` hace las llamadas y `PyYAML` gestiona la configuración. Teams usa `127.0.0.1:11435`; facturas usa `127.0.0.1:11434`.
+- **Una instancia local de Ollama por feature**; `httpx` hace las llamadas y `PyYAML` gestiona la configuración existente. Teams usa `127.0.0.1:11435`; facturas usa `127.0.0.1:11434`; cierre mensual usa `127.0.0.1:11436` y configuración JSON independiente.
 - **Facturas:** `openpyxl` para Excel, `defusedxml` para XML, `pypdf` para PDF con texto, y `pypdfium2` más `Pillow` para renderizar PDF escaneados.
 - **Tkinter y SQLite** de la biblioteca estándar para interfaces y persistencia local; **pytest** para pruebas.
 - **Tesseract OCR** es una instalación externa opcional, necesaria solo para PDF escaneados. Opera, Edge y Ollama también se instalan aparte cuando se usa la función correspondiente.
@@ -245,7 +245,8 @@ sin continuar. No instala servicios ni tareas sin ejecutar este script.
 Cada ejecución carga desde disco las respuestas, reglas, categorías y remitentes.
 No depende de memoria de chat ni de enlaces publicados. SQLite conserva el
 histórico y las decisiones; el panel refleja el mes nuevo sin republicación.
-El resumen de consola se consulta también con:
+El resumen queda en `last-close.txt` dentro del directorio privado de datos.
+También se consulta con:
 
 ```powershell
 .\scripts\run-monthly-close.ps1 -Command summary -Month 2026-10
@@ -285,6 +286,9 @@ Pruebas reproducibles sin credenciales ni correo personal:
 
 Se validan reglas, importes, zona horaria, decisiones persistentes, exclusión de
 remitentes no autorizados, protección del panel y DOM sintético con Playwright.
+También se prueban el formulario inicial, los cambios de configuración, los
+totales con centavos, las decisiones desde el navegador y las etiquetas de los
+gráficos. Se revisaron capturas a 1440 y 390 píxeles, en modo claro y oscuro.
 Las pruebas gráficas usan Chromium instalado por `bootstrap.ps1`.
 **Pendiente de validar con el usuario:** selectores de su Outlook, cobertura real
 de Spam/Eliminados, resultados del modelo local y ejecución de la tarea instalada.

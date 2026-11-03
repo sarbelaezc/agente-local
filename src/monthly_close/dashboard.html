@@ -1,0 +1,1220 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <title>Cierre mensual · Panel local</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f5f8;
+      --surface: #fff;
+      --surface-2: #f7f8fb;
+      --ink: #17212f;
+      --muted: #5e6b7b;
+      --line: #dce2e9;
+      --accent: #245cdb;
+      --accent-soft: #e8efff;
+      --green: #157347;
+      --green-soft: #e8f5ed;
+      --orange: #a64b00;
+      --orange-soft: #fff1e5;
+      --red: #b42318;
+      --red-soft: #fff0ef;
+      --shadow: 0 10px 28px rgb(20 32 52 / 7%);
+      --radius: 16px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #10151d;
+      --surface: #19212c;
+      --surface-2: #202b38;
+      --ink: #eef3f8;
+      --muted: #aab6c4;
+      --line: #354252;
+      --accent: #91b4ff;
+      --accent-soft: #25395e;
+      --green: #83d2a4;
+      --green-soft: #1d392b;
+      --orange: #ffba7a;
+      --orange-soft: #422b19;
+      --red: #ff9a91;
+      --red-soft: #442322;
+      --shadow: 0 10px 28px rgb(0 0 0 / 22%);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: var(--bg); color: var(--ink); }
+    button, input, select, textarea { font: inherit; }
+    button, select, input, textarea { color: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+    textarea:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    .shell { max-width: 1440px; margin: 0 auto; padding: 24px clamp(16px, 3vw, 42px) 48px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: var(--accent); color: #fff; font-weight: 800; }
+    h1 { margin: 0; font-size: clamp(1.15rem, 2.5vw, 1.55rem); letter-spacing: -.03em; }
+    .eyebrow { margin: 3px 0 0; color: var(--muted); font-size: .88rem; }
+    .top-actions, .toolbar, .inline-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+    .button, .select-button {
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+      min-height: 42px; padding: 9px 13px; border: 1px solid var(--line); border-radius: 11px;
+      background: var(--surface); color: var(--ink); font-weight: 650;
+    }
+    .button:hover { border-color: var(--accent); }
+    .button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+    .button.primary:hover { filter: brightness(.96); }
+    .button.small { min-height: 36px; padding: 7px 10px; font-size: .9rem; }
+    .button.danger { color: var(--red); }
+    .button[disabled] { cursor: not-allowed; opacity: .58; }
+    .alert { padding: 13px 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .alert.warning { border-color: #e7bd72; background: var(--orange-soft); color: var(--ink); }
+    .alert.error { border-color: var(--red); background: var(--red-soft); color: var(--red); }
+    .alert.success { border-color: var(--green); background: var(--green-soft); color: var(--ink); }
+    [hidden] { display: none !important; }
+    .intro { max-width: 780px; margin: 12px 0 24px; color: var(--muted); line-height: 1.55; }
+    .panel, .card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+    .panel { padding: clamp(17px, 2.5vw, 26px); }
+    .card { padding: 18px; min-width: 0; }
+    .card h3, .panel h2, .section-heading h2 { margin: 0; letter-spacing: -.02em; }
+    .card h3 { font-size: 1rem; }
+    .section-heading { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin: 25px 0 14px; }
+    .section-heading p { margin: 5px 0 0; color: var(--muted); }
+    .muted, .hint { color: var(--muted); }
+    .hint { font-size: .88rem; line-height: 1.5; }
+    .config-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 20px; }
+    .field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+    .field > label, .field-label { font-weight: 650; font-size: .93rem; }
+    .field input, .field select, .field textarea, .control {
+      width: 100%; min-height: 43px; padding: 10px 11px; border: 1px solid var(--line);
+      border-radius: 10px; background: var(--surface); color: var(--ink);
+    }
+    .field textarea { min-height: 92px; resize: vertical; }
+    .field.full, .form-footer, .checkbox-field { grid-column: 1 / -1; }
+    .checkbox-field { display: flex; align-items: flex-start; gap: 10px; line-height: 1.45; }
+    .checkbox-field input { width: 18px; height: 18px; flex: 0 0 auto; margin: 2px 0 0; }
+    .form-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin: 22px 0 18px; }
+    .tab {
+      position: relative; border: 0; border-radius: 10px 10px 0 0; padding: 12px 18px;
+      background: transparent; color: var(--muted); font-weight: 700;
+    }
+    .tab[aria-selected="true"] { color: var(--accent); background: var(--accent-soft); }
+    .tab[aria-selected="true"]::after { position: absolute; right: 12px; bottom: -1px; left: 12px; height: 3px; content: ""; background: var(--accent); border-radius: 4px; }
+    .toolbar { justify-content: space-between; margin: 16px 0; }
+    .toolbar-group { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .control-label { color: var(--muted); font-size: .86rem; font-weight: 650; }
+    .select-button { padding: 7px 11px; }
+    .select-button select { min-width: 112px; border: 0; background: transparent; color: inherit; font-weight: 700; }
+    .month-chips { display: flex; gap: 8px; overflow-x: auto; padding: 3px 1px 9px; scrollbar-width: thin; }
+    .chip { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; background: var(--surface); color: var(--muted); font-weight: 650; }
+    .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; margin: 13px 0; }
+    .metric { padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+    .metric .label { display: block; color: var(--muted); font-size: .86rem; font-weight: 650; }
+    .metric strong { display: block; margin-top: 7px; font-size: clamp(1.1rem, 2vw, 1.55rem); overflow-wrap: anywhere; }
+    .metric small { display: block; margin-top: 5px; color: var(--muted); }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+    .card-header p { margin: 5px 0 0; color: var(--muted); font-size: .86rem; }
+    .calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+    .weekday, .day-cell { text-align: center; }
+    .weekday { padding: 6px 1px; color: var(--muted); font-size: .75rem; font-weight: 700; }
+    .day-cell { min-height: 66px; padding: 6px 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); overflow: hidden; }
+    .day-cell.empty { border-color: transparent; background: transparent; }
+    .day-cell.today { border-color: var(--accent); }
+    .day-number { display: block; font-size: .8rem; font-weight: 700; }
+    .day-amount { display: block; margin-top: 7px; color: var(--green); font-size: .68rem; font-weight: 700; overflow-wrap: anywhere; }
+    .legend, .rank-list, .account-list { display: flex; flex-direction: column; gap: 10px; }
+    .legend-row, .rank-row, .account-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .legend-label { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+    .swatch { width: 11px; height: 11px; flex: 0 0 auto; border-radius: 3px; background: var(--accent); }
+    .chart-wrap { width: 100%; overflow-x: auto; }
+    svg.chart { display: block; width: 100%; min-width: 300px; height: auto; overflow: visible; }
+    .axis-label { fill: var(--ink); font-size: 11px; font-weight: 600; }
+    .chart-grid { stroke: var(--line); stroke-dasharray: 4 5; }
+    .bar-personal { fill: #4779e6; }
+    .bar-family { fill: #e7a443; }
+    :root[data-theme="dark"] .bar-personal { fill: #91b4ff; }
+    :root[data-theme="dark"] .bar-family { fill: #ffba7a; }
+    .table-wrap { width: 100%; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .91rem; }
+    th, td { padding: 11px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+    th { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+    td.numeric, th.numeric { text-align: right; white-space: nowrap; }
+    .status-pill { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: .8rem; font-weight: 650; }
+    .status-pill.reviewed { background: var(--green-soft); color: var(--green); }
+    .status-pill.partial { background: var(--orange-soft); color: var(--orange); }
+    details.category-detail, details.history-detail { margin-top: 9px; border: 1px solid var(--line); border-radius: 11px; padding: 11px 13px; background: var(--surface-2); }
+    details summary { cursor: pointer; font-weight: 650; }
+    .detail-rows { margin-top: 10px; display: grid; gap: 8px; }
+    .detail-row { display: flex; justify-content: space-between; gap: 12px; font-size: .88rem; }
+    .decision-list { display: grid; gap: 12px; }
+    .decision-card { padding: 17px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+    .decision-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 7px 16px; color: var(--muted); font-size: .88rem; }
+    .decision-card h3 { margin: 10px 0 4px; }
+    .decision-card .reason { margin: 6px 0 14px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .decision-category { max-width: 380px; margin: 12px 0; }
+    .decision-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .decision-actions .button { min-width: 112px; }
+    .empty-state { padding: 24px; border: 1px dashed var(--line); border-radius: 13px; color: var(--muted); text-align: center; }
+    .coverage-form { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(0, 2fr) auto; align-items: end; gap: 10px; }
+    .notice-line { display: flex; align-items: flex-start; gap: 9px; color: var(--muted); font-size: .88rem; line-height: 1.45; }
+    .footer-note { margin-top: 24px; color: var(--muted); font-size: .84rem; line-height: 1.5; }
+    @media (max-width: 850px) {
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 600px) {
+      .shell { padding: 15px 13px 34px; }
+      .topbar { align-items: flex-start; }
+      .top-actions { justify-content: flex-end; }
+      .top-actions .button { min-height: 39px; padding: 7px 9px; font-size: .86rem; }
+      .brand-mark { width: 37px; height: 37px; }
+      .eyebrow { font-size: .78rem; }
+      .config-form, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .metrics { gap: 8px; }
+      .metric { padding: 12px; }
+      .metric .label { font-size: .77rem; }
+      .metric strong { font-size: 1.07rem; }
+      .tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; }
+      .tab { padding: 11px 5px; font-size: .9rem; }
+      .toolbar { align-items: flex-start; }
+      .toolbar-group { width: 100%; }
+      .month-chips { margin-right: -13px; padding-right: 13px; }
+      .day-cell { min-height: 54px; padding: 5px 1px; }
+      .day-amount { margin-top: 5px; font-size: .6rem; }
+      .coverage-form { grid-template-columns: 1fr; }
+      .coverage-form .button { width: 100%; }
+      .card, .panel { padding: 15px; }
+      th, td { padding: 9px 7px; }
+      .decision-actions .button { flex: 1 1 30%; min-width: 0; padding-inline: 8px; }
+    }
+    @media (max-width: 390px) {
+      .topbar { gap: 8px; }
+      .top-actions { gap: 5px; }
+      .top-actions .button { font-size: .79rem; }
+      .top-actions .refresh-label { display: none; }
+      .metric { padding: 10px; }
+      .day-cell { min-height: 48px; }
+      .day-amount { font-size: .56rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">C</div>
+        <div>
+          <h1>Cierre mensual</h1>
+          <p class="eyebrow">Panel financiero local · decisiones siempre bajo tu control</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="button" id="theme-toggle" type="button" aria-pressed="false" aria-label="Cambiar tema claro u oscuro">◐ <span>Tema</span></button>
+        <button class="button" id="refresh-button" type="button" hidden>↻ <span class="refresh-label">Actualizar</span></button>
+        <button class="button" id="edit-config-button" type="button" hidden>Configuración</button>
+      </div>
+    </header>
+
+    <div id="global-message" class="alert" role="status" aria-live="polite" hidden></div>
+    <div id="load-error" class="alert error" role="alert" hidden></div>
+
+    <main>
+      <section id="setup-area" class="panel" hidden aria-labelledby="setup-title">
+        <p class="eyebrow">Configuración inicial</p>
+        <h2 id="setup-title">Prepara tu cierre local</h2>
+        <p class="intro">Define el contexto y las fuentes autorizadas. Si no indicas remitentes aprobados, la importación permanece bloqueada hasta configurarlos.</p>
+        <div class="alert warning" role="note">Los datos importados pueden estar incompletos. La salida del modelo no es confiable y debe revisarse. Nunca introduzcas credenciales bancarias, contraseñas, tokens ni cookies aquí.</div>
+        <div id="setup-form-host"></div>
+      </section>
+
+      <section id="dashboard-area" hidden aria-label="Panel de cierre mensual">
+        <div class="alert warning" role="note">
+          Los datos importados pueden estar incompletos; las sugerencias del modelo son texto no confiable y requieren revisión. No introduzcas credenciales bancarias. No hay escaneo desde esta página: las importaciones se ejecutan por CLI.
+        </div>
+        <p id="sender-warning" class="alert warning" role="note" hidden>No hay remitentes aprobados. La importación debe permanecer bloqueada hasta que añadas direcciones exactas en Configuración.</p>
+        <div id="config-area" class="panel" hidden aria-labelledby="config-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Preferencias para futuras importaciones</p>
+              <h2 id="config-title" tabindex="-1">Configuración</h2>
+              <p>Los cambios no alteran importaciones anteriores ni sus decisiones.</p>
+            </div>
+            <button id="close-config-button" class="button small" type="button">Cerrar</button>
+          </div>
+          <div id="config-form-host"></div>
+        </div>
+        <div class="toolbar">
+          <div class="toolbar-group">
+            <label class="control-label" for="currency-select">Moneda</label>
+            <span class="select-button"><select id="currency-select" aria-label="Moneda para mostrar"></select></span>
+          </div>
+          <div id="coverage-summary" class="hint" aria-live="polite"></div>
+        </div>
+        <div id="month-chips" class="month-chips" role="group" aria-label="Seleccionar mes"></div>
+        <div class="tabs" role="tablist" aria-label="Vista del cierre">
+          <button class="tab" id="tab-month" type="button" role="tab" aria-selected="true" aria-controls="panel-month" tabindex="0">Mes</button>
+          <button class="tab" id="tab-year" type="button" role="tab" aria-selected="false" aria-controls="panel-year" tabindex="-1">Año</button>
+          <button class="tab" id="tab-decisions" type="button" role="tab" aria-selected="false" aria-controls="panel-decisions" tabindex="-1">Decisión</button>
+        </div>
+
+        <section id="panel-month" role="tabpanel" aria-labelledby="tab-month">
+          <div class="metrics" id="month-metrics"></div>
+          <div class="grid-2">
+            <article class="card">
+              <div class="card-header"><div><h3>Calendario diario</h3><p>Montos personales y familiares decididos</p></div></div>
+              <div id="calendar" class="calendar" aria-label="Calendario del mes"></div>
+            </article>
+            <article class="card">
+              <div class="card-header"><div><h3>Gasto por categoría</h3><p>Solo decisiones personales y familiares</p></div></div>
+              <div id="category-chart" class="chart-wrap"></div>
+            </article>
+            <article class="card">
+              <div class="card-header"><div><h3>Acumulado del mes</h3><p>Personal y familiar por día</p></div></div>
+              <div id="cumulative-chart" class="chart-wrap"></div>
+            </article>
+            <article class="card">
+              <div class="card-header"><div><h3>Distribución por día</h3><p>Importes decididos según el día de la semana</p></div></div>
+              <div id="weekday-chart" class="rank-list"></div>
+            </article>
+            <article class="card">
+              <div class="card-header"><div><h3>Cuentas de pago</h3><p>Según los datos disponibles en la importación</p></div></div>
+              <div id="account-ranking" class="account-list"></div>
+            </article>
+            <article class="card">
+              <div class="card-header"><div><h3>Comercios frecuentes</h3><p>Ordenados por importe decidido</p></div></div>
+              <div id="merchant-ranking" class="rank-list"></div>
+            </article>
+          </div>
+          <section aria-labelledby="category-details-title">
+            <div class="section-heading"><div><h2 id="category-details-title">Detalle por categoría</h2><p>Abre una categoría para revisar sus movimientos.</p></div></div>
+            <div id="category-details"></div>
+          </section>
+          <section class="card" aria-labelledby="coverage-title" style="margin-top:16px">
+            <div class="card-header"><div><h3 id="coverage-title">Verificación manual de cobertura</h3><p>Marcar revisado registra únicamente tu verificación manual; no certifica que la importación esté completa.</p></div></div>
+            <form id="coverage-form" class="coverage-form">
+              <div class="field"><label for="coverage-month">Mes</label><select id="coverage-month" required></select></div>
+              <div class="field"><label for="coverage-note">Nota de conciliación (obligatoria)</label><input id="coverage-note" type="text" maxlength="500" autocomplete="off" placeholder="Qué revisaste" required></div>
+              <button class="button primary" type="submit">Marcar revisado</button>
+            </form>
+          </section>
+        </section>
+
+        <section id="panel-year" role="tabpanel" aria-labelledby="tab-year" hidden>
+          <div class="toolbar">
+            <div class="toolbar-group">
+              <label class="control-label" for="year-select">Año</label>
+              <span class="select-button"><select id="year-select" aria-label="Año para mostrar"></select></span>
+            </div>
+          </div>
+          <div class="metrics" id="year-metrics"></div>
+          <article class="card">
+            <div class="card-header"><div><h3>Totales mensuales por categoría</h3><p>Las columnas apiladas representan las categorías decididas.</p></div>
+              <div id="year-category-legend" class="legend"></div>
+            </div>
+            <div id="year-chart" class="chart-wrap"></div>
+          </article>
+          <article class="card" style="margin-top:14px">
+            <div class="card-header"><div><h3>Resumen por mes</h3><p>Pendiente se muestra aparte y no se incluye en los totales decididos.</p></div></div>
+            <p id="year-coverage-note" class="alert warning" role="note"></p>
+            <div id="year-table" class="table-wrap"></div>
+          </article>
+          <article class="card" style="margin-top:14px">
+            <div class="card-header"><div><h3>Categorías del año</h3><p>Solo decisiones personales y familiares en la moneda seleccionada.</p></div></div>
+            <div id="year-categories" class="rank-list"></div>
+          </article>
+        </section>
+
+        <section id="panel-decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden>
+          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Las categorías solo se cuentan en totales si eliges Personal o Familiar.</p></div></div>
+          <div id="pending-list" class="decision-list"></div>
+          <details class="history-detail" id="decision-history">
+            <summary>Decisiones anteriores · cambiar una decisión</summary>
+            <div id="history-list" class="decision-list" style="margin-top:12px"></div>
+          </details>
+        </section>
+        <p class="footer-note">Importes en unidades de la moneda seleccionada. No se combinan monedas. La cobertura se actualiza solo mediante revisión manual.</p>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    "use strict";
+    (() => {
+      const $ = (selector, root = document) => root.querySelector(selector);
+      const el = (tag, className, text) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+      const svgEl = (tag, attrs = {}) => {
+        const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+        for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+        return node;
+      };
+      const currentMonth = () => {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      };
+      const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
+      const state = { data: null, month: currentMonth(), year: String(new Date().getFullYear()), currency: "", activeTab: "month", busy: false };
+      const palette = ["#4779e6", "#e7a443", "#42a17a", "#9a70d6", "#df7180", "#3c9aaa", "#b68732", "#64748b"];
+      const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+      const weekdayNames = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+      const nonExpenseKinds = new Set(["loan", "income", "card_payment", "rejected", "promotion", "verification"]);
+      let decisionCardSequence = 0;
+
+      function showMessage(message, type = "success") {
+        const box = $("#global-message");
+        box.className = `alert ${type}`;
+        box.textContent = message;
+        box.hidden = !message;
+      }
+
+      function setError(message) {
+        const box = $("#load-error");
+        box.textContent = message;
+        box.hidden = !message;
+      }
+
+      function formatMoney(minor, currency = state.currency) {
+        const amount = Number.isSafeInteger(minor) ? minor / 100 : 0;
+        try {
+          return new Intl.NumberFormat("es", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+        } catch {
+          return `${amount.toFixed(2)} ${currency || ""}`.trim();
+        }
+      }
+
+      function axisAmount(minor) {
+        const amount = Number.isSafeInteger(minor) ? minor / 100 : 0;
+        let compact;
+        try {
+          compact = new Intl.NumberFormat("es", { notation: "compact", maximumFractionDigits: 1 }).format(amount);
+        } catch {
+          compact = amount.toFixed(0);
+        }
+        const label = svgEl("text", { class: "axis-label", "aria-label": formatMoney(minor) });
+        label.textContent = compact;
+        return label;
+      }
+
+      function safeArray(value) { return Array.isArray(value) ? value : []; }
+      function txCurrency(tx) { return typeof tx.currency === "string" ? tx.currency : ""; }
+      function transactions() {
+        return safeArray(state.data && state.data.transactions).filter(tx =>
+          tx && typeof tx === "object" && Number.isSafeInteger(tx.amount_minor) && txCurrency(tx) === state.currency
+        );
+      }
+      function isExcludedAccount(tx) {
+        const account = typeof tx.account === "string" ? tx.account.trim().toLocaleLowerCase() : "";
+        return account !== "" && safeArray(state.data && state.data.config && state.data.config.excluded_accounts)
+          .some(excluded => typeof excluded === "string" && excluded.trim().toLocaleLowerCase() === account);
+      }
+      function decisionOptions(tx) {
+        const kind = typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "";
+        if (nonExpenseKinds.has(kind)) return [["exclude", "No cuenta"]];
+        if (kind === "own_transfer" || isExcludedAccount(tx)) return [["family", "Familiar"], ["exclude", "No cuenta"]];
+        return [["personal", "Gasto personal"], ["family", "Familiar"], ["exclude", "No cuenta"]];
+      }
+      function counted(items) {
+        return items.filter(tx =>
+          (tx.decision === "personal" || tx.decision === "family") &&
+          !nonExpenseKinds.has(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "") &&
+          !(tx.decision === "personal" && (
+            (typeof tx.kind === "string" && tx.kind.trim().toLowerCase() === "own_transfer") ||
+            isExcludedAccount(tx)
+          ))
+        );
+      }
+      function sum(items) { return items.reduce((total, tx) => total + tx.amount_minor, 0); }
+      function monthOf(tx) { return typeof tx.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(tx.day) ? tx.day.slice(0, 7) : ""; }
+      function monthLabel(key) {
+        if (!monthPattern.test(key)) return key;
+        const [year, month] = key.split("-");
+        return `${monthNames[Number(month) - 1]} ${year}`;
+      }
+      function updateCoverageSummary(month) {
+        const coverage = safeArray(state.data && state.data.coverage).find(entry => entry && entry.month === month);
+        $("#coverage-summary").textContent = coverage
+          ? `Cobertura: ${coverage.status === "reviewed" ? "revisada manualmente" : coverage.status === "partial" ? "parcial" : "sin verificar"}${coverage.note ? ` · ${coverage.note}` : ""}`
+          : "Cobertura: sin verificar";
+      }
+      function itemText(item) {
+        const name = typeof item === "string" && item.trim() ? item.trim() : "Sin especificar";
+        return name;
+      }
+      function makeMetric(label, value, note = "") {
+        const box = el("div", "metric");
+        box.append(el("span", "label", label), el("strong", "", value));
+        if (note) box.append(el("small", "", note));
+        return box;
+      }
+
+      async function loadState(quiet = false) {
+        if (!quiet) showMessage("Actualizando datos…", "success");
+        setError("");
+        try {
+          const response = await fetch("/api/state", { headers: { Accept: "application/json" }, cache: "no-store" });
+          if (!response.ok) throw new Error(`El servidor respondió ${response.status} ${response.statusText || ""}`.trim());
+          const data = await response.json();
+          if (!data || typeof data.configured !== "boolean" || !Array.isArray(data.transactions) || !Array.isArray(data.categories) || !Array.isArray(data.coverage) || !Array.isArray(data.discoveries)) {
+            throw new Error("La respuesta de /api/state no coincide con el contrato esperado.");
+          }
+          state.data = data;
+          if (!quiet) showMessage("");
+          render();
+        } catch (error) {
+          state.data = null;
+          $("#setup-area").hidden = true;
+          $("#dashboard-area").hidden = true;
+          $("#refresh-button").hidden = true;
+          $("#edit-config-button").hidden = true;
+          showMessage("");
+          setError(`No se pudo cargar el panel local: ${error.message}. Comprueba que el servidor esté disponible y vuelve a intentar.`);
+        }
+      }
+
+      function mountConfigForm(host, mode) {
+        host.replaceChildren();
+        const form = el("form", "config-form");
+        form.id = `config-form-${mode}`;
+        form.noValidate = false;
+        const config = state.data && state.data.config ? state.data.config : {};
+        const field = (labelText, name, value, options = {}) => {
+          const wrap = el("div", `field${options.full ? " full" : ""}`);
+          const label = el("label", "", labelText);
+          label.htmlFor = `${form.id}-${name}`;
+          let input;
+          if (options.type === "select") {
+            input = document.createElement("select");
+            for (const [valueOption, labelOption] of options.options) {
+              const option = el("option", "", labelOption);
+              option.value = valueOption;
+              input.append(option);
+            }
+          } else if (options.type === "textarea") {
+            input = document.createElement("textarea");
+          } else {
+            input = document.createElement("input");
+            input.type = options.type || "text";
+          }
+          input.id = label.htmlFor;
+          input.name = name;
+          input.value = value == null ? "" : String(value);
+          if (options.required) input.required = true;
+          if (options.placeholder) input.placeholder = options.placeholder;
+          if (options.autocomplete) input.autocomplete = options.autocomplete;
+          if (options.maxlength) input.maxLength = options.maxlength;
+          if (options.help) {
+            const helpId = `${input.id}-help`;
+            input.setAttribute("aria-describedby", helpId);
+            const help = el("span", "hint", options.help);
+            help.id = helpId;
+            wrap.append(label, input, help);
+          } else {
+            wrap.append(label, input);
+          }
+          return wrap;
+        };
+        form.append(
+          field("Ubicación", "location", config.location, { required: true, autocomplete: "off", placeholder: "Ciudad o región" }),
+          field("Zona horaria", "timezone", config.timezone, { required: true, placeholder: "Ej.: America/Mexico_City", autocomplete: "off" }),
+          field("Moneda", "currency", config.currency || "MXN", {
+            type: "select", required: true, help: "Se muestran y suman solo importes de una misma moneda.",
+            options: Array.from(new Set(["MXN", "USD", "EUR", "CAD", "GBP", "COP", "ARS", "CLP", "PEN", "BRL", "JPY", "CHF", "AUD", config.currency].filter(Boolean))).map(code => [code, code])
+          }),
+          field("Etiqueta para transferencias", "transfer_label", config.transfer_label, { required: true, placeholder: "Transferencia", autocomplete: "off" }),
+          field("Cuentas autorizadas", "accounts", safeArray(config.accounts).join("\n"), { type: "textarea", full: true, required: true, help: "Una cuenta por línea. No agregues credenciales ni datos de acceso." }),
+          field("Cuentas excluidas", "excluded_accounts", safeArray(config.excluded_accounts).join("\n"), { type: "textarea", full: true, help: "Opcional: una cuenta por línea." }),
+          field("Remitentes aprobados exactos", "approved_senders", safeArray(config.approved_senders).join("\n"), { type: "textarea", full: true, help: "Una dirección de correo exacta por línea. Vacío bloquea importaciones; no se aceptan patrones ni dominios comodín." }),
+          field("Categorías", "categories", safeArray(config.categories || (state.data && state.data.categories)).join("\n"), { type: "textarea", full: true, help: "Una categoría por línea." })
+        );
+        const askSavings = el("label", "checkbox-field");
+        const savingsInput = document.createElement("input");
+        savingsInput.type = "checkbox";
+        savingsInput.name = "ask_savings";
+        savingsInput.checked = config.ask_savings === true;
+        const savingsText = el("span", "", "Preguntar por aportes o movimientos de ahorro.");
+        askSavings.append(savingsInput, savingsText);
+        const askPeople = el("label", "checkbox-field");
+        const peopleInput = document.createElement("input");
+        peopleInput.type = "checkbox";
+        peopleInput.name = "ask_people";
+        peopleInput.checked = config.ask_people === true;
+        const peopleText = el("span", "", "Preguntar por movimientos relacionados con otras personas.");
+        askPeople.append(peopleInput, peopleText);
+        form.append(askSavings, askPeople);
+        const consent = el("label", "checkbox-field");
+        const consentInput = document.createElement("input");
+        consentInput.type = "checkbox";
+        consentInput.name = "confidential_confirmed";
+        consentInput.required = true;
+        const consentText = el("span", "", "Confirmo que tengo autorización para procesar el contenido confidencial que pueda estar incluido en los datos importados.");
+        consent.append(consentInput, consentText);
+        form.append(consent);
+        const footer = el("div", "form-footer");
+        const help = el("span", "hint", "No se solicitan ni guardan contraseñas, tokens o cookies.");
+        const submit = el("button", "button primary", mode === "setup" ? "Guardar configuración" : "Guardar cambios");
+        submit.type = "submit";
+        footer.append(help, submit);
+        form.append(footer);
+        form.addEventListener("submit", event => saveConfig(event, form));
+        host.append(form);
+      }
+
+      function lines(value) {
+        return value.split(/\r?\n/).map(entry => entry.trim()).filter(Boolean);
+      }
+
+      async function saveConfig(event, form) {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        const data = new FormData(form);
+        const senders = lines(String(data.get("approved_senders") || ""));
+        const invalidEmail = senders.find(email => {
+          const input = document.createElement("input");
+          input.type = "email";
+          input.value = email;
+          return !input.checkValidity() || /[*?]/.test(email);
+        });
+        if (invalidEmail) {
+          showMessage(`Remitente no válido: ${invalidEmail}. Usa una dirección exacta.`, "error");
+          return;
+        }
+        const config = {
+          location: String(data.get("location") || "").trim(),
+          timezone: String(data.get("timezone") || "").trim(),
+          currency: String(data.get("currency") || "").trim().toUpperCase(),
+          accounts: lines(String(data.get("accounts") || "")),
+          excluded_accounts: lines(String(data.get("excluded_accounts") || "")),
+          transfer_label: String(data.get("transfer_label") || "").trim(),
+          ask_savings: form.elements.ask_savings.checked,
+          ask_people: form.elements.ask_people.checked,
+          approved_senders: senders,
+          categories: lines(String(data.get("categories") || ""))
+        };
+        if (!config.accounts.length || !config.categories.length) {
+          showMessage("Indica al menos una cuenta autorizada y una categoría.", "error");
+          return;
+        }
+        await postJson("/api/config", { ...config, confidential_confirmed: form.elements.confidential_confirmed.checked }, "Configuración guardada.");
+      }
+
+      async function postJson(url, payload, successText) {
+        if (!state.data || typeof state.data.csrf !== "string" || !state.data.csrf) {
+          showMessage("No hay token CSRF disponible. Actualiza el panel antes de guardar.", "error");
+          return false;
+        }
+        showMessage("Guardando…", "success");
+        setBusy(true);
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json", "X-CSRF-Token": state.data.csrf },
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) {
+            let detail = "";
+            try {
+              const body = await response.json();
+              if (body && typeof body.detail === "string") detail = `: ${body.detail}`;
+              else if (body && typeof body.error === "string") detail = `: ${body.error}`;
+            } catch { /* el servidor puede responder texto o no devolver cuerpo */ }
+            throw new Error(`El servidor respondió ${response.status} ${response.statusText || ""}${detail}`.trim());
+          }
+          await loadState(true);
+          if (state.data) {
+            showMessage(successText);
+            return true;
+          }
+          return false;
+        } catch (error) {
+          showMessage(`No se guardó el cambio: ${error.message}. Tus datos no se han confirmado.`, "error");
+          return false;
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      function setBusy(busy) {
+        state.busy = busy;
+        document.querySelectorAll("button[type='submit']").forEach(button => { button.disabled = busy; });
+      }
+
+      function render() {
+        const data = state.data;
+        if (!data) return;
+        const configured = data.configured && data.config && typeof data.config === "object";
+        $("#setup-area").hidden = configured;
+        $("#dashboard-area").hidden = !configured;
+        $("#refresh-button").hidden = !configured;
+        $("#edit-config-button").hidden = !configured;
+        if (!configured) {
+          mountConfigForm($("#setup-form-host"), "setup");
+          return;
+        }
+        $("#sender-warning").hidden = safeArray(data.config.approved_senders).length > 0;
+        const currencies = Array.from(new Set(safeArray(data.transactions).map(tx => tx && tx.currency).filter(currency => typeof currency === "string" && currency)));
+        if (typeof data.config.currency === "string" && data.config.currency && !currencies.includes(data.config.currency)) currencies.unshift(data.config.currency);
+        if (!currencies.length) currencies.push(typeof data.config.currency === "string" && data.config.currency ? data.config.currency : "MXN");
+        if (!currencies.includes(state.currency)) state.currency = currencies.includes(data.config.currency) ? data.config.currency : currencies[0];
+        const currencySelect = $("#currency-select");
+        currencySelect.replaceChildren();
+        currencies.forEach(currency => {
+          const option = el("option", "", currency);
+          option.value = currency;
+          option.selected = currency === state.currency;
+          currencySelect.append(option);
+        });
+        const monthKeys = new Set([currentMonth()]);
+        safeArray(data.transactions).forEach(tx => { const month = tx && monthOf(tx); if (month && monthPattern.test(month)) monthKeys.add(month); });
+        safeArray(data.coverage).forEach(entry => { if (entry && monthPattern.test(entry.month)) monthKeys.add(entry.month); });
+        const months = Array.from(monthKeys).sort();
+        if (!months.includes(state.month)) state.month = currentMonth();
+        const chips = $("#month-chips");
+        chips.replaceChildren();
+        months.slice().reverse().forEach(month => {
+          const button = el("button", "chip", monthLabel(month));
+          button.type = "button";
+          button.setAttribute("aria-pressed", String(month === state.month));
+          button.addEventListener("click", () => {
+            state.month = month;
+            renderMonthControls(months);
+            renderDashboard();
+            renderYear();
+            renderDecisions();
+            updateCoverageSummary(state.month);
+          });
+          chips.append(button);
+        });
+        const coverageSelect = $("#coverage-month");
+        coverageSelect.replaceChildren();
+        months.slice().reverse().forEach(month => {
+          const option = el("option", "", monthLabel(month));
+          option.value = month;
+          option.selected = month === state.month;
+          coverageSelect.append(option);
+        });
+        const years = Array.from(new Set(months.map(month => month.slice(0, 4)))).sort();
+        if (!years.includes(state.year)) state.year = state.month.slice(0, 4);
+        const yearSelect = $("#year-select");
+        yearSelect.replaceChildren();
+        years.slice().reverse().forEach(year => {
+          const option = el("option", "", year);
+          option.value = year;
+          option.selected = year === state.year;
+          yearSelect.append(option);
+        });
+        updateCoverageSummary(state.month);
+        if (!$("#config-area").hidden) mountConfigForm($("#config-form-host"), "edit");
+        renderDashboard();
+        renderYear();
+        renderDecisions();
+      }
+
+      function renderMonthControls(months) {
+        const chips = $("#month-chips");
+        for (const button of chips.querySelectorAll("button")) button.setAttribute("aria-pressed", String(button.textContent === monthLabel(state.month)));
+        for (const option of $("#coverage-month").options) option.selected = option.value === state.month;
+        const years = Array.from(new Set(months.map(month => month.slice(0, 4))));
+        if (years.includes(state.month.slice(0, 4))) {
+          state.year = state.month.slice(0, 4);
+          for (const option of $("#year-select").options) option.selected = option.value === state.year;
+        }
+      }
+
+      function renderDashboard() {
+        const inMonth = transactions().filter(tx => monthOf(tx) === state.month);
+        const decisions = counted(inMonth);
+        const personal = decisions.filter(tx => tx.decision === "personal");
+        const family = decisions.filter(tx => tx.decision === "family");
+        const pending = inMonth.filter(tx => tx.decision == null);
+        const monthDate = new Date(Number(state.month.slice(0, 4)), Number(state.month.slice(5, 7)) - 1, 1);
+        const total = sum(decisions);
+        const metrics = $("#month-metrics");
+        metrics.replaceChildren(
+          makeMetric("Personal", formatMoney(sum(personal)), `${personal.length} movimientos`),
+          makeMetric("Familiar", formatMoney(sum(family)), `${family.length} movimientos`),
+          makeMetric("Total decidido", formatMoney(total), "Personal + familiar; moneda seleccionada"),
+          makeMetric("Pendiente", formatMoney(sum(pending)), `${pending.length} movimientos · no incluido en total`)
+        );
+        renderCalendar(inMonth, monthDate);
+        renderDonut(decisions);
+        renderCumulative(inMonth, monthDate);
+        renderWeekdays(decisions);
+        renderRanking("#account-ranking", decisions, tx => tx.account, "Sin cuenta");
+        renderRanking("#merchant-ranking", decisions, tx => tx.merchant, "Sin comercio");
+        renderCategoryDetails(inMonth);
+      }
+
+      function renderCalendar(items, firstDay) {
+        const host = $("#calendar");
+        host.replaceChildren();
+        for (const day of weekdayNames) host.append(el("div", "weekday", day));
+        const offset = (firstDay.getDay() + 6) % 7;
+        for (let i = 0; i < offset; i++) host.append(el("div", "day-cell empty"));
+        const year = firstDay.getFullYear();
+        const month = firstDay.getMonth();
+        const days = new Date(year, month + 1, 0).getDate();
+        const grouped = new Map();
+        for (const tx of counted(items)) {
+          const date = Number(tx.day.slice(8, 10));
+          if (date >= 1 && date <= days) grouped.set(date, (grouped.get(date) || 0) + tx.amount_minor);
+        }
+        for (let day = 1; day <= days; day++) {
+          const date = new Date(year, month, day);
+          const cell = el("div", `day-cell${date.toDateString() === new Date().toDateString() ? " today" : ""}`);
+          cell.setAttribute("aria-label", `${day} ${monthLabel(state.month)}${grouped.has(day) ? `, ${formatMoney(grouped.get(day))}` : ""}`);
+          cell.append(el("span", "day-number", String(day)));
+          if (grouped.has(day)) cell.append(el("span", "day-amount", formatMoney(grouped.get(day))));
+          host.append(cell);
+        }
+      }
+
+      function renderDonut(items) {
+        const host = $("#category-chart");
+        host.replaceChildren();
+        const groups = new Map();
+        counted(items).forEach(tx => {
+          const category = itemText(tx.category);
+          groups.set(category, (groups.get(category) || 0) + Math.abs(tx.amount_minor));
+        });
+        const entries = Array.from(groups).filter(([, amount]) => amount > 0).sort((a, b) => b[1] - a[1]);
+        const grandTotal = entries.reduce((sumAmount, entry) => sumAmount + entry[1], 0);
+        if (!grandTotal) { host.append(el("div", "empty-state", "No hay importes decididos para graficar.")); return; }
+        const svg = svgEl("svg", { id: "category-chart-svg", viewBox: "0 0 240 190", role: "img", "aria-label": "Gráfico de dona de importes por categoría" });
+        const title = svgEl("title");
+        title.textContent = "Distribución por categoría por magnitud";
+        svg.append(title);
+        const radius = 62;
+        const circumference = 2 * Math.PI * radius;
+        let offset = 0;
+        entries.forEach(([category, amount], index) => {
+          const arc = circumference * amount / grandTotal;
+          const circle = svgEl("circle", {
+            cx: 120, cy: 88, r: radius, fill: "none", stroke: palette[index % palette.length],
+            "stroke-width": 28, "stroke-dasharray": `${arc} ${circumference - arc}`, "stroke-dashoffset": -offset,
+            transform: "rotate(-90 120 88)"
+          });
+          circle.append(svgEl("title"));
+          circle.lastChild.textContent = `${category}: ${formatMoney(amount)}`;
+          svg.append(circle);
+          offset += arc;
+        });
+        const center = svgEl("text", { x: 120, y: 85, "text-anchor": "middle", class: "axis-label" });
+        center.textContent = "Magnitud";
+        svg.append(center);
+        host.append(svg);
+        const legend = el("div", "legend");
+        entries.slice(0, 8).forEach(([category, amount], index) => {
+          const row = el("div", "legend-row");
+          const label = el("span", "legend-label");
+          const swatch = el("span", "swatch");
+          swatch.style.backgroundColor = palette[index % palette.length];
+          label.append(swatch, el("span", "", category));
+          row.append(label, el("strong", "", formatMoney(amount)));
+          legend.append(row);
+        });
+        host.append(legend);
+      }
+
+      function renderCumulative(items, firstDay) {
+        const host = $("#cumulative-chart");
+        host.replaceChildren();
+        const days = new Date(firstDay.getFullYear(), firstDay.getMonth() + 1, 0).getDate();
+        const rows = Array.from({ length: days }, () => ({ personal: 0, family: 0 }));
+        counted(items).forEach(tx => {
+          const day = Number(tx.day.slice(8, 10)) - 1;
+          if (day >= 0 && day < days) rows[day][tx.decision] += tx.amount_minor;
+        });
+        let personalTotal = 0;
+        let familyTotal = 0;
+        const cumulative = rows.map(row => {
+          personalTotal += row.personal;
+          familyTotal += row.family;
+          return [personalTotal, familyTotal];
+        });
+        const maxValue = Math.max(0, ...cumulative.flat().map(Math.abs));
+        if (!maxValue) { host.append(el("div", "empty-state", "Sin movimientos decididos este mes.")); return; }
+        const width = 720, height = 220, left = 70, right = 12, top = 14, bottom = 30;
+        const chartWidth = width - left - right, chartHeight = height - top - bottom;
+        const svg = svgEl("svg", { id: "cumulative-chart-svg", viewBox: `0 0 ${width} ${height}`, class: "chart", role: "img", "aria-label": "Gráfico de líneas del acumulado diario personal y familiar" });
+        const title = svgEl("title"); title.textContent = "Acumulado diario, personal y familiar"; svg.append(title);
+        for (let tick = 0; tick <= 4; tick++) {
+          const y = top + chartHeight * tick / 4;
+          svg.append(svgEl("line", { x1: left, y1: y, x2: width - right, y2: y, class: "chart-grid" }));
+          const label = axisAmount(Math.round(maxValue * (4 - tick) / 4));
+          label.setAttribute("x", String(left - 8));
+          label.setAttribute("y", String(y + 4));
+          label.setAttribute("text-anchor", "end");
+          svg.append(label);
+        }
+        const toPoints = key => cumulative.map((values, index) => {
+          const x = left + (days === 1 ? chartWidth / 2 : chartWidth * index / (days - 1));
+          const y = top + chartHeight * (1 - values[key === "personal" ? 0 : 1] / maxValue);
+          return `${x},${y}`;
+        }).join(" ");
+        svg.append(svgEl("polyline", { points: toPoints("personal"), fill: "none", stroke: "#4779e6", "stroke-width": 3, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+        svg.append(svgEl("polyline", { points: toPoints("family"), fill: "none", stroke: "#e7a443", "stroke-width": 3, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+        [1, Math.ceil(days / 2), days].forEach(day => {
+          const x = left + (days === 1 ? chartWidth / 2 : chartWidth * (day - 1) / (days - 1));
+          const label = svgEl("text", { x, y: height - 8, "text-anchor": "middle", class: "axis-label" });
+          label.textContent = String(day);
+          svg.append(label);
+        });
+        host.append(svg);
+        const legend = el("div", "legend-row");
+        legend.append(el("span", "legend-label", `Personal ${formatMoney(personalTotal)}`), el("span", "legend-label", `Familiar ${formatMoney(familyTotal)}`));
+        host.append(legend);
+      }
+
+      function renderWeekdays(items) {
+        const host = $("#weekday-chart");
+        host.replaceChildren();
+        const totals = Array.from({ length: 7 }, () => 0);
+        counted(items).forEach(tx => {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(tx.day)) return;
+          const [year, month, day] = tx.day.split("-").map(Number);
+          const index = (new Date(year, month - 1, day).getDay() + 6) % 7;
+          totals[index] += tx.amount_minor;
+        });
+        const max = Math.max(0, ...totals);
+        weekdayNames.forEach((name, index) => {
+          const row = el("div", "rank-row");
+          const label = el("span", "legend-label", name);
+          const progress = document.createElement("progress");
+          progress.max = max || 1;
+          progress.value = Math.max(0, totals[index]);
+          progress.setAttribute("aria-label", `${name}: ${formatMoney(totals[index])}`);
+          progress.style.width = "38%";
+          row.append(label, progress, el("strong", "", formatMoney(totals[index])));
+          host.append(row);
+        });
+      }
+
+      function renderRanking(selector, items, keyOf, missingLabel) {
+        const host = $(selector);
+        host.replaceChildren();
+        const groups = new Map();
+        counted(items).forEach(tx => {
+          const key = itemText(keyOf(tx)) === "Sin especificar" ? missingLabel : itemText(keyOf(tx));
+          const previous = groups.get(key) || { total: 0, count: 0 };
+          previous.total += tx.amount_minor;
+          previous.count++;
+          groups.set(key, previous);
+        });
+        const top = Array.from(groups).sort((a, b) => b[1].total - a[1].total).slice(0, 7);
+        if (!top.length) { host.append(el("div", "empty-state", "Sin datos decididos.")); return; }
+        top.forEach(([name, value]) => {
+          const row = el("div", "rank-row");
+          row.append(el("span", "legend-label", `${name} · ${value.count}`), el("strong", "", formatMoney(value.total)));
+          host.append(row);
+        });
+      }
+
+      function renderCategoryDetails(items) {
+        const host = $("#category-details");
+        host.replaceChildren();
+        const groups = new Map();
+        items.forEach(tx => {
+          const category = itemText(tx.category);
+          if (!groups.has(category)) groups.set(category, []);
+          groups.get(category).push(tx);
+        });
+        if (!groups.size) { host.append(el("div", "empty-state", "No hay movimientos para este mes y moneda.")); return; }
+        Array.from(groups).sort((a, b) => a[0].localeCompare(b[0], "es")).forEach(([category, rows]) => {
+          const detail = el("details", "category-detail");
+          const decided = counted(rows);
+          const summary = el("summary", "", `${category} · ${formatMoney(sum(decided))} decidido · ${rows.length} movimientos`);
+          detail.append(summary);
+          const body = el("div", "detail-rows");
+          rows.sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
+            const row = el("div", "detail-row");
+            const status = tx.decision === "personal" ? "Personal" : tx.decision === "family" ? "Familiar" : tx.decision === "exclude" ? "Excluido" : "Pendiente";
+            row.append(el("span", "", `${tx.day || "Sin fecha"} · ${itemText(tx.merchant)} · ${status}`), el("strong", "", formatMoney(tx.amount_minor)));
+            body.append(row);
+          });
+          detail.append(body);
+          host.append(detail);
+        });
+      }
+
+      function renderYear() {
+        const items = transactions().filter(tx => monthOf(tx).startsWith(`${state.year}-`));
+        const buckets = Array.from({ length: 12 }, (_, index) => ({ month: `${state.year}-${String(index + 1).padStart(2, "0")}`, personal: [], family: [], pending: [], categories: new Map() }));
+        items.forEach(tx => {
+          const index = Number(tx.day.slice(5, 7)) - 1;
+          if (index < 0 || index > 11) return;
+          if (tx.decision == null) buckets[index].pending.push(tx);
+          else if (counted([tx]).length) {
+            if (tx.decision === "personal") buckets[index].personal.push(tx);
+            else buckets[index].family.push(tx);
+            const category = itemText(tx.category);
+            buckets[index].categories.set(category, (buckets[index].categories.get(category) || 0) + tx.amount_minor);
+          }
+        });
+        const available = buckets.filter(bucket => safeArray(state.data.transactions).some(tx => tx && monthOf(tx) === bucket.month && txCurrency(tx) === state.currency));
+        const completedTotals = available.map(bucket => sum(bucket.personal) + sum(bucket.family));
+        const average = completedTotals.length ? Math.round(completedTotals.reduce((a, b) => a + b, 0) / completedTotals.length) : 0;
+        const highest = available.length ? available.reduce((best, bucket) => sum(bucket.personal) + sum(bucket.family) > sum(best.personal) + sum(best.family) ? bucket : best) : null;
+        const categoryTotals = new Map();
+        counted(items).forEach(tx => {
+          const category = itemText(tx.category);
+          categoryTotals.set(category, (categoryTotals.get(category) || 0) + tx.amount_minor);
+        });
+        const leadingCategory = Array.from(categoryTotals).sort((a, b) => b[1] - a[1])[0];
+        const yearMetrics = $("#year-metrics");
+        yearMetrics.replaceChildren(
+          makeMetric("Promedio mensual", formatMoney(average), `${available.length} meses con importaciones`),
+          makeMetric("Mes más alto", highest ? formatMoney(sum(highest.personal) + sum(highest.family)) : "—", highest ? monthLabel(highest.month) : "Sin datos"),
+          makeMetric("Categoría principal", leadingCategory ? leadingCategory[0] : "—", leadingCategory ? formatMoney(leadingCategory[1]) : "Sin decisiones"),
+          makeMetric("Total decidido", formatMoney(completedTotals.reduce((a, b) => a + b, 0)), `${counted(items).length} movimientos`)
+        );
+        renderYearChart(buckets);
+        renderYearTable(buckets);
+        const categoryHost = $("#year-categories");
+        categoryHost.replaceChildren();
+        if (!leadingCategory) categoryHost.append(el("div", "empty-state", "Sin categorías decididas este año."));
+        Array.from(categoryTotals).sort((a, b) => b[1] - a[1]).slice(0, 10).forEach(([name, total]) => {
+          const row = el("div", "rank-row");
+          row.append(el("span", "legend-label", name), el("strong", "", formatMoney(total)));
+          categoryHost.append(row);
+        });
+      }
+
+      function renderYearChart(buckets) {
+        const host = $("#year-chart");
+        host.replaceChildren();
+        const categories = Array.from(new Set(buckets.flatMap(bucket => Array.from(bucket.categories.keys())))).sort((a, b) => a.localeCompare(b, "es"));
+        const legend = $("#year-category-legend");
+        legend.replaceChildren();
+        categories.forEach((category, index) => {
+          const label = el("span", "legend-label");
+          const swatch = el("span", "swatch");
+          swatch.style.backgroundColor = palette[index % palette.length];
+          label.append(swatch, el("span", "", category));
+          legend.append(label);
+        });
+        const max = Math.max(0, ...buckets.map(bucket => categories.reduce((total, category) => total + Math.max(0, bucket.categories.get(category) || 0), 0)));
+        if (!max) { host.append(el("div", "empty-state", "Sin importes decididos este año.")); return; }
+        const width = 760, height = 270, left = 70, right = 12, top = 18, bottom = 38;
+        const chartWidth = width - left - right, chartHeight = height - top - bottom;
+        const svg = svgEl("svg", { id: "year-chart-svg", viewBox: `0 0 ${width} ${height}`, class: "chart", role: "img", "aria-label": "Barras mensuales apiladas por categoría" });
+        const title = svgEl("title"); title.textContent = `Importes mensuales del año ${state.year}`; svg.append(title);
+        for (let tick = 0; tick <= 4; tick++) {
+          const y = top + chartHeight * tick / 4;
+          svg.append(svgEl("line", { x1: left, y1: y, x2: width - right, y2: y, class: "chart-grid" }));
+          const label = axisAmount(Math.round(max * (4 - tick) / 4));
+          label.setAttribute("x", String(left - 8));
+          label.setAttribute("y", String(y + 4));
+          label.setAttribute("text-anchor", "end");
+          svg.append(label);
+        }
+        const band = chartWidth / 12;
+        buckets.forEach((bucket, index) => {
+          const barWidth = band * .54;
+          const x = left + band * index + (band - barWidth) / 2;
+          let stackedHeight = 0;
+          categories.forEach((category, categoryIndex) => {
+            const amount = Math.max(0, bucket.categories.get(category) || 0);
+            const segmentHeight = chartHeight * amount / max;
+            if (segmentHeight) {
+              const rect = svgEl("rect", {
+                x, y: top + chartHeight - stackedHeight - segmentHeight, width: barWidth, height: segmentHeight,
+                fill: palette[categoryIndex % palette.length]
+              });
+              const title = svgEl("title");
+              title.textContent = `${monthLabel(bucket.month)} · ${category}: ${formatMoney(amount)}`;
+              rect.append(title);
+              svg.append(rect);
+            }
+            stackedHeight += segmentHeight;
+          });
+          const label = svgEl("text", { x: left + band * index + band / 2, y: height - 13, "text-anchor": "middle", class: "axis-label" });
+          label.textContent = monthNames[index].slice(0, 3);
+          svg.append(label);
+        });
+        host.append(svg);
+      }
+
+      function renderYearTable(buckets) {
+        const host = $("#year-table");
+        host.replaceChildren();
+        const current = currentMonth();
+        const elapsedUnverified = [];
+        const coverageByMonth = new Map(safeArray(state.data.coverage).filter(entry => entry && typeof entry.month === "string").map(entry => [entry.month, entry]));
+        const importedMonths = new Set(safeArray(state.data.transactions)
+          .filter(tx => tx && txCurrency(tx) === state.currency)
+          .map(monthOf).filter(Boolean));
+        $("#year-coverage-note").textContent = `Los meses transcurridos que no aparecen como verificados manualmente no deben interpretarse como gasto cero. “Sin importación” indica que no hay movimientos de esta moneda registrados para ese mes.`;
+        const table = document.createElement("table");
+        const head = document.createElement("thead");
+        const header = document.createElement("tr");
+        ["Mes", "Personal", "Familiar", "Pendiente", "Cobertura"].forEach((label, index) => {
+          const th = el("th", index > 0 && index < 4 ? "numeric" : "", label);
+          header.append(th);
+        });
+        head.append(header);
+        const body = document.createElement("tbody");
+        buckets.forEach(bucket => {
+          const tr = document.createElement("tr");
+          const coverage = coverageByMonth.get(bucket.month);
+          const hasImports = importedMonths.has(bucket.month);
+          const isFuture = bucket.month > current;
+          const status = isFuture ? "Futuro"
+            : !hasImports ? `Sin importación · ${coverage && coverage.status === "reviewed" ? "revisado manualmente" : coverage && coverage.status === "partial" ? "parcial" : "sin verificar"}`
+              : coverage && coverage.status === "reviewed" ? "Revisado manualmente"
+                : coverage && coverage.status === "partial" ? "Parcial" : "Sin verificar";
+          if (bucket.month < current && status !== "Revisado manualmente") elapsedUnverified.push(`${monthLabel(bucket.month)}: ${status.toLocaleLowerCase("es")}`);
+          tr.append(
+            el("td", "", monthLabel(bucket.month)),
+            el("td", "numeric", formatMoney(sum(bucket.personal))),
+            el("td", "numeric", formatMoney(sum(bucket.family))),
+            el("td", "numeric", formatMoney(sum(bucket.pending))),
+            el("td", "", status)
+          );
+          body.append(tr);
+        });
+        table.append(head, body);
+        host.append(table);
+        if (elapsedUnverified.length) {
+          $("#year-coverage-note").textContent += ` Meses transcurridos sin verificación manual completa: ${elapsedUnverified.join("; ")}.`;
+        }
+      }
+
+      function renderDecisions() {
+        const all = transactions();
+        const pending = all.filter(tx => tx.decision == null).sort((a, b) => String(a.day || "").localeCompare(String(b.day || "")));
+        const host = $("#pending-list");
+        host.replaceChildren();
+        if (!pending.length) host.append(el("div", "empty-state", "No hay movimientos pendientes para esta moneda."));
+        pending.forEach(tx => host.append(makeDecisionCard(tx, false)));
+        const previous = all.filter(tx => tx.decision === "personal" || tx.decision === "family" || tx.decision === "exclude")
+          .sort((a, b) => String(b.day || "").localeCompare(String(a.day || "")));
+        $("#decision-history").hidden = previous.length === 0;
+        const history = $("#history-list");
+        history.replaceChildren();
+        previous.forEach(tx => history.append(makeDecisionCard(tx, true)));
+      }
+
+      function makeDecisionCard(tx, isPrevious) {
+        const card = el("article", "decision-card");
+        const meta = el("div", "decision-meta");
+        meta.append(el("span", "", tx.day || "Fecha no disponible"), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
+        card.append(meta, el("h3", "", itemText(tx.merchant)), el("strong", "", formatMoney(tx.amount_minor)));
+        const reason = typeof tx.reason === "string" && tx.reason.trim() ? tx.reason : "Sin motivo anotado.";
+        card.append(el("p", "reason", reason));
+        const categoryField = el("div", "field decision-category");
+        const categoryLabel = el("label", "", "Categoría");
+        categoryLabel.htmlFor = `decision-category-${decisionCardSequence++}`;
+        const categorySelect = document.createElement("select");
+        categorySelect.id = categoryLabel.htmlFor;
+        categorySelect.name = "category";
+        categorySelect.setAttribute("aria-label", `Categoría para ${itemText(tx.merchant)}`);
+        const categories = safeArray(state.data.categories).filter(category => typeof category === "string");
+        if (typeof tx.category === "string" && tx.category && !categories.includes(tx.category)) categories.unshift(tx.category);
+        categories.forEach(category => {
+          const option = el("option", "", category);
+          option.value = category;
+          option.selected = category === tx.category;
+          categorySelect.append(option);
+        });
+        categoryField.append(categoryLabel, categorySelect);
+        card.append(categoryField);
+        const options = decisionOptions(tx);
+        if (nonExpenseKinds.has(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "")) {
+          card.append(el("p", "hint", "Este tipo no se cuenta como gasto; solo puedes marcarlo «No cuenta»."));
+        } else if (options.length === 2) {
+          card.append(el("p", "hint", "Transferencia propia o cuenta excluida: no puede marcarse Personal."));
+        }
+        card.append(el("p", "hint", "Al elegir una decisión, también se guarda la categoría seleccionada."));
+        const actions = el("div", "decision-actions");
+        options.forEach(([decision, label]) => {
+          const button = el("button", `button small${decision === "exclude" ? " danger" : ""}`, label);
+          button.type = "button";
+          button.setAttribute("aria-pressed", String(tx.decision === decision));
+          button.addEventListener("click", async () => {
+            await postJson("/api/decision", { id: tx.id, decision, category: categorySelect.value }, isPrevious ? "Decisión actualizada." : "Decisión guardada.");
+          });
+          actions.append(button);
+        });
+        card.append(actions);
+        return card;
+      }
+
+      function selectTab(tab) {
+        state.activeTab = tab;
+        const tabs = [
+          ["month", "#tab-month", "#panel-month"],
+          ["year", "#tab-year", "#panel-year"],
+          ["decisions", "#tab-decisions", "#panel-decisions"]
+        ];
+        tabs.forEach(([key, buttonSelector, panelSelector]) => {
+          const selected = key === tab;
+          $(buttonSelector).setAttribute("aria-selected", String(selected));
+          $(buttonSelector).tabIndex = selected ? 0 : -1;
+          $(panelSelector).hidden = !selected;
+        });
+      }
+
+      $("#refresh-button").addEventListener("click", () => loadState());
+      $("#edit-config-button").addEventListener("click", () => {
+        $("#config-area").hidden = false;
+        mountConfigForm($("#config-form-host"), "edit");
+        $("#config-title").focus();
+      });
+      $("#close-config-button").addEventListener("click", () => { $("#config-area").hidden = true; });
+      $("#currency-select").addEventListener("change", event => { state.currency = event.target.value; renderDashboard(); renderYear(); renderDecisions(); });
+      $("#year-select").addEventListener("change", event => { state.year = event.target.value; renderYear(); });
+      $("#coverage-month").addEventListener("change", event => {
+        $("#coverage-note").value = "";
+        updateCoverageSummary(event.target.value);
+      });
+      $("#coverage-form").addEventListener("submit", async event => {
+        event.preventDefault();
+        const month = $("#coverage-month").value;
+        if (!monthPattern.test(month)) { showMessage("Selecciona un mes válido.", "error"); return; }
+        const saved = await postJson("/api/coverage", { month, status: "reviewed", note: $("#coverage-note").value.trim() }, "Revisión manual registrada.");
+        if (saved) $("#coverage-note").value = "";
+      });
+      const tabButtons = [$("#tab-month"), $("#tab-year"), $("#tab-decisions")];
+      tabButtons.forEach(button => {
+        button.addEventListener("click", () => selectTab(button.id.replace("tab-", "") === "month" ? "month" : button.id.replace("tab-", "")));
+        button.addEventListener("keydown", event => {
+          const current = tabButtons.indexOf(button);
+          let target = null;
+          if (event.key === "ArrowRight") target = (current + 1) % tabButtons.length;
+          if (event.key === "ArrowLeft") target = (current + tabButtons.length - 1) % tabButtons.length;
+          if (event.key === "Home") target = 0;
+          if (event.key === "End") target = tabButtons.length - 1;
+          if (target !== null) { event.preventDefault(); tabButtons[target].focus(); tabButtons[target].click(); }
+        });
+      });
+      $("#theme-toggle").addEventListener("click", event => {
+        const root = document.documentElement;
+        const dark = root.dataset.theme !== "dark";
+        root.dataset.theme = dark ? "dark" : "light";
+        event.currentTarget.setAttribute("aria-pressed", String(dark));
+        try { localStorage.setItem("monthly-close-theme", dark ? "dark" : "light"); } catch { /* el tema sigue funcionando sin almacenamiento local */ }
+      });
+      try {
+        if (localStorage.getItem("monthly-close-theme") === "dark") {
+          document.documentElement.dataset.theme = "dark";
+          $("#theme-toggle").setAttribute("aria-pressed", "true");
+        }
+      } catch { /* la preferencia del tema es opcional */ }
+      loadState();
+    })();
+  </script>
+</body>
+</html>
