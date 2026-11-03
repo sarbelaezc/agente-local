@@ -548,6 +548,18 @@ La repetición acotada leyó 15 orígenes autorizados y superó la fila que fall
 sin llamar al modelo ni importar movimientos. No se relajan las comprobaciones
 de remitente, selección ni identidad MIME.
 
+**Resultado posterior de la validación masiva (enero a octubre de 2026):**
+la ejecución con Ollama real se detuvo al rechazar una propuesta por
+`Tipo de movimiento invalido` (el tipo o el indicador booleano de ahorros no
+cumplía el contrato). No se normalizó ni aceptó ese resultado y el aviso fallido
+no se marcó como procesado. La base conserva seis mensajes procesados en total,
+un solo movimiento con decisión Familiar y cero dudas, sin nuevas propuestas
+financieras importadas en estos intentos. Los meses del rango siguen parciales;
+no se completó el recorrido con inferencia ni se certificaron sus totales.
+Ollama y el navegador de la prueba quedaron cerrados. Es necesario validar la
+salida del modelo para ese aviso antes de repetir una importación completa;
+no se habilita saltar avisos inválidos para aparentar éxito.
+
 ## Skill de revisión: Ponytail
 
 Instalada para este proyecto en
