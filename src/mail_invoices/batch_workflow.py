@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
@@ -32,6 +34,18 @@ def _active_messages(messages: list[BatchMessage], limit: int) -> list[BatchMess
     return sorted(
         (message for message in messages if message.state != "moved"), key=priority,
     )[:limit]
+
+
+def _persist_execution_error(
+    message: BatchMessage, journal: BatchStateStore, error: Exception,
+) -> None:
+    if (
+        message.state == "registered"
+        and "body changed after review" in str(error).casefold()
+    ):
+        message.state = "blocked"
+    message.last_error = str(error)
+    journal.save([message])
 
 
 def execute_message(
@@ -87,8 +101,7 @@ def execute_message(
         message.last_error = ""
         journal.save([message])
     except (OSError, ValueError, LookupError, sqlite3.Error, PlaywrightError) as error:
-        message.last_error = str(error)
-        journal.save([message])
+        _persist_execution_error(message, journal, error)
         raise
 
 
@@ -97,6 +110,18 @@ def process_invoice_batch(
 ) -> int:
     if not 1 <= batch_size <= 5:
         raise ValueError("Los lotes controlados admiten entre 1 y 5 correos")
+    settings.attachments_dir.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix="invoice-batch-", dir=settings.attachments_dir) as run_dir:
+        return _process_invoice_batch(
+            settings, days, use_model, batch_size, resume=resume,
+            attachment_dir=Path(run_dir),
+        )
+
+
+def _process_invoice_batch(
+    settings: MailSettings, days: int, use_model: bool, batch_size: int,
+    *, resume: bool, attachment_dir: Path,
+) -> int:
     path = batch_state_path()
     with batch_lock(path.with_suffix(".lock")):
         journal = BatchStateStore(path, batch_scope(settings))
@@ -106,7 +131,7 @@ def process_invoice_batch(
         if not resume:
             report = simulate_classification(
                 replace(settings, batch_limit=batch_size), days, [], use_model,
-                include_review_items=True,
+                include_review_items=True, attachment_dir=attachment_dir,
             )
             for raw in report["messages"]:
                 if not raw.get("conversation"):
@@ -133,7 +158,7 @@ def process_invoice_batch(
                 page = outlook_page(context)
                 page.wait_for_selector(MESSAGE_SELECTOR, timeout=60000)
                 folders = [folder.path for folder in discover_folders(page)]
-                window = BatchReviewWindow(active, folders, settings, journal)
+                window = BatchReviewWindow(active, folders, settings, journal, attachment_dir)
                 if not window.run():
                     print(to_json({"executed": False, "message": "Lote cerrado sin ejecutar"}))
                     return 1

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path, PurePosixPath
+from zipfile import BadZipFile, ZipFile
 
 from mail_invoices.batch_state import BatchMessage, BatchStateStore
+from mail_invoices.documents import MAX_FILE_BYTES
 from mail_invoices.review import reviewed_invoice_from_fields
 from mail_invoices.review_ui import InvoiceReviewWindow
 from mail_invoices.settings import MailSettings
@@ -18,12 +23,97 @@ STATE_TEXT = {
 }
 
 
+def _safe_pdf_entry(info) -> bool:
+    path = PurePosixPath(info.filename.replace("\\", "/"))
+    if info.is_dir() or path.suffix.casefold() != ".pdf":
+        return False
+    if path.is_absolute() or ".." in path.parts or info.flag_bits & 1:
+        return False
+    return info.file_size <= MAX_FILE_BYTES
+
+
+def _matching_pdf_entry(entries, member: PurePosixPath):
+    if member.suffix.casefold() == ".pdf":
+        matches = [
+            item for item in entries
+            if PurePosixPath(item.filename.replace("\\", "/")) == member
+        ]
+    else:
+        matches = [
+            item for item in entries
+            if PurePosixPath(item.filename.replace("\\", "/")).stem.casefold()
+            == member.stem.casefold()
+            and PurePosixPath(item.filename.replace("\\", "/")).parent == member.parent
+        ]
+        if not matches and len(entries) == 1:
+            matches = entries
+    return matches[0] if len(matches) == 1 else None
+
+
+def _zip_pdf_bytes(root: Path, source: str) -> bytes | None:
+    zip_marker = source.casefold().find(".zip:")
+    archive_path = (root / source[:zip_marker + 4]).resolve()
+    member = PurePosixPath(source[zip_marker + 5:].replace("\\", "/"))
+    if not archive_path.is_relative_to(root) or not archive_path.is_file():
+        return None
+    if member.is_absolute() or ".." in member.parts:
+        return None
+    try:
+        with ZipFile(archive_path) as archive:
+            entry = _matching_pdf_entry(
+                [item for item in archive.infolist() if _safe_pdf_entry(item)], member,
+            )
+            if entry is None:
+                return None
+            with archive.open(entry) as stream:
+                data = stream.read(MAX_FILE_BYTES + 1)
+    except (BadZipFile, KeyError, OSError, RuntimeError):
+        return None
+    return data if len(data) <= MAX_FILE_BYTES else None
+
+
+def _direct_pdf_preview(root: Path, source: str) -> Path | None:
+    candidate = (root / source).resolve()
+    if not candidate.is_relative_to(root):
+        return None
+    if candidate.suffix.casefold() == ".pdf":
+        return candidate if candidate.is_file() and candidate.stat().st_size <= MAX_FILE_BYTES else None
+    if candidate.suffix.casefold() != ".xml" or not candidate.is_file():
+        return None
+    pdfs = list(candidate.parent.glob("*.pdf"))
+    matches = [path for path in pdfs if path.stem.casefold() == candidate.stem.casefold()]
+    if not matches:
+        matches = pdfs
+    if len(matches) != 1:
+        return None
+    preview = matches[0].resolve()
+    return preview if preview.is_relative_to(root) and preview.stat().st_size <= MAX_FILE_BYTES else None
+
+
+def prepare_pdf_preview(attachments_dir: Path | None, source: str) -> Path | None:
+    if attachments_dir is None:
+        return None
+    root = attachments_dir.resolve()
+    if ".zip:" not in source.casefold():
+        return _direct_pdf_preview(root, source)
+    data = _zip_pdf_bytes(root, source)
+    if data is None:
+        return None
+    preview_dir = root / "pdf-preview"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    preview_path = preview_dir / f"{hashlib.sha256(source.encode('utf-8')).hexdigest()}.pdf"
+    preview_path.write_bytes(data)
+    return preview_path
+
+
 class BatchReviewWindow(InvoiceReviewWindow):
     def __init__(
         self, messages: list[BatchMessage], folders: list[str],
         settings: MailSettings, journal: BatchStateStore,
+        attachments_dir: Path | None = None,
     ) -> None:
         self.messages, self.folders, self.journal = messages, folders, journal
+        self.attachments_dir = attachments_dir
         self.message_forms: list[dict] = []
         super().__init__([], [], settings)
         self.root.title("Revisar lote: registrar facturas y archivar correos")
@@ -44,9 +134,10 @@ class BatchReviewWindow(InvoiceReviewWindow):
         for message in self.messages:
             group = self.ttk.LabelFrame(outer, text=message.subject[:180], padding=8)
             group.pack(fill="x", pady=6)
+            warnings = "\n".join(f"Advertencia: {warning}" for warning in message.warnings)
             self.ttk.Label(
                 group, text=f"{STATE_TEXT[message.state]}\n{message.sender}\n"
-                f"{message.reason}\n{message.last_error}\n" + "\n".join(message.errors),
+                f"{message.reason}\n{message.last_error}\n{warnings}\n" + "\n".join(message.errors),
                 wraplength=1000,
             ).pack(fill="x")
             if message.state not in {"pending", "blocked"}:
@@ -90,11 +181,27 @@ class BatchReviewWindow(InvoiceReviewWindow):
                 for child in card.winfo_children():
                     if isinstance(child, self.ttk.Checkbutton):
                         child.destroy()
+                pdf_path = prepare_pdf_preview(self.attachments_dir, item.candidate.source)
+                self.ttk.Button(
+                    card, text="Abrir factura (PDF)",
+                    command=lambda path=pdf_path: self._open_pdf(path),
+                    state="normal" if pdf_path is not None else "disabled",
+                ).grid(row=0, column=0, sticky="w")
             self.message_forms.append({
                 "message": message, "selected": selected, "folder": folder,
                 "forms": self.forms[form_start:], "selectable": selectable,
             })
         self.cards = outer
+
+    def _open_pdf(self, path: Path | None) -> None:
+        from tkinter import messagebox
+
+        if path is None:
+            return
+        try:
+            os.startfile(str(path))
+        except OSError as error:
+            messagebox.showerror("No se pudo abrir el PDF", str(error), parent=self.root)
 
     def _build_approval_controls(self) -> None:
         controls = self.ttk.Frame(self.root, padding=12)

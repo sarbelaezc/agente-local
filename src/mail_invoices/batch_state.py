@@ -10,6 +10,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
+from pathlib import PurePosixPath
 
 from mail_invoices.classification_decisions import decisions_path
 from mail_invoices.documents import InvoiceCandidate
@@ -56,6 +57,18 @@ def _json_default(value: object) -> str:
     raise TypeError(f"Unsupported persisted value: {type(value).__name__}")
 
 
+def _review_source(source: str) -> str:
+    zip_marker = source.casefold().find(".zip:")
+    if zip_marker >= 0:
+        archive = Path(source[:zip_marker + 4])
+        member = PurePosixPath(source[zip_marker + 5:].replace("\\", "/"))
+        archive_name = archive.name if archive.is_absolute() or ".." in archive.parts else archive.as_posix()
+        member_name = member.name if member.is_absolute() or ".." in member.parts else member.as_posix()
+        return f"{archive_name}:{member_name}"
+    path = Path(source)
+    return path.name if path.is_absolute() or ".." in path.parts else path.as_posix()
+
+
 @dataclass
 class BatchMessage:
     conversation: str
@@ -64,6 +77,7 @@ class BatchMessage:
     items: list[ReviewItem]
     context: IncomingMessage
     errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     folder: str | None = None
     reason: str = ""
     state: str = "pending"
@@ -79,20 +93,31 @@ class BatchMessage:
         if not identity:
             raise ValueError("Cannot persist a message without a stable conversation identity")
         context = message.get("classification_context", {})
-        errors = list(message["errors"])
-        if len(message.get("review_items", [])) > 10:
+        review_items = message.get("review_items", [])
+        model_errors = {item.model_error for item in review_items if item.model_error}
+        warnings = [
+            error for error in message["errors"]
+            if error.startswith("Invoice number differs between subject and attachment:")
+        ]
+        errors = [
+            error for error in message["errors"]
+            if error not in warnings
+            and not error.startswith("Rejected model fields:")
+            and error not in model_errors
+        ]
+        if len(review_items) > 10:
             errors.append("Mas de 10 facturas: fuera del limite del lote controlado")
         return cls(
             identity, message["sender"], message["subject"], [
                 replace(item, candidate=replace(
-                    item.candidate, evidence="", source=Path(item.candidate.source).name,
+                    item.candidate, evidence="", source=_review_source(item.candidate.source),
                 )) for item in message.get("review_items", [])
             ],
             IncomingMessage(
                 message["sender"], message["subject"], context.get("supplier", ""),
                 context.get("body", ""), tuple(context.get("invoices", [])),
             ),
-            errors=errors, folder=message.get("folder"),
+            errors=errors, warnings=warnings, folder=message.get("folder"),
             reason=message.get("reason", ""),
             body_digest=message.get("body_digest", ""),
         )

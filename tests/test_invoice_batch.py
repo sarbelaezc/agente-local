@@ -2,12 +2,14 @@ from dataclasses import asdict, replace
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import pytest
 from openpyxl import Workbook, load_workbook
 
 from mail_invoices import batch_workflow
 from mail_invoices.batch_state import BatchMessage, BatchStateStore, batch_lock, batch_scope
+from mail_invoices.batch_review_ui import prepare_pdf_preview
 from mail_invoices.classification_decisions import ClassificationDecisionStore
 from mail_invoices.documents import InvoiceCandidate
 from mail_invoices.folders import IncomingMessage
@@ -262,6 +264,105 @@ def test_preparation_does_not_store_raw_evidence_or_paths():
     assert prepared.items[0].candidate.source == "invoice.xml"
 
 
+def test_preparation_preserves_only_relative_archive_source():
+    message = pending()
+    candidate = replace(
+        message.items[0].candidate,
+        source="classification-1/invoice.zip:Facturas/invoice.xml",
+    )
+    raw = {
+        "conversation": "TEST", "sender": message.sender, "subject": message.subject,
+        "errors": [], "review_items": [replace(message.items[0], candidate=candidate)],
+        "classification_context": asdict(message.context),
+    }
+
+    prepared = BatchMessage.from_report(raw)
+
+    assert prepared.items[0].candidate.source == "classification-1/invoice.zip:Facturas/invoice.xml"
+
+
+def test_pdf_preview_accepts_only_files_inside_the_run_directory(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    direct_pdf = run_dir / "invoice.pdf"
+    direct_pdf.write_bytes(b"%PDF synthetic")
+    outside_pdf = tmp_path / "outside.pdf"
+    outside_pdf.write_bytes(b"%PDF outside")
+
+    assert prepare_pdf_preview(run_dir, "invoice.pdf") == direct_pdf
+    assert prepare_pdf_preview(run_dir, "../outside.pdf") is None
+    assert prepare_pdf_preview(None, "invoice.pdf") is None
+
+
+def test_pdf_preview_extracts_only_an_unambiguous_zip_document(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    archive_path = run_dir / "invoice.zip"
+    with ZipFile(archive_path, "w") as archive:
+        archive.writestr("Facturas/invoice.xml", b"<invoice />")
+        archive.writestr("Facturas/invoice.pdf", b"%PDF matching")
+        archive.writestr("other.pdf", b"%PDF unrelated")
+
+    preview = prepare_pdf_preview(run_dir, "invoice.zip:Facturas/invoice.xml")
+    assert preview is not None
+    assert preview.read_bytes() == b"%PDF matching"
+
+    ambiguous_path = run_dir / "ambiguous.zip"
+    with ZipFile(ambiguous_path, "w") as archive:
+        archive.writestr("invoice.xml", b"<invoice />")
+        archive.writestr("one.pdf", b"%PDF one")
+        archive.writestr("two.pdf", b"%PDF two")
+    assert prepare_pdf_preview(run_dir, "ambiguous.zip:invoice.xml") is None
+
+
+def test_model_rejection_is_correctable_without_bypassing_other_errors(tmp_path):
+    message = pending()
+    item = replace(message.items[0], rejected_model_fields=("number",))
+    raw = {
+        "conversation": "TEST", "sender": message.sender, "subject": message.subject,
+        "errors": [
+            "Rejected model fields: number",
+            "Invoice number differs between subject and attachment: TEST-1",
+        ], "review_items": [item],
+        "classification_context": asdict(message.context),
+    }
+
+    prepared = BatchMessage.from_report(raw)
+    assert prepared.errors == []
+    assert prepared.warnings == [
+        "Invoice number differs between subject and attachment: TEST-1",
+    ]
+    assert prepared.items[0].rejected_model_fields == ("number",)
+    journal = BatchStateStore(tmp_path / "state.sqlite3", "test")
+    journal.save([prepared])
+    assert journal.load()[0].warnings == prepared.warnings
+
+    raw["errors"].append("Unreadable attachment")
+    assert BatchMessage.from_report(raw).errors == ["Unreadable attachment"]
+
+
+def test_changed_registered_message_requires_manual_reapproval(stores, monkeypatch):
+    journal, workbook, decisions = stores
+    message = approved()
+    workbook.record(message.invoices)
+    message.state = "registered"
+    journal.save([message])
+    mock_folders(monkeypatch)
+    monkeypatch.setattr(
+        batch_workflow, "move_registered_message",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            LookupError("Message body changed after review; movement blocked")
+        ),
+    )
+
+    with pytest.raises(LookupError, match="body changed"):
+        batch_workflow.execute_message(message, journal, workbook, decisions, None)
+
+    persisted = journal.load()[0]
+    assert persisted.state == "blocked"
+    assert persisted.last_error == "Message body changed after review; movement blocked"
+
+
 def test_blocked_records_do_not_starve_ready_pending_messages():
     blocked = replace(pending("BLOCKED"), state="blocked")
     error = replace(pending("ERROR"), errors=["Unreadable attachment"])
@@ -282,8 +383,9 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
     monkeypatch.setattr(batch_workflow, "decisions_path", lambda: tmp_path / "decisions.sqlite3")
     scanned = []
 
-    def simulate(config, days, history, use_model, *, include_review_items):
+    def simulate(config, days, history, use_model, *, include_review_items, attachment_dir):
         assert config.batch_limit == 2 and include_review_items
+        assert attachment_dir.is_dir()
         scanned.append(True)
         return {"folders": ["Salud"], "messages": []}
 
@@ -305,9 +407,13 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
     monkeypatch.setattr(batch_workflow, "sync_playwright", Session)
     monkeypatch.setattr(batch_workflow, "outlook_page", lambda ctx: page)
 
+    review_dirs = []
+
     class Review:
-        def __init__(self, messages, folders, config, journal):
+        def __init__(self, messages, folders, config, journal, attachment_dir):
             assert len(messages) == 2
+            assert attachment_dir.is_dir()
+            review_dirs.append(attachment_dir)
 
         def run(self):
             return True
@@ -325,6 +431,7 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
     assert executed == ["TEST-1", "TEST-2"]
     assert len(scanned) == (0 if resume else 1)
     assert closed == [True]
+    assert not review_dirs[0].exists()
     assert len([m for m in journal.load() if m.state == "approved"]) == 2
 
 

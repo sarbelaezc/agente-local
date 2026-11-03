@@ -30,10 +30,18 @@ def simulate_classification(
     *, register: bool = False,
     include_review_items: bool = False,
     candidate_text: str | None = None,
+    attachment_dir: Path | None = None,
 ) -> dict:
     """Run classification with attachments isolated to a cleaned temporary directory."""
     if register and settings.batch_limit != 1:
         raise ValueError("Integrated controlled test requires exactly one email")
+    if attachment_dir is not None:
+        attachment_dir.mkdir(parents=True, exist_ok=True)
+        return _simulate_classification(
+            replace(settings, attachments_dir=attachment_dir), days, authorized_history, use_model,
+            register=register, include_review_items=include_review_items,
+            candidate_text=candidate_text,
+        )
     settings.attachments_dir.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix="classification-run-", dir=settings.attachments_dir) as run_dir:
         return _simulate_classification(

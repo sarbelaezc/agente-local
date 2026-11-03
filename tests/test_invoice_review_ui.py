@@ -6,6 +6,37 @@ import tkinter as tk
 import pytest
 from openpyxl import Workbook, load_workbook
 
+from mail_invoices.review_ui import InvoiceReviewWindow
+
+
+def test_mousewheel_scrolls_only_when_pointer_is_over_cards():
+    calls = []
+
+    class Canvas:
+        def winfo_rootx(self):
+            return 100
+
+        def winfo_rooty(self):
+            return 200
+
+        def winfo_width(self):
+            return 400
+
+        def winfo_height(self):
+            return 300
+
+        def yview_scroll(self, amount, unit):
+            calls.append((amount, unit))
+
+    window = type("Window", (), {"canvas": Canvas()})()
+    event = type("Event", (), {"x_root": 250, "y_root": 350, "delta": -120})()
+
+    assert InvoiceReviewWindow._on_mousewheel(window, event) == "break"
+    assert calls == [(1, "units")]
+    event.x_root = 20
+    assert InvoiceReviewWindow._on_mousewheel(window, event) is None
+    assert calls == [(1, "units")]
+
 
 @pytest.mark.parametrize("iteration", range(12))
 def test_workbook_then_tk_in_same_process(tmp_path, iteration):

@@ -87,6 +87,7 @@ class InvoiceReviewWindow:
         self.canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
+        self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
         self.cards = ttk.Frame(self.canvas)
         self.canvas_window = self.canvas.create_window(
             (0, 0), window=self.cards, anchor="nw"
@@ -105,6 +106,14 @@ class InvoiceReviewWindow:
         )
         for index, item in enumerate(items, start=1):
             self._build_card(index, item)
+
+    def _on_mousewheel(self, event):
+        left, top = self.canvas.winfo_rootx(), self.canvas.winfo_rooty()
+        right, bottom = left + self.canvas.winfo_width(), top + self.canvas.winfo_height()
+        if not (left <= event.x_root < right and top <= event.y_root < bottom):
+            return None
+        self.canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        return "break"
 
     def _build_card(self, index: int, item: ReviewItem) -> None:
         tk = self.tk

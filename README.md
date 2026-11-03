@@ -6,8 +6,9 @@ implementa.
 
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
-| Organización y clasificación de facturas electrónicas en Hotmail | En implementación; validación controlada y sintética | `src/mail_invoices/` | `python -m mail_invoices.main --classify-invoices` / `--process-invoice-batch` / `--resume-invoice-batch` |
+| Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/run-invoice-batch.ps1` / `-Resume` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
+| Cierre mensual de gastos de Outlook con Ollama local | Piloto implementado; pruebas sintéticas; buzón real y tarea instalada pendientes de validar | `src/monthly_close/` | `scripts/run-monthly-close.ps1` |
 
 ## Stack tecnológico
 
@@ -71,6 +72,223 @@ implementa.
     La configuración de pytest usa captura `sys`; no la cambies a `fd` para las pruebas gráficas de Windows.
 
 `scripts/run.ps1` inicia el agente de Teams, no el organizador de facturas. No lo ejecutes mientras Teams siga pausado. Los comandos de facturas se muestran en sus secciones y usan `config/settings.yaml`.
+
+## Ejecución bajo demanda
+
+La función de facturas no tiene servicio residente ni tarea programada. Para iniciar manualmente una
+revisión de hasta 3 correos de los últimos 30 días:
+
+```powershell
+.\scripts\run-invoice-batch.ps1
+```
+
+Ajusta el tamaño (1 a 5) y el rango (1 a 365 días) cuando lo necesites; usa
+`-Resume` para retomar aprobaciones persistidas sin volver a escanear:
+
+```powershell
+.\scripts\run-invoice-batch.ps1 -BatchSize 5 -Days 30
+.\scripts\run-invoice-batch.ps1 -Resume -BatchSize 5
+```
+
+El script requiere `.venv`, `config/settings.yaml`, Opera y la instancia local
+de Ollama de facturas en el endpoint configurado. Si falta la configuración,
+crea una copia de la plantilla y se detiene para que completes los valores.
+Cada ejecución abre la revisión supervisada; nada se escribe ni se mueve hasta
+que selecciones y apruebes los correos en la UI. `scripts/run.ps1` sigue siendo
+exclusivo de Teams y no debe usarse para facturas.
+Si la política de PowerShell bloquea los scripts `.ps1`, ejecuta el mismo modo
+directamente desde la raíz del repositorio:
+
+```powershell
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config/settings.yaml --process-invoice-batch --batch-size 3 --days 30
+```
+
+## Cierre mensual de gastos: Outlook Web y Ollama local
+
+### Alcance y reglas
+
+Nueva función separada de facturas y Teams. No requiere Microsoft Graph,
+credenciales de API ni conector de Gmail. Playwright lee Outlook Web en un perfil
+exclusivo. Reutiliza, sin modificarlo, el cliente JSON local de Ollama existente.
+No descarga adjuntos, envía correos, mueve mensajes ni modifica libros de facturas.
+Abrir un mensaje puede marcarlo como leído en Outlook.
+
+El panel local ofrece:
+
+- **Paso 0:** las seis preguntas juntas: ubicación/zona horaria, cuentas, cuentas
+  excluidas, etiqueta para transferencias, tratamiento de ahorros y transferencias
+  a personas. Añade moneda, categorías, remitentes exactos y autorización para
+  contenido confidencial. La lectura queda bloqueada sin completar este paso.
+- **Mes:** meses seleccionables, total personal y familiar separados, calendario,
+  dona por categoría, acumulado, días de la semana, medios de pago, comercios y detalle.
+- **Año:** comparativa mensual, promedios, mes de mayor gasto, categoría líder y
+  tabla personal/familiar/pendiente. Los meses no conciliados llevan advertencia.
+- **Decisión:** confirmar gasto personal, familiar o no contable y corregir categoría.
+  Las decisiones se guardan en SQLite y pueden revisarse después. Reimportar no
+  las reemplaza.
+
+Los importes se calculan con enteros en centésimas, no con aritmética del modelo.
+No se convierten ni mezclan monedas; cada configuración importa una sola moneda,
+con hasta dos decimales. Fechas ISO con zona explícita se convierten a la zona
+IANA elegida. No se supone que una fecha de la interfaz de Outlook esté en UTC.
+Si el aviso no contiene fecha de compra reconocible, se usa la fecha local del
+aviso y se indica en la propuesta.
+
+Ingresos, préstamos, compras rechazadas, promociones, códigos y pagos de tarjeta
+no cuentan. Las compras de tarjeta se revisan individualmente. Transferencias
+propias o cuentas excluidas solo permiten Familiar o No cuenta.
+**Desviación deliberada del video:** toda propuesta de gasto requiere confirmación
+humana, incluso si se eligió considerar transferencias personales por defecto.
+Una clasificación de Ollama no equivale a aprobación. Revisa posibles avisos
+duplicados de la misma compra antes de aprobarlos.
+
+### Configuración y primer uso en Windows
+
+1. Actualiza el entorno con `.\.venv\Scripts\python.exe -m pip install -e ".[dev]"`.
+   La nueva dependencia `tzdata` permite zonas IANA y horario de verano en Windows.
+2. Prepara la configuración técnica fuera de Git:
+
+   ```powershell
+   $data = Join-Path $env:LOCALAPPDATA "MonthlyCloseAgent"
+   New-Item -ItemType Directory -Force $data | Out-Null
+   if (-not (Test-Path (Join-Path $data "runtime.json"))) {
+     Copy-Item config\monthly-close.example.json (Join-Path $data "runtime.json")
+   }
+   .\scripts\run-monthly-close.ps1
+   ```
+
+   Abre en el navegador la dirección local indicada en consola y completa el
+   paso 0. No introduzcas números de cuenta, contraseñas ni tokens. Usa alias.
+   Puedes dejar remitentes vacíos mientras los identificas; eso bloquea `scan`.
+   El panel escucha exclusivamente en `127.0.0.1`, no se publica en Internet.
+3. Configura `browser_executable` en `runtime.json` e inicia sesión manualmente:
+
+   ```powershell
+   .\scripts\run-monthly-close.ps1 -Command login
+   ```
+
+   Solo este comando permite la preparación manual del perfil. El agente no
+   resuelve MFA, captcha ni autenticación. En lecturas posteriores se detiene si
+   encuentra esos estados. No reutilices el perfil de facturas o el perfil habitual.
+4. **Calibra los selectores antes de leer correos reales.** La plantilla centraliza
+   los selectores y viene con `selectors_verified: false`. Es un contrato de DOM
+   orientativo, **no una afirmación de que los `data-testid` de ejemplo existan
+   en tu versión de Outlook**. Inspecciona la interfaz y adapta los selectores.
+   Deben identificar un único resultado, remitente, asunto, cuerpo y fecha con
+   zona; la fila y el panel deben exponer el mismo `data-itemid`. Desactiva la
+   agrupación por conversaciones. Los hilos agrupados se rechazan, no se leen
+   parcialmente ni se consideran completos.
+   Verifica que la búsqueda indica Todas las carpetas y prueba avisos conocidos
+   en Bandeja, Spam y Eliminados; solo entonces marca `selectors_verified: true`.
+   Si Outlook no expone esos datos de forma comprobable, **no actives el escaneo**:
+   se necesita adaptar el lector a esa versión, no relajar sus comprobaciones.
+5. Si necesitas descubrir remitentes, ejecuta explícitamente una búsqueda acotada:
+
+   ```powershell
+   .\scripts\run-monthly-close.ps1 -Command discover -Start 2026-10-01 -End 2026-11-01
+   ```
+
+   `discover` autoriza la lectura de metadatos de resultados de todas las carpetas
+   en ese rango: remitente y asunto, no cuerpos. Muestra los hallazgos en la
+   configuración del panel. Revisa cuáles son avisos de tus bancos y aprueba
+   sus direcciones exactas. No se aprueban automáticamente.
+6. Inicia una tercera instancia de Ollama, separada de facturas (`11434`) y
+   Teams (`11435`). En otra terminal:
+
+   ```powershell
+   $env:OLLAMA_HOST = "127.0.0.1:11436"
+   $env:OLLAMA_MODELS = "$env:LOCALAPPDATA\MonthlyCloseAgent\OllamaModels"
+   ollama serve
+   ```
+
+   En otra consola con las mismas variables, descarga el modelo configurado:
+   `ollama pull qwen2.5:7b`. La descarga inicial necesita Internet; la inferencia
+   usa únicamente loopback, sin proxies ni herramientas para el modelo.
+7. Importa de enero al mes anterior con `-Command scan` sin fechas, o indica
+   `-Start` y `-End` (fin exclusivo). Ejemplo:
+
+   ```powershell
+   .\scripts\run-monthly-close.ps1 -Command scan -Start 2026-01-01 -End 2026-11-01
+   ```
+
+   El límite predeterminado es 200 resultados por búsqueda; si se alcanza, se
+   detiene con error. Reduce el rango y repite. Los mensajes ya importados no se
+   duplican por identificador. Pulsa Actualizar en el panel para ver los cambios.
+   Para el mes vivo, incluye sus fechas explícitamente.
+
+### Cobertura, cierre y tarea persistente
+
+Cada mes buscado se marca **parcial/sin conciliar**, aunque no haya avisos. Nunca
+se certifica completitud contando correos. Outlook puede excluir Spam o Eliminados
+de su búsqueda global, cambiar sus selectores o haber borrado mensajes por
+retención. Compara los totales con extractos: el sistema no tiene una API bancaria
+ni puede saber cuánto cobró una tarjeta sin datos adicionales.
+La revisión manual del panel conserva una nota de conciliación. Movimientos
+nuevos invalidan esa revisión; repetir la misma importación no borra decisiones.
+
+Después de configurar y validar el buzón, instala opcionalmente la tarea:
+
+```powershell
+.\scripts\register-monthly-close.ps1 -WhatIf
+.\scripts\register-monthly-close.ps1
+Get-ScheduledTaskInfo -TaskName "AgenteLocal-MonthlyClose"
+```
+
+Usa el **Programador de tareas de Windows**, no un cron de sesión ni herramientas
+de Claude. Persiste al cerrar VS Code. Una comprobación horaria solo inicia
+lectura **el último día del mes, durante las 22:00 de la zona configurada**.
+Python aplica las reglas de zona/horario de verano; las demás ejecuciones no
+abren el navegador. Requiere Windows con sesión interactiva abierta, equipo
+encendido y Ollama funcionando. Si falta autenticación o cambia Outlook, falla
+sin continuar. No instala servicios ni tareas sin ejecutar este script.
+
+Cada ejecución carga desde disco las respuestas, reglas, categorías y remitentes.
+No depende de memoria de chat ni de enlaces publicados. SQLite conserva el
+histórico y las decisiones; el panel refleja el mes nuevo sin republicación.
+El resumen de consola se consulta también con:
+
+```powershell
+.\scripts\run-monthly-close.ps1 -Command summary -Month 2026-10
+.\scripts\register-monthly-close.ps1 -Remove
+```
+
+El resumen indica gasto confirmado, familiar y dudas, no totales del modelo sin
+aprobar. Un cierre a las 22:00 no incluye compras posteriores: vuelve a importar
+ese mes al día siguiente antes de conciliarlo. No hay envío de notificaciones
+por correo ni garantía de ejecución si el equipo está apagado.
+
+### Privacidad, límites y validación
+
+- Solo `discover`, solicitado expresamente, lee metadatos de remitentes aún no
+  aprobados. `scan` comprueba el remitente antes de abrir el cuerpo y antes de
+  mandarlo a Ollama. No transmite mensajes a servicios de IA externos.
+- El navegador sí se comunica con Microsoft. El modelo no dispone de terminal,
+  disco, red ni herramientas; sus respuestas JSON se validan y jamás se ejecutan.
+- No se guardan cuerpos en SQLite ni en logs. Se retienen los hechos financieros,
+  decisiones, remitentes/asuntos descubiertos y auditoría local hasta borrado
+  manual. El perfil de navegador conserva sesión y caché administradas por el
+  navegador; protégelo como información sensible.
+- Para borrar todos los datos de esta función: detén panel, lecturas y tarea;
+  elimina manualmente `close.sqlite3` del directorio de datos. Se pierden también
+  decisiones e histórico. Borra `BrowserProfile` para retirar sesión y caché.
+  No afecta a facturas ni Teams. No se realiza borrado automático del histórico.
+- No hay cifrado propio ni autenticación multiusuario. Usa una cuenta Windows
+  protegida y cifrado de disco si procede. Otros procesos del mismo equipo pueden
+  acceder al panel local. No guardes el directorio de datos dentro del repositorio
+  ni en una carpeta compartida o sincronizada.
+
+Pruebas reproducibles sin credenciales ni correo personal:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_monthly_close.py tests\test_monthly_close_outlook.py tests\test_monthly_close_dashboard.py
+```
+
+Se validan reglas, importes, zona horaria, decisiones persistentes, exclusión de
+remitentes no autorizados, protección del panel y DOM sintético con Playwright.
+Las pruebas gráficas usan Chromium instalado por `bootstrap.ps1`.
+**Pendiente de validar con el usuario:** selectores de su Outlook, cobertura real
+de Spam/Eliminados, resultados del modelo local y ejecución de la tarea instalada.
+No se ha accedido al buzón ni configurado una tarea real durante la implementación.
 
 ## Skill de revisión: Ponytail
 
@@ -303,6 +521,17 @@ editables, la carpeta sugerida y los errores de cada correo. La selección es po
 correo, empieza desmarcada e incluye TODAS sus facturas; un adjunto con errores
 bloquea la selección. Puede usar «Seleccionar correos aptos» y desmarcar después.
 Revise cada destino: una carpeta propuesta por Ollama no es una autorización.
+La ventana permite desplazarse con la rueda del mouse. Cada factura ofrece
+«Abrir factura (PDF)» cuando existe un PDF directo o un único PDF asociado en el
+ZIP; el botón queda deshabilitado si no hay una asociación inequívoca. Los PDFs
+se abren desde el directorio temporal del lote, que se elimina al cerrar.
+Los campos rechazados por Ollama se muestran como advertencias editables. Corrija
+los valores con el PDF y revise TODAS las facturas del correo; solo se puede
+aprobar el correo completo y todos sus campos deben validar. Los errores de
+extracción o identidad siguen bloqueando el correo.
+Una diferencia entre el número del asunto y el XML/PDF se muestra como advertencia
+corregible, no como aprobación automática: contraste el documento y corrija el
+campo antes de aprobar el correo completo.
 
 **«Aprobar y ejecutar lote»** guarda las aprobaciones y autoriza, para cada correo
 seleccionado, registro en Excel con respaldo, guardado local de la carpeta como
@@ -349,11 +578,22 @@ y se libera al cerrar o terminar el proceso. No ejecute simultáneamente los
 modos antiguos: no participan de este bloqueo. Excel y Outlook siguen sin ser
 una transacción atómica. La verificación de identidad incluye remitente, asunto
 y, antes de mover, una huella del cuerpo leído; un cambio bloquea el movimiento.
+Si el cuerpo cambia después de registrar, el mensaje pasa a `blocked` y no se
+reintenta el movimiento automáticamente. Las demás aprobaciones quedan guardadas;
+revise manualmente ese correo antes de volver a aprobarlo. El agente no reemplaza
+el digest aprobado con el cuerpo nuevo ni mueve el correo usando una aprobación
+obsoleta.
 La ejecución programada y la aprobación automática sin supervisión siguen
-pendientes. La suite actual pasa 195 pruebas, incluidas aprobación conjunta,
-persistencia, cancelación, recuperación sin duplicar registros, bloqueo de
-ejecuciones simultáneas y una página sintética con los selectores de movimiento.
-Este modo no se ha probado todavía con un lote real de varios correos.
+pendientes. Un piloto real supervisado terminó con cuatro correos movidos y
+verificados y uno bloqueado porque su cuerpo cambió después de la revisión. El
+candidato con discrepancia entre asunto y PDF pudo corregirse en la UI; la factura
+se validó con su PDF. El piloto sigue teniendo resultado mixto y no habilita
+ejecución autónoma. El correo bloqueado requiere reconciliación manual antes de
+otra aprobación. Las pruebas cubren
+aprobación conjunta, persistencia, cancelación, recuperación sin duplicar registros,
+bloqueo de ejecuciones simultáneas y una página sintética con los selectores de
+movimiento. Esto no valida la precisión general del modelo ni convierte el piloto
+mixto en una validación exitosa.
 
 ### Escanear la bandeja (solo lectura)
 
