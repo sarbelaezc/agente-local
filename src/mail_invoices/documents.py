@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import PurePosixPath
 from typing import Protocol
-from zipfile import BadZipFile, ZipFile
+from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from defusedxml import ElementTree
 from defusedxml.common import DefusedXmlException
@@ -209,6 +209,14 @@ def _pdf_invoice(data: bytes, source: str, ocr: PdfOcr | None) -> InvoiceCandida
     )
 
 
+def _zip_member(
+    archive: ZipFile, entry: ZipInfo, source: str, ocr: PdfOcr | None,
+) -> list[InvoiceCandidate]:
+    with archive.open(entry) as stream:
+        content = stream.read(MAX_FILE_BYTES + 1)
+    return parse_document(content, f"{source}:{entry.filename}", ocr)
+
+
 def parse_document(
     data: bytes, source: str, ocr: PdfOcr | None = None
 ) -> list[InvoiceCandidate]:
@@ -231,6 +239,7 @@ def parse_document(
             entries = archive.infolist()
             if len(entries) > 100 or sum(entry.file_size for entry in entries) > MAX_ZIP_BYTES:
                 raise DocumentError("ZIP exceeds the pilot limits")
+            documents = []
             for entry in entries:
                 if entry.is_dir():
                     continue
@@ -243,11 +252,14 @@ def parse_document(
                     raise DocumentError("ZIP contains an encrypted or oversized document")
                 if entry.file_size > max(entry.compress_size, 1) * 200:
                     raise DocumentError("ZIP compression ratio exceeds the pilot limit")
-                with archive.open(entry) as stream:
-                    content = stream.read(MAX_FILE_BYTES + 1)
-                candidates.extend(
-                    parse_document(content, f"{source}:{entry.filename}", ocr)
-                )
+                documents.append((path.suffix.lower(), entry))
+            pdfs = [entry for suffix, entry in documents if suffix == ".pdf"]
+            for entry in [entry for suffix, entry in documents if suffix == ".xml"]:
+                candidates.extend(_zip_member(archive, entry, source, ocr))
+            # One PDF per XML invoice is its graphic rendering (DIAN layout); XML data wins.
+            if not candidates or len(pdfs) != len(candidates):
+                for entry in pdfs:
+                    candidates.extend(_zip_member(archive, entry, source, ocr))
     except BadZipFile as exc:
         raise DocumentError("Invalid ZIP attachment") from exc
     if not candidates:
