@@ -4,23 +4,5 @@
   "browser_executable": "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe",
   "outlook_url": "https://outlook.live.com/mail/0/",
   "max_messages": 200,
-  "selectors_verified": false,
-  "folder_scan_verified": false,
-  "selectors": {
-    "search": "input[placeholder='Buscar']",
-    "all_folders": "[role='option'][aria-label='Todas las carpetas']",
-    "all_folders_active": "[aria-label='Todas las carpetas'][aria-selected='true']",
-    "results_ready": "[role='listbox'][aria-label='Resultados de la búsqueda']",
-    "rows": "[role='option'][data-itemid]",
-    "row_sender": "[email]",
-    "row_subject": "[data-testid='message-subject']",
-    "scroll_container": "[role='listbox'][aria-label='Resultados de la búsqueda']",
-    "selected_row": "[role='option'][data-itemid][aria-selected='true']",
-    "message": "[data-testid='message-reading-pane']",
-    "sender": "[email]",
-    "subject": "[data-testid='message-subject']",
-    "received": "time[datetime]",
-    "body": "[role='document']",
-    "thread_messages": "[data-testid='message-container']"
-  }
+  "folder_scan_verified": false
 }

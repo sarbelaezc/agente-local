@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("serve", "login", "pilot", "discover", "scan", "summary", "scheduled", "check-config")]
+    [ValidateSet("serve", "login", "pilot", "scan", "summary", "scheduled", "check-config")]
     [string]$Command = "serve",
     [string]$DataDir = (Join-Path $env:LOCALAPPDATA "MonthlyCloseAgent"),
     [string]$Start,

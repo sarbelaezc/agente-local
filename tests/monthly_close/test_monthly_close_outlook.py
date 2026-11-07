@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright
 
 from monthly_close import main as app
 from monthly_close.domain import CATEGORIES, Preferences
-from monthly_close.outlook import Candidate, OutlookError, OutlookReader
+from monthly_close.outlook import Candidate, OutlookError, guard_page
 from monthly_close.store import Store
 
 URL = "https://outlook.live.com/mail/0/"
@@ -33,16 +33,6 @@ HTML = """
 </body></html>
 """
 
-SELECTORS = {
-    "search": "#search", "all_folders": "#all-folders", "all_folders_active": "#active",
-    "results_ready": "#results", "rows": "#results [role='option']",
-    "row_sender": "[email]", "row_subject": ".subject", "scroll_container": "#results",
-    "selected_row": "#results [aria-selected='true']", "message": "#pane",
-    "sender": "[email]", "subject": ".subject", "received": "time",
-    "body": "[role='document']", "thread_messages": ".thread",
-}
-
-
 @pytest.fixture
 def page():
     with sync_playwright() as playwright:
@@ -58,49 +48,10 @@ def page():
             browser.close()
 
 
-def test_search_reads_matching_message_without_modifying_mail(page):
-    reader = OutlookReader(page, URL, SELECTORS)
-    reader.search("from:(avisos@example.test)")
-    candidates = reader.candidates()
-    assert len(candidates) == 1
-    mail = reader.read(candidates[0])
-    assert mail.sender == "avisos@example.test"
-    assert mail.body == "Compraste en Tienda $ 1.234,56."
-    assert mail.received == "2026-03-01T02:15:00Z"
-    assert len(mail.id) == 64
-    assert reader.next_page(candidates) is False
-
-
-def test_ambiguous_selector_stops(page):
-    page.locator("#pane").evaluate(
-        "el => el.appendChild(el.querySelector('[email]').cloneNode(true))"
-    )
-    reader = OutlookReader(page, URL, SELECTORS)
-    with pytest.raises(OutlookError, match="ambiguo"):
-        reader.read(reader.candidates()[0])
-
-
-def test_opened_sender_must_match_expected_sender(page):
-    page.locator("#pane [email]").evaluate("el => el.setAttribute('email','other@example.test')")
-    reader = OutlookReader(page, URL, SELECTORS)
-    with pytest.raises(OutlookError, match="remitente abierto"):
-        reader.read(reader.candidates()[0])
-
-
-def test_thread_without_individual_messages_stops(page):
-    page.locator("#pane").evaluate(
-        "el => el.appendChild(el.querySelector('.thread').cloneNode(true))"
-    )
-    reader = OutlookReader(page, URL, SELECTORS)
-    with pytest.raises(OutlookError, match="Hilo"):
-        reader.read(reader.candidates()[0])
-
-
 def test_authentication_redirect_stops(page):
-    reader = OutlookReader(page, URL, SELECTORS)
     page.goto("https://login.live.com/")
     with pytest.raises(OutlookError, match="Autenticacion"):
-        reader.candidates()
+        guard_page(page, "outlook.live.com")
 
 
 def test_mfa_inside_outlook_stops(page):
@@ -108,19 +59,7 @@ def test_mfa_inside_outlook_stops(page):
         "el => { const input=document.createElement('input'); input.name='otc'; el.append(input); }"
     )
     with pytest.raises(OutlookError, match="MFA"):
-        OutlookReader(page, URL, SELECTORS).candidates()
-
-
-def test_limit_stops_before_reading_extra_messages(page):
-    reader = OutlookReader(page, URL, SELECTORS)
-    with pytest.raises(OutlookError, match="Limite"):
-        reader.walk("test", 0, lambda candidate: pytest.fail("No debe abrir mensajes."))
-
-
-def test_all_folders_marker_is_required(page):
-    page.locator("#active").evaluate("el => el.remove()")
-    with pytest.raises(OutlookError, match="all_folders_active"):
-        OutlookReader(page, URL, SELECTORS).candidates()
+        guard_page(page, "outlook.live.com")
 
 
 def test_scan_rejects_sender_before_opening_body(page, tmp_path, monkeypatch):
@@ -141,6 +80,7 @@ def test_scan_rejects_sender_before_opening_body(page, tmp_path, monkeypatch):
 
     monkeypatch.setattr(app, "browser", fake_browser)
     monkeypatch.setattr(app, "OllamaJsonModel", NoModel)
+    monkeypatch.setattr(app, "require_model", lambda settings: None)
     monkeypatch.setattr(
         app.OutlookSourceReader, "walk_folders",
         lambda reader, limit, visit: visit(Candidate("message-1", "other@example.test", "Compra")),

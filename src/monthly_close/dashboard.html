@@ -474,7 +474,7 @@
           const response = await fetch("/api/state", { headers: { Accept: "application/json" }, cache: "no-store" });
           if (!response.ok) throw new Error(`El servidor respondió ${response.status} ${response.statusText || ""}`.trim());
           const data = await response.json();
-          if (!data || typeof data.configured !== "boolean" || !Array.isArray(data.transactions) || !Array.isArray(data.categories) || !Array.isArray(data.coverage) || !Array.isArray(data.discoveries)) {
+          if (!data || typeof data.configured !== "boolean" || !Array.isArray(data.transactions) || !Array.isArray(data.categories) || !Array.isArray(data.coverage)) {
             throw new Error("La respuesta de /api/state no coincide con el contrato esperado.");
           }
           state.data = data;

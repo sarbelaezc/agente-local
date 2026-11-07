@@ -604,7 +604,7 @@ def pilot(page, tmp_path, monkeypatch):
     monkeypatch.setattr(app, "browser", fake_browser)
     settings = {
         "outlook_url": URL, "ollama_url": "http://127.0.0.1:11436",
-        "ollama_model": "local-test", "selectors_verified": False,
+        "ollama_model": "local-test",
     }
     return store, settings, tmp_path
 
@@ -618,7 +618,6 @@ def test_read_only_pilot_uses_one_notice_and_never_calls_model_or_imports(pilot,
     with store.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM processed").fetchone()[0] == 0
     assert store.state()["transactions"] == []
-    assert settings["selectors_verified"] is False
 
 
 def test_full_pilot_persists_only_unapproved_proposals(pilot, monkeypatch):

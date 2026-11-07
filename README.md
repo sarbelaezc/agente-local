@@ -239,19 +239,10 @@ su registro y auditoría; no hace falta reimportar.
    el piloto MIME de abajo, establece `folder_scan_verified: true` en el archivo
    local. La plantilla lo deja en `false`; un cambio de DOM exige recalibración,
    nunca relajar controles ni omitir una carpeta que falle.
-5. Aprueba direcciones exactas de tus avisos bancarios en el panel. El comando
-   antiguo de descubrimiento global sigue disponible, pero **no está calibrado
-   para este buzón**:
-
-   ```powershell
-   .\scripts\run-monthly-close.ps1 -Command discover -Start 2026-10-01 -End 2026-11-01
-   ```
-
-   `discover` exige su propia calibración de `selectors` y
-   `selectors_verified: true`; activar `folder_scan_verified` no lo habilita.
-   Los `data-testid` de la plantilla son orientativos, no controles reales
-   garantizados. Ese descubrimiento lee remitente y asunto, no cuerpos, y
-   muestra hallazgos en el panel; nunca aprueba direcciones automáticamente.
+5. Aprueba en el panel las direcciones exactas de tus avisos bancarios. El comando
+   `discover` (búsqueda global con selectores propios) se retiró: nunca se calibró
+   para este buzón y el panel no mostraba sus hallazgos. Las claves `selectors` y
+   `selectors_verified` que queden en un `runtime.json` existente se ignoran.
 6. Inicia una tercera instancia de Ollama, separada de facturas (`11434`) y
    Teams (`11435`). En otra terminal:
 
@@ -264,6 +255,9 @@ su registro y auditoría; no hace falta reimportar.
    En otra consola con las mismas variables, descarga el modelo configurado:
    `ollama pull qwen2.5:7b`. La descarga inicial necesita Internet; la inferencia
    usa únicamente loopback, sin proxies ni herramientas para el modelo.
+   `scan` (sin `-ReadOnly`), la tarea programada y `pilot` comprueban que esta
+   instancia tiene el modelo configurado **antes** de abrir Outlook; si no, se
+   detienen sin recorrer carpetas ni marcar cobertura.
 7. Importa de enero al mes anterior con `-Command scan` sin fechas, o indica
    `-Start` y `-End` (fin exclusivo). Ejemplo:
 
@@ -545,13 +539,12 @@ por correo ni garantía de ejecución si el equipo está apagado.
 
 - `scan` inspecciona remitente, identificador y posición de todas las filas para
   verificar el recorrido. Solo lee asunto y origen MIME de remitentes aprobados;
-  los demás no se abren ni se mandan a Ollama. `discover`, solicitado expresamente,
-  puede leer también asuntos de remitentes aún no aprobados. No se transmiten
+  los demás no se abren ni se mandan a Ollama. No se transmiten
   mensajes a servicios de IA externos.
 - El navegador sí se comunica con Microsoft. El modelo no dispone de terminal,
   disco, red ni herramientas; sus respuestas JSON se validan y jamás se ejecutan.
 - No se guardan cuerpos en SQLite ni en logs. Se retienen los hechos financieros,
-  decisiones, remitentes/asuntos descubiertos y auditoría local hasta borrado
+  decisiones y auditoría local hasta borrado
   manual. El perfil de navegador conserva sesión y caché administradas por el
   navegador; protégelo como información sensible.
 - Para borrar todos los datos de esta función: detén panel, lecturas y tarea;

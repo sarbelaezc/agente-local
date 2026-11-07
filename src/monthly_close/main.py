@@ -22,7 +22,7 @@ from mail_invoices.local_model import LocalModelError, validate_local_url
 from monthly_close.model import OllamaJsonModel
 from monthly_close.domain import Preferences, received_local
 from monthly_close.extraction import extract
-from monthly_close.outlook import Candidate, OutlookError, OutlookReader, validate_url
+from monthly_close.outlook import Candidate, OutlookError, validate_url
 from monthly_close.server import create_server
 from monthly_close.source_reader import OutlookSourceReader
 from monthly_close.store import Store
@@ -61,8 +61,6 @@ def runtime(data_dir: Path) -> dict:
         raise ValueError("max_messages debe estar entre 1 y 10000.")
     if not isinstance(raw.get("ollama_model"), str) or not raw["ollama_model"].strip():
         raise ValueError("Configura ollama_model.")
-    if not isinstance(raw.get("selectors"), dict):
-        raise ValueError("Configura los selectores.")
     return raw
 
 
@@ -106,18 +104,8 @@ def scheduled_month(now: datetime, timezone: str) -> str | None:
 
 def scan(
     store: Store, data_dir: Path, settings: dict, preferences: Preferences,
-    start: date, end: date, discover: bool = False, read_only: bool = False,
+    start: date, end: date, read_only: bool = False,
 ) -> None:
-    if discover:
-        if settings.get("selectors_verified") is not True:
-            raise ValueError("El descubrimiento global requiere selectores verificados; sigue bloqueado.")
-        if read_only:
-            raise ValueError("Usa scan --read-only para validar las carpetas sin descubrimiento.")
-        with browser(data_dir, settings) as page:
-            reader = OutlookReader(page, settings["outlook_url"], settings["selectors"])
-            query = f"received:>={start.isoformat()} received:<{end.isoformat()}"
-            reader.walk(query, settings["max_messages"], lambda row: store.discover(row.sender, row.subject))
-        return
     if not read_only and settings.get("folder_scan_verified") is not True:
         raise ValueError(
             "Recorrido de carpetas no verificado. Ejecuta scan --read-only y valida "
@@ -128,6 +116,7 @@ def scan(
     if start >= end:
         raise ValueError("El inicio debe ser anterior al fin exclusivo.")
     if not read_only:
+        require_model(settings)
         for month in months(start, end):
             store.coverage(
                 month, "partial",
@@ -188,23 +177,28 @@ def scan(
         print("Solo metadatos: sin abrir mensajes, Ollama, importaciones ni cambios de decisiones.")
 
 
+def require_model(settings: dict) -> None:
+    """Fail before opening Outlook if the exclusive Ollama instance lacks the model."""
+    try:
+        with httpx.Client(timeout=10, trust_env=False) as client:
+            response = client.get(settings["ollama_url"] + "/api/tags")
+            response.raise_for_status()
+        payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise LocalModelError("Se requiere la instancia exclusiva de Ollama activa.") from exc
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, list) or not any(
+        isinstance(model, dict) and model.get("name") == settings["ollama_model"]
+        for model in models
+    ):
+        raise LocalModelError("El modelo configurado no esta instalado en Ollama del cierre mensual.")
+
+
 def run_pilot(store: Store, data_dir: Path, settings: dict, read_only: bool) -> None:
     """Validate or import at most one visible authorized notice, without a broad scan."""
     preferences = store.preferences()
     if not read_only:
-        try:
-            with httpx.Client(timeout=10, trust_env=False) as client:
-                response = client.get(settings["ollama_url"] + "/api/tags")
-                response.raise_for_status()
-            payload = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise LocalModelError("El piloto requiere la instancia exclusiva de Ollama activa.") from exc
-        models = payload.get("models") if isinstance(payload, dict) else None
-        if not isinstance(models, list) or not any(
-            isinstance(model, dict) and model.get("name") == settings["ollama_model"]
-            for model in models
-        ):
-            raise LocalModelError("El modelo configurado no esta instalado en Ollama del cierre mensual.")
+        require_model(settings)
     with browser(data_dir, settings) as page:
         reader = OutlookSourceReader(page, settings["outlook_url"], preferences.approved_senders)
         mail = reader.read(reader.candidate())
@@ -280,13 +274,8 @@ def run(args: argparse.Namespace) -> None:
     end = date.fromisoformat(args.end) if args.end else now.date().replace(day=1)
     if start >= end:
         raise ValueError("Usa --start y --end (fin exclusivo); el rango debe contener dias.")
-    scan(
-        store, data_dir, settings, preferences, start, end,
-        discover=args.command == "discover", read_only=args.read_only,
-    )
-    if args.command == "discover":
-        print("Remitentes y asuntos visibles en el panel. Aprueba solo avisos financieros.")
-    elif not args.read_only:
+    scan(store, data_dir, settings, preferences, start, end, read_only=args.read_only)
+    if not args.read_only:
         print("Importacion terminada. Revisa movimientos, meses parciales y decisiones en el panel.")
 
 
@@ -294,7 +283,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Cierre mensual local: Outlook Web + Ollama.")
     parser.add_argument(
         "command",
-        choices=["serve", "login", "pilot", "discover", "scan", "summary", "scheduled", "check-config"],
+        choices=["serve", "login", "pilot", "scan", "summary", "scheduled", "check-config"],
     )
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
     parser.add_argument("--port", type=int, default=8766)
