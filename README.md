@@ -876,7 +876,10 @@ Teams continúa separado en los paquetes `app`, `automation`, `ai`, `storage` y
 
 Se preparó un módulo de facturas independiente del de Teams, con extracción
 local de XML UBL, ZIP y PDF con texto. La lectura de XML sigue siendo la fuente
-preferida para los datos estructurados de la factura.
+preferida para los datos estructurados de la factura. En un ZIP con tantos PDF
+como facturas XML (estructura DIAN: XML más su representación gráfica), los PDF
+no se analizan ni pasan por OCR u Ollama; un PDF ilegible ya no bloquea la
+factura XML válida. Si las cantidades difieren, se analizan todos los PDF como antes.
 
 ### Ollama local y OCR
 
@@ -1085,7 +1088,9 @@ y continúa solo el archivo. Antes del clic de mover se guarda `moving`. Si el
 proceso se interrumpe ahí, la siguiente ejecución **solo comprueba la carpeta
 aprobada y nunca vuelve a mover automáticamente**. Si no puede verificarla,
 permanece pendiente de revisión con un error explícito. `moved` no se procesa
-de nuevo. Un conflicto de registro bloquea el archivo.
+de nuevo. Un conflicto de registro bloquea el archivo. Si el Excel está abierto
+al ejecutar, el correo conserva su estado `approved` con el error y se reintenta
+tras cerrar el libro; no pasa a `blocked` ni exige volver a aprobarlo.
 Los correos `blocked` muestran campos editables precargados con la última revisión.
 Corrija el conflicto en Excel o los datos de la ventana y seleccione explícitamente
 el correo para volver a aprobarlo. Cerrar no altera su estado ni su autorización.

@@ -177,7 +177,8 @@ class InvoiceWorkbook:
         if self.path.suffix.lower() != ".xlsx":
             raise WorkbookError("Only the reviewed XLSX workbook format is supported")
         if self.path.with_name("~$" + self.path.name).exists():
-            raise WorkbookError("Close the workbook in Excel before approving a batch")
+            # Transient, not a conflict: batch approvals stay retryable instead of blocked.
+            raise PermissionError("Close the workbook in Excel before approving a batch")
         original_hash = hashlib.sha256(self.path.read_bytes()).hexdigest()
         workbook = load_workbook(self.path)
         temporary: Path | None = None

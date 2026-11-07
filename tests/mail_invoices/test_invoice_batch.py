@@ -243,6 +243,26 @@ def test_company_conflict_is_durable_and_can_be_reapproved(stores, monkeypatch, 
     assert journal.load()[0].state == "moved"
 
 
+def test_open_workbook_keeps_approval_for_retry(stores, monkeypatch):
+    journal, workbook, decisions = stores
+    message = approved()
+    journal.save([message])
+    lock = workbook.path.with_name("~$" + workbook.path.name)
+    lock.write_bytes(b"")
+    monkeypatch.setattr(batch_workflow, "move_registered_message", lambda *a, **kw: pytest.fail("Move attempted"))
+    with pytest.raises(PermissionError):
+        batch_workflow.execute_message(message, journal, workbook, decisions, None)
+    assert journal.load()[0].state == "approved"
+    lock.unlink()
+    mock_folders(monkeypatch)
+    monkeypatch.setattr(
+        batch_workflow, "move_registered_message",
+        lambda page, data, folder, *, approved, before_move: before_move(),
+    )
+    batch_workflow.execute_message(journal.load()[0], journal, workbook, decisions, None)
+    assert journal.load()[0].state == "moved"
+
+
 @pytest.mark.parametrize("state", ["pending", "blocked", "moved"])
 def test_non_executable_states_have_no_side_effects(stores, state):
     journal, _, _ = stores
