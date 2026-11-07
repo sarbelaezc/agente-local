@@ -6,9 +6,11 @@ from contextlib import contextmanager
 from datetime import date
 
 import pytest
+import httpx
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
 
+from mail_invoices.local_model import LocalModelError
 from monthly_close import main as app
 from monthly_close.domain import CATEGORIES, Preferences
 from monthly_close.extraction import Mail
@@ -176,7 +178,7 @@ def test_scan_allows_read_only_preflight_without_enabling_or_persisting(page, tm
     settings = {
         "outlook_url": URL, "ollama_url": "http://127.0.0.1:11436",
         "ollama_model": "local-test", "max_messages": 5,
-        "folder_scan_verified": False, "selectors_verified": False,
+        "folder_scan_verified": False,
     }
     app.scan(
         store, tmp_path, settings, prefs, date(2026, 2, 1), date(2026, 3, 1), read_only=True,
@@ -266,10 +268,34 @@ def test_normal_scan_requires_its_own_gate_before_starting_browser(tmp_path, mon
     )
     monkeypatch.setattr(app, "browser", lambda *args: pytest.fail("No debe abrirse Outlook."))
     with pytest.raises(ValueError, match="Recorrido de carpetas"):
-        app.scan(
-            store, tmp_path, {"selectors_verified": True}, prefs,
-            date(2026, 2, 1), date(2026, 3, 1),
-        )
+        app.scan(store, tmp_path, {}, prefs, date(2026, 2, 1), date(2026, 3, 1))
+
+
+def test_scan_checks_ollama_before_opening_outlook(tmp_path, monkeypatch):
+    store = Store(tmp_path / "test.sqlite3")
+    prefs = Preferences(
+        "Prueba", "America/Bogota", "COP", ["Tarjeta A"], [], "Familiar",
+        True, True, [SENDER], CATEGORIES, True,
+    )
+    monkeypatch.setattr(app, "browser", lambda *args: pytest.fail("No debe abrirse Outlook."))
+    original_client = httpx.Client
+    monkeypatch.setattr(app.httpx, "Client", lambda **kwargs: original_client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"models": []})),
+    ))
+    settings = {
+        "folder_scan_verified": True, "ollama_url": "http://127.0.0.1:11436",
+        "ollama_model": "local-test",
+    }
+    with pytest.raises(LocalModelError, match="no esta instalado"):
+        app.scan(store, tmp_path, settings, prefs, date(2026, 2, 1), date(2026, 3, 1))
+    assert store.state()["coverage"] == []
+
+
+def test_removed_discover_command_is_rejected(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["monthly_close", "discover"])
+    with pytest.raises(SystemExit) as exc:
+        app.main()
+    assert exc.value.code == 2
 
 
 def test_date_cutoff_stops_only_current_folder_and_requires_newest_first(page):
@@ -373,6 +399,7 @@ def test_scan_skips_newer_mail_and_stops_before_start_in_each_folder(
     monkeypatch.setattr(app, "browser", browser)
     monkeypatch.setattr(app.OutlookSourceReader, "read", read)
     monkeypatch.setattr(app, "OllamaJsonModel", Model)
+    monkeypatch.setattr(app, "require_model", lambda settings: None)
     app.scan(
         store, tmp_path, {
             "outlook_url": URL, "ollama_url": "http://127.0.0.1:11436",
@@ -433,10 +460,11 @@ def test_real_scan_covers_spam_deleted_filters_dates_and_preserves_choices(page,
     monkeypatch.setattr(app, "browser", fake_browser)
     monkeypatch.setattr(app.OutlookSourceReader, "read", read)
     monkeypatch.setattr(app, "OllamaJsonModel", Model)
+    monkeypatch.setattr(app, "require_model", lambda settings: None)
     settings = {
         "outlook_url": URL, "ollama_url": "http://127.0.0.1:11436",
         "ollama_model": "local-test", "max_messages": 6,
-        "folder_scan_verified": True, "selectors_verified": False,
+        "folder_scan_verified": True,
     }
     app.scan(store, tmp_path, settings, prefs, date(2026, 2, 1), date(2026, 3, 1))
     assert reads == ["in-0", "in-2", "spam-0", "del-0"]
@@ -707,7 +735,7 @@ def test_runtime_bounds_for_large_folder_trees(tmp_path, limit, valid):
     settings = {
         "ollama_url": "http://127.0.0.1:11436", "ollama_model": "local-test",
         "browser_executable": sys.executable, "outlook_url": URL,
-        "max_messages": limit, "selectors": {},
+        "max_messages": limit,
     }
     (tmp_path / "runtime.json").write_text(json.dumps(settings), encoding="utf-8")
     if valid:

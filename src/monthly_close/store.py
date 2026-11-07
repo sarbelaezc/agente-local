@@ -27,10 +27,6 @@ CREATE TABLE IF NOT EXISTS scan_progress (
 CREATE TABLE IF NOT EXISTS coverage (
     month TEXT PRIMARY KEY, status TEXT NOT NULL, note TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS discoveries (
-    sender TEXT NOT NULL, subject TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1,
-    PRIMARY KEY (sender, subject)
-);
 CREATE TABLE IF NOT EXISTS audit (
     id INTEGER PRIMARY KEY, at TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,
     value TEXT NOT NULL
@@ -198,14 +194,6 @@ class Store:
                 )
             self._audit(db, "coverage", month, status)
 
-    def discover(self, sender: str, subject: str) -> None:
-        with self.connect() as db:
-            db.execute(
-                """INSERT INTO discoveries VALUES (?,?,1)
-                ON CONFLICT(sender,subject) DO UPDATE SET count=count+1""",
-                (clean_text(sender, 150), clean_text(subject, 300)),
-            )
-
     def state(self) -> dict:
         with self.connect() as db:
             raw = db.execute("SELECT value FROM settings WHERE id=1").fetchone()
@@ -220,7 +208,6 @@ class Store:
                     )
                 ],
                 "coverage": [dict(row) for row in db.execute("SELECT * FROM coverage ORDER BY month")],
-                "discoveries": [dict(row) for row in db.execute("SELECT * FROM discoveries ORDER BY sender")],
             }
 
     def summary(self, month: str) -> str:

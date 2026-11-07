@@ -77,6 +77,7 @@ def test_scan_resumes_failed_notice_without_rereading_completed_or_losing_decisi
     monkeypatch.setattr(app, "browser", lambda *args: nullcontext(None))
     monkeypatch.setattr(app, "OutlookSourceReader", Reader)
     monkeypatch.setattr(app, "OllamaJsonModel", lambda *args: Model())
+    monkeypatch.setattr(app, "require_model", lambda settings: None)
     settings = {"folder_scan_verified": True, "outlook_url": "https://outlook.live.com/mail/0/",
                 "ollama_url": "http://127.0.0.1:11436", "ollama_model": "test", "max_messages": 10}
     args = (store, tmp_path, settings, preferences, date(2026, 2, 1), date(2026, 3, 1))
