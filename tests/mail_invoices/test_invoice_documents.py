@@ -41,6 +41,84 @@ def test_zip_xml_is_read_without_extracting_files():
     assert parse_document(stream.getvalue(), "invoice.zip")[0].number == "TEST-001"
 
 
+def _blank_pdf() -> bytes:
+    writer = PdfWriter()
+    writer.add_blank_page(width=600, height=800)
+    stream = BytesIO()
+    writer.write(stream)
+    return stream.getvalue()
+
+
+def test_zip_pdf_rendering_of_xml_invoice_is_not_parsed():
+    stream = BytesIO()
+    with ZipFile(stream, "w") as archive:
+        archive.writestr("invoice.xml", XML)
+        archive.writestr("invoice.pdf", _blank_pdf())
+    candidates = parse_document(stream.getvalue(), "invoice.zip")
+    assert [(c.number, c.method) for c in candidates] == [("TEST-001", "xml")]
+
+
+def test_zip_extra_pdf_without_xml_pair_is_still_parsed():
+    stream = BytesIO()
+    with ZipFile(stream, "w") as archive:
+        archive.writestr("invoice.xml", XML)
+        archive.writestr("invoice.pdf", _blank_pdf())
+        archive.writestr("other.pdf", _blank_pdf())
+    with pytest.raises(DocumentError, match="Scanned PDF"):
+        parse_document(stream.getvalue(), "invoice.zip")
+
+
+def test_zip_unpaired_pdf_is_parsed_even_when_counts_match():
+    stream = BytesIO()
+    with ZipFile(stream, "w") as archive:
+        archive.writestr("invoice.xml", XML)
+        archive.writestr("other.pdf", _blank_pdf())
+    with pytest.raises(DocumentError, match="Scanned PDF"):
+        parse_document(stream.getvalue(), "invoice.zip")
+
+
+def test_zip_failed_pdf_is_reported_without_losing_valid_xml():
+    stream = BytesIO()
+    with ZipFile(stream, "w") as archive:
+        archive.writestr("invoice.xml", XML)
+        archive.writestr("other.pdf", _blank_pdf())
+    errors = []
+    candidates = parse_document(stream.getvalue(), "invoice.zip", member_errors=errors)
+    assert [(c.number, c.method) for c in candidates] == [("TEST-001", "xml")]
+    assert len(errors) == 1 and errors[0][0] == "invoice.zip:other.pdf"
+    assert "Scanned PDF" in errors[0][1]
+
+    stream = BytesIO()
+    with ZipFile(stream, "w") as archive:
+        archive.writestr("other.pdf", _blank_pdf())
+    with pytest.raises(DocumentError, match="Scanned PDF"):
+        parse_document(stream.getvalue(), "invoice.zip", member_errors=[])
+
+
+def test_zip_pdf_named_by_invoice_number_is_paired_once():
+    stream = BytesIO()
+    with ZipFile(stream, "w") as archive:
+        archive.writestr("ad0900.xml", XML)
+        archive.writestr("Factura_TEST-001.pdf", _blank_pdf())
+    candidates = parse_document(stream.getvalue(), "invoice.zip")
+    assert [(c.number, c.method) for c in candidates] == [("TEST-001", "xml")]
+
+    stream = BytesIO()
+    with ZipFile(stream, "w") as archive:
+        archive.writestr("ad0900.xml", XML)
+        archive.writestr("ad0900.pdf", _blank_pdf())
+        archive.writestr("TEST-001.pdf", _blank_pdf())
+    with pytest.raises(DocumentError, match="Scanned PDF"):
+        parse_document(stream.getvalue(), "invoice.zip")
+
+    stream = BytesIO()
+    with ZipFile(stream, "w") as archive:
+        archive.writestr("ad0900.xml", XML)
+        archive.writestr("otros/ad0900.pdf", _blank_pdf())
+    with pytest.raises(DocumentError, match="Scanned PDF"):
+        parse_document(stream.getvalue(), "invoice.zip")
+
+
 def test_xml_extracts_invoice_line_concepts_without_customer_data():
     line = b"""<cac:InvoiceLine><cac:Item>
     <cbc:Description>Consulta  medicina general</cbc:Description>

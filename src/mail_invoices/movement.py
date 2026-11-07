@@ -127,31 +127,3 @@ def move_registered_message(
     verify_destination(page, message, folder)
     message["movement_status"] = "verified"
 
-
-def approve_movement(message: dict, folders: list[str]) -> str | None:
-    import tkinter as tk
-    from tkinter import ttk, messagebox
-
-    root = tk.Tk()
-    root.title("Aprobar movimiento de UN correo")
-    root.geometry("850x330")
-    ttk.Label(
-        root, text=f"{message['subject']}\nRegistro de todas las facturas verificado en Excel.\n"
-        "Revise el destino. Pulsar Aprobar y mover autoriza el movimiento real de este correo.",
-        wraplength=800, padding=15,
-    ).pack()
-    folder = tk.StringVar(value=message.get("reviewed_folder") or "")
-    ttk.Combobox(root, textvariable=folder, values=folders, state="readonly", width=65).pack()
-    approved = []
-
-    def confirm() -> None:
-        if folder.get() not in folders:
-            messagebox.showerror("Destino requerido", "Seleccione una carpeta existente.", parent=root)
-            return
-        approved.append(folder.get())
-        root.destroy()
-
-    ttk.Button(root, text="Aprobar y mover este correo", command=confirm).pack(pady=15)
-    ttk.Button(root, text="Cancelar (no mover)", command=root.destroy).pack()
-    root.mainloop()
-    return approved[0] if approved else None

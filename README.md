@@ -840,8 +840,8 @@ Ejecuta todas con `.\.venv\Scripts\python.exe -m pytest`, o solo una feature con
 para probar otra feature).
 `mail_invoices` agrupa la funcionalidad de facturas:
 
-- `main.py`: argumentos y selección del modo de ejecución; conserva los comandos.
-- `workflow.py`: orquesta sesión, descarga, extracción y revisión.
+- `main.py`: argumentos y selección del modo de ejecución.
+- `workflow.py`: modos de solo lectura y extracción compartida de adjuntos.
 - `review.py`: datos y reglas de revisión, sin depender de Tkinter.
 - `review_ui.py`: ventana, selección y aprobación humana.
 - `browser.py` e `inbox.py`: interacción con Opera y Outlook.
@@ -869,7 +869,18 @@ Teams continúa separado en los paquetes `app`, `automation`, `ai`, `storage` y
 
 Se preparó un módulo de facturas independiente del de Teams, con extracción
 local de XML UBL, ZIP y PDF con texto. La lectura de XML sigue siendo la fuente
-preferida para los datos estructurados de la factura.
+preferida para los datos estructurados de la factura. Dentro de un ZIP, un PDF
+se trata como la representación gráfica de un XML (estructura DIAN) y no se
+analiza ni pasa por OCR u Ollama solo si se empareja de forma uno a uno e
+inequívoca con ese XML: mismo nombre de archivo sin extensión, o el número de
+factura del XML como palabra del nombre del PDF. Así un PDF ilegible no bloquea
+la factura XML válida. Cualquier PDF sin pareja inequívoca se sigue analizando,
+aunque el ZIP traiga tantos PDF como XML. Si un archivo del ZIP falla y otro es
+válido, se conservan las facturas válidas y el fallo se informa con la ruta de
+ese archivo (`adjunto.zip:archivo.pdf`). Ese error sigue bloqueando el correo en
+el lote hasta revisarlo, porque el archivo ilegible podría ser otra factura. Si
+ningún archivo del ZIP es válido, falla todo el adjunto como antes. Probado con ZIP sintéticos; falta
+confirmar los nombres que usan los proveedores reales.
 
 ### Ollama local y OCR
 
@@ -911,8 +922,7 @@ destinos. El lector de historial requiere autorización por carpeta. Se revisaro
 63 carpetas y se guardaron 291 ejemplos de remitente/asunto, excluyendo una fila
 sin dirección verificable; esos ejemplos no incluyen cuerpos o facturas históricas
 ni se cargan automáticamente. Son contexto, no entrenamiento de pesos. El movimiento
-se habilita solo con aprobación en el modo integrado de un correo o en lotes
-supervisados pequeños, descritos abajo.
+se habilita solo con aprobación en lotes supervisados pequeños, descritos abajo.
 
 ### Simular clasificación de facturas (sin mover)
 
@@ -985,43 +995,8 @@ mensajes), por ejemplo:
 
 `--no-model` omite Ollama. La prueba real sin historial encontró las carpetas
 y facturas pendientes en el Excel original; por ello no se efectuó ningún
-movimiento. La simulación nunca mueve; el movimiento real requiere el modo
-integrado y la aprobación explícita de su destino.
-
-### Prueba integrada de UN correo (escribe Excel y mueve con aprobación)
-
-```powershell
-.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --process-one-invoice --days 30
-```
-
-Procesa únicamente el primer candidato, independientemente de `batch_limit`:
-descarga y extrae las facturas, abre la revisión habitual y registra solo las
-seleccionadas al pulsar «Aprobar y guardar lote». El escritor crea el respaldo
-del Excel. Deben quedar registradas TODAS las facturas del correo y no existir
-errores de extracción para habilitar el movimiento. Cancelar o aprobar solo
-parte del correo bloquea su archivo, sin deshacer registros ya aprobados.
-
-Después permite revisar y guardar ejemplos de carpeta. Esto no mueve nada.
-Una ventana separada **«Aprobar movimiento de UN correo»** exige seleccionar
-un destino existente y pulsar **«Aprobar y mover este correo»**. Cancelar deja
-el correo en la bandeja y conserva el registro de Excel. Se vuelve a comprobar
-el registro después de esta aprobación y se valida la identidad estable del
-correo antes de mover. Se verifica que aparece en la carpeta aprobada.
-
-Si falla la verificación tras intentar mover, el informe indica
-`movement_status: unverified`; no se reintenta automáticamente. Revise Outlook
-antes de repetir la prueba: Excel y Outlook no forman una transacción atómica.
-No crea carpetas y no procesa otros correos. Ollama sigue proponiendo, no
-autorizando destinos; sus sugerencias pueden ser incorrectas.
-
-Se verificó una prueba con un correo real: registro aprobado en el Excel
-original, creación de respaldo, corrección y guardado local del destino,
-aprobación del movimiento y presencia del mismo correo en la carpeta elegida.
-Una sesión nueva confirmó el registro y el destino sin escribir en Excel.
-La primera tentativa se bloqueó antes de mover por la carga asíncrona del árbol;
-se añadió la espera y se reanudó solo el movimiento aprobado, sin repetir la
-escritura. En esa etapa la suite pasó 138 pruebas. Esto valida una prueba controlada, no
-clasificación masiva ni precisión general del modelo.
+movimiento. La simulación nunca mueve; el movimiento real requiere un lote
+supervisado y la aprobación explícita de su destino.
 
 ### Lotes pequeños con revisión unificada y estados locales
 
@@ -1030,7 +1005,9 @@ clasificación masiva ni precisión general del modelo.
 ```
 
 Prepara hasta 3 correos por defecto (entre 1 y 5 con `--batch-size`, independiente
-del `batch_limit` de los modos anteriores). La ventana muestra las facturas
+de `invoices.batch_limit`, que solo usa `--classify-invoices`). Cada ejecución abre
+Opera una sola vez y reutiliza esa sesión para clasificar, revisar y archivar;
+`--resume-invoice-batch` sin pendientes termina sin abrir Opera. La ventana muestra las facturas
 editables, la carpeta sugerida y los errores de cada correo. La selección es por
 correo, empieza desmarcada e incluye TODAS sus facturas; un adjunto con errores
 bloquea la selección. Puede usar «Seleccionar correos aptos» y desmarcar después.
@@ -1046,6 +1023,10 @@ extracción o identidad siguen bloqueando el correo.
 Una diferencia entre el número del asunto y el XML/PDF se muestra como advertencia
 corregible, no como aprobación automática: contraste el documento y corrija el
 campo antes de aprobar el correo completo.
+La columna `Empresa` se sugiere a partir del historial del Excel cuando todas las
+filas con la misma razón social usan la misma empresa; si no hay una coincidencia
+histórica inequívoca, usa la razón social del documento. Verifique la sugerencia.
+El campo «Aprobado por» se precarga con `approver` y sigue siendo editable.
 
 **«Aprobar y ejecutar lote»** guarda las aprobaciones y autoriza, para cada correo
 seleccionado, registro en Excel con respaldo, guardado local de la carpeta como
@@ -1078,7 +1059,9 @@ y continúa solo el archivo. Antes del clic de mover se guarda `moving`. Si el
 proceso se interrumpe ahí, la siguiente ejecución **solo comprueba la carpeta
 aprobada y nunca vuelve a mover automáticamente**. Si no puede verificarla,
 permanece pendiente de revisión con un error explícito. `moved` no se procesa
-de nuevo. Un conflicto de registro bloquea el archivo.
+de nuevo. Un conflicto de registro bloquea el archivo. Si el Excel está abierto
+al ejecutar, el correo conserva su estado `approved` con el error y se reintenta
+tras cerrar el libro; no pasa a `blocked` ni exige volver a aprobarlo.
 Los correos `blocked` muestran campos editables precargados con la última revisión.
 Corrija el conflicto en Excel o los datos de la ventana y seleccione explícitamente
 el correo para volver a aprobarlo. Cerrar no altera su estado ni su autorización.
@@ -1088,8 +1071,7 @@ siendo de verificación solamente, sin esta opción de reaprobar el movimiento.
 
 El lote se detiene ante el primer fallo y conserva las demás aprobaciones.
 Un bloqueo del sistema operativo impide ejecutar dos de estos lotes a la vez
-y se libera al cerrar o terminar el proceso. No ejecute simultáneamente los
-modos antiguos: no participan de este bloqueo. Excel y Outlook siguen sin ser
+y se libera al cerrar o terminar el proceso. Excel y Outlook siguen sin ser
 una transacción atómica. La verificación de identidad incluye remitente, asunto
 y, antes de mover, una huella del cuerpo leído; un cambio bloquea el movimiento.
 Si el cuerpo cambia después de registrar, el mensaje pasa a `blocked` y no se
@@ -1123,43 +1105,6 @@ La búsqueda de un candidato recorre la lista virtualizada hasta que el scroll
 deja de avanzar, con un límite de 60 páginas. No interpreta un número constante
 de filas visibles como final de la bandeja.
 
-### Descargar y analizar adjuntos
-
-```powershell
-.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --download-attachments --days 30
-```
-
-Escanea la bandeja igual que `--scan-inbox`, abre cada candidato (máximo `batch_limit`),
-guarda sus adjuntos PDF, XML y ZIP en un subdirectorio temporal de `attachments_dir`
-(por defecto `tmp\`) y los analiza en solo lectura. El subdirectorio se elimina al
-terminar. Omite archivos mayores a 10 MB y no escribe en el Excel. Ten en cuenta
-que **abrir un correo lo marca como leído** en Outlook. Usa `--no-model` para no llamar a
-Ollama. Los candidatos que fallan se listan en el JSON con `requires_review`.
-
-### Revisar y registrar un lote
-
-```powershell
-.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --review-invoices --days 30
-```
-
-Descarga y analiza los adjuntos como el modo anterior, y luego abre una ventana de
-revisión. Las facturas empiezan sin seleccionar; puede marcarlas individualmente o
-usar «Seleccionar todas» y desmarcar las que no autoriza. Seleccionar no escribe.
-La columna `Empresa` se
-sugiere a partir del historial del Excel cuando todas las filas con la misma razón
-social usan la misma empresa; si no hay una coincidencia histórica inequívoca, usa
-como sugerencia la razón social del documento. Verifique la sugerencia antes de
-aprobar. El campo "Aprobado por" se precarga con `approver` de la configuración y
-sigue siendo editable. La ventana muestra los campos
-extraídos y cualquier campo descartado por Ollama. La ruta de destino y el aviso de
-respaldo están visibles antes de guardar. Pulsar «Aprobar y guardar lote» es la
-autorización explícita para escribir, sin un diálogo final adicional. Cerrar sin
-guardar no modifica el Excel. Las coincidencias históricas conservan sus diálogos
-de confirmación explícita. El registro crea
-una copia de seguridad, verifica el archivo temporal y no mueve correos. Ollama se usa
-por defecto para completar campos de PDF; `--no-model` lo omite y deja esos campos
-para completar a mano.
-
 ### Analizar un adjunto local (solo lectura)
 
 Extrae los datos de un XML, PDF o ZIP guardado en el equipo y los muestra en
@@ -1171,6 +1116,16 @@ por el modelo y los rechazados. No escribe en el Excel ni toca el correo.
 ```
 
 Usa `--no-model` para ver solo el resultado de reglas y OCR, sin Ollama.
+
+### Modos retirados
+
+`--process-one-invoice`, `--download-attachments` y `--review-invoices` se
+eliminaron. El lote supervisado (`--process-invoice-batch`, con `--batch-size 1`
+para un solo correo) cubre descarga, revisión, registro y archivo, y además usa
+el bloqueo de ejecución única y los estados recuperables. Una prueba real previa
+con `--process-one-invoice` registró y movió un correo verificado; ese resultado
+no se ha repetido con el lote de un correo. Para consultas de solo lectura siguen
+`--scan-inbox`, `--classify-invoices` y `--analyze-file`.
 
 ### Requisitos de OCR
 
@@ -1205,7 +1160,7 @@ valores y el formato antes de reemplazar el libro. No agrega filas.
 Las pruebas del escritor usan únicamente libros sintéticos en directorios temporales;
 nunca escriben en el Excel real. La interfaz solicita aprobación explícita antes de
 llamar al registro. La simulación de carpetas ya se probó con Outlook real;
-el modo de un correo y los lotes pequeños exigen aprobación para el movimiento real,
+los lotes pequeños exigen aprobación para el movimiento real,
 como se indica arriba.
 
 La configuración personal está en `config/settings.yaml`, excluida de Git.

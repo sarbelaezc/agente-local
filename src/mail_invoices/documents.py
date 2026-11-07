@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import PurePosixPath
 from typing import Protocol
-from zipfile import BadZipFile, ZipFile
+from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from defusedxml import ElementTree
 from defusedxml.common import DefusedXmlException
@@ -209,12 +209,41 @@ def _pdf_invoice(data: bytes, source: str, ocr: PdfOcr | None) -> InvoiceCandida
     )
 
 
+def _zip_member(
+    archive: ZipFile, entry: ZipInfo, source: str, ocr: PdfOcr | None,
+    failures: list[tuple[str, DocumentError]],
+) -> list[InvoiceCandidate]:
+    name = f"{source}:{entry.filename}"
+    with archive.open(entry) as stream:
+        content = stream.read(MAX_FILE_BYTES + 1)
+    try:
+        return parse_document(content, name, ocr)
+    except DocumentError as exc:
+        failures.append((name, exc))
+        return []
+
+
+def _rendered_xml(pdf_name: str, xmls: list[tuple[str, set[str]]]) -> int | None:
+    """Return the only XML with this PDF's path stem or whose invoice number names it."""
+    path = PurePosixPath(pdf_name.replace("\\", "/"))
+    key = str(path.with_suffix("")).lower()
+    words = set(re.split(r"[^0-9a-z-]+", path.stem.lower()))
+    matches = [
+        index for index, (xml_key, numbers) in enumerate(xmls)
+        if xml_key == key or numbers & words
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def parse_document(
-    data: bytes, source: str, ocr: PdfOcr | None = None
+    data: bytes, source: str, ocr: PdfOcr | None = None,
+    member_errors: list[tuple[str, str]] | None = None,
 ) -> list[InvoiceCandidate]:
     """Parse local invoice bytes without extracting archives or following links.
 
-    Scanned PDFs are only read when a local ``ocr`` engine is supplied.
+    Scanned PDFs are only read when a local ``ocr`` engine is supplied. A ZIP member
+    that fails raises, unless ``member_errors`` is given and another member is valid:
+    then the failure is appended there as ``(member source, message)``.
     """
     if len(data) > MAX_FILE_BYTES:
         raise DocumentError("Attachment exceeds the 10 MB pilot limit")
@@ -226,11 +255,13 @@ def parse_document(
     if suffix != ".zip":
         raise DocumentError("Only XML, PDF and ZIP attachments are supported")
     candidates = []
+    failures: list[tuple[str, DocumentError]] = []
     try:
         with ZipFile(BytesIO(data)) as archive:
             entries = archive.infolist()
             if len(entries) > 100 or sum(entry.file_size for entry in entries) > MAX_ZIP_BYTES:
                 raise DocumentError("ZIP exceeds the pilot limits")
+            documents = []
             for entry in entries:
                 if entry.is_dir():
                     continue
@@ -243,13 +274,27 @@ def parse_document(
                     raise DocumentError("ZIP contains an encrypted or oversized document")
                 if entry.file_size > max(entry.compress_size, 1) * 200:
                     raise DocumentError("ZIP compression ratio exceeds the pilot limit")
-                with archive.open(entry) as stream:
-                    content = stream.read(MAX_FILE_BYTES + 1)
-                candidates.extend(
-                    parse_document(content, f"{source}:{entry.filename}", ocr)
-                )
+                documents.append((path.suffix.lower(), entry))
+            xmls: list[tuple[str, set[str]]] = []
+            for entry in [entry for suffix, entry in documents if suffix == ".xml"]:
+                parsed = _zip_member(archive, entry, source, ocr, failures)
+                candidates.extend(parsed)
+                key = str(PurePosixPath(entry.filename.replace("\\", "/")).with_suffix("")).lower()
+                xmls.append((key, {c.number.lower() for c in parsed if c.number}))
+            claimed: set[int] = set()
+            for entry in [entry for suffix, entry in documents if suffix == ".pdf"]:
+                pair = _rendered_xml(entry.filename, xmls)
+                # A PDF paired one-to-one with an XML is its DIAN graphic rendering; XML wins.
+                if pair is not None and pair not in claimed:
+                    claimed.add(pair)
+                    continue
+                candidates.extend(_zip_member(archive, entry, source, ocr, failures))
     except BadZipFile as exc:
         raise DocumentError("Invalid ZIP attachment") from exc
+    if failures and (not candidates or member_errors is None):
+        raise failures[0][1]
     if not candidates:
         raise DocumentError("ZIP contains no supported invoices")
+    if member_errors is not None:
+        member_errors.extend((name, str(exc)) for name, exc in failures)
     return candidates
