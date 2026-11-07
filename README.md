@@ -876,10 +876,14 @@ Teams continúa separado en los paquetes `app`, `automation`, `ai`, `storage` y
 
 Se preparó un módulo de facturas independiente del de Teams, con extracción
 local de XML UBL, ZIP y PDF con texto. La lectura de XML sigue siendo la fuente
-preferida para los datos estructurados de la factura. En un ZIP con tantos PDF
-como facturas XML (estructura DIAN: XML más su representación gráfica), los PDF
-no se analizan ni pasan por OCR u Ollama; un PDF ilegible ya no bloquea la
-factura XML válida. Si las cantidades difieren, se analizan todos los PDF como antes.
+preferida para los datos estructurados de la factura. Dentro de un ZIP, un PDF
+se trata como la representación gráfica de un XML (estructura DIAN) y no se
+analiza ni pasa por OCR u Ollama solo si se empareja de forma uno a uno e
+inequívoca con ese XML: mismo nombre de archivo sin extensión, o el número de
+factura del XML como palabra del nombre del PDF. Así un PDF ilegible no bloquea
+la factura XML válida. Cualquier PDF sin pareja inequívoca se sigue analizando,
+aunque el ZIP traiga tantos PDF como XML. Probado con ZIP sintéticos; falta
+confirmar los nombres que usan los proveedores reales.
 
 ### Ollama local y OCR
 

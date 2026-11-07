@@ -217,6 +217,18 @@ def _zip_member(
     return parse_document(content, f"{source}:{entry.filename}", ocr)
 
 
+def _rendered_xml(pdf_name: str, xmls: list[tuple[str, set[str]]]) -> int | None:
+    """Return the only XML with this PDF's path stem or whose invoice number names it."""
+    path = PurePosixPath(pdf_name.replace("\\", "/"))
+    key = str(path.with_suffix("")).lower()
+    words = set(re.split(r"[^0-9a-z-]+", path.stem.lower()))
+    matches = [
+        index for index, (xml_key, numbers) in enumerate(xmls)
+        if xml_key == key or numbers & words
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def parse_document(
     data: bytes, source: str, ocr: PdfOcr | None = None
 ) -> list[InvoiceCandidate]:
@@ -253,13 +265,20 @@ def parse_document(
                 if entry.file_size > max(entry.compress_size, 1) * 200:
                     raise DocumentError("ZIP compression ratio exceeds the pilot limit")
                 documents.append((path.suffix.lower(), entry))
-            pdfs = [entry for suffix, entry in documents if suffix == ".pdf"]
+            xmls: list[tuple[str, set[str]]] = []
             for entry in [entry for suffix, entry in documents if suffix == ".xml"]:
+                parsed = _zip_member(archive, entry, source, ocr)
+                candidates.extend(parsed)
+                key = str(PurePosixPath(entry.filename.replace("\\", "/")).with_suffix("")).lower()
+                xmls.append((key, {c.number.lower() for c in parsed if c.number}))
+            claimed: set[int] = set()
+            for entry in [entry for suffix, entry in documents if suffix == ".pdf"]:
+                pair = _rendered_xml(entry.filename, xmls)
+                # A PDF paired one-to-one with an XML is its DIAN graphic rendering; XML wins.
+                if pair is not None and pair not in claimed:
+                    claimed.add(pair)
+                    continue
                 candidates.extend(_zip_member(archive, entry, source, ocr))
-            # One PDF per XML invoice is its graphic rendering (DIAN layout); XML data wins.
-            if not candidates or len(pdfs) != len(candidates):
-                for entry in pdfs:
-                    candidates.extend(_zip_member(archive, entry, source, ocr))
     except BadZipFile as exc:
         raise DocumentError("Invalid ZIP attachment") from exc
     if not candidates:
