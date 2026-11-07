@@ -330,11 +330,3 @@ class InvoiceReviewWindow:
                 return None
             resolved.append(replace(invoice, confirmed_new=True))
         return resolved
-
-
-def run_invoice_review(
-    items: list[ReviewItem], issues: list[dict], settings: MailSettings
-) -> bool:
-    if not items:
-        raise ValueError("No hay facturas legibles para revisar")
-    return InvoiceReviewWindow(items, issues, settings).run()

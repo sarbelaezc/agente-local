@@ -397,28 +397,31 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
 ):
     journal, workbook, _ = stores
     settings = MailSettings(tmp_path / "opera", tmp_path, workbook.path, tmp_path / "backups", "Hoja1", 20)
+    settings.executable.write_bytes(b"")
     journal = BatchStateStore(journal.path, batch_scope(settings))
     journal.save([approved(f"TEST-{index}") for index in range(1, 5)])
     monkeypatch.setattr(batch_workflow, "batch_state_path", lambda: journal.path)
     monkeypatch.setattr(batch_workflow, "decisions_path", lambda: tmp_path / "decisions.sqlite3")
     scanned = []
+    page = SimpleNamespace(wait_for_selector=lambda *a, **kw: None)
 
-    def simulate(config, days, history, use_model, *, include_review_items, attachment_dir):
+    def simulate(config, days, history, use_model, *, include_review_items, attachment_dir, page):
         assert config.batch_limit == 2 and include_review_items
         assert attachment_dir.is_dir()
+        assert page is shared_page
         scanned.append(True)
         return {"folders": ["Salud"], "messages": []}
 
+    shared_page = page
     monkeypatch.setattr(batch_workflow, "simulate_classification", simulate)
     mock_folders(monkeypatch)
-    closed = []
-    page = SimpleNamespace(wait_for_selector=lambda *a, **kw: None)
+    closed, launched = [], []
     context = SimpleNamespace(close=lambda: closed.append(True))
 
     class Session:
         def __enter__(self):
             return SimpleNamespace(chromium=SimpleNamespace(
-                launch_persistent_context=lambda *a, **kw: context,
+                launch_persistent_context=lambda *a, **kw: launched.append(True) or context,
             ))
 
         def __exit__(self, *args):
@@ -450,7 +453,7 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
     assert batch_workflow.process_invoice_batch(settings, 30, False, 2, resume=resume) == 0
     assert executed == ["TEST-1", "TEST-2"]
     assert len(scanned) == (0 if resume else 1)
-    assert closed == [True]
+    assert closed == [True] and launched == [True]
     assert not review_dirs[0].exists()
     assert len([m for m in journal.load() if m.state == "approved"]) == 2
 
@@ -461,6 +464,7 @@ def test_batch_cancellation_or_failure_stops_other_durable_approvals(
 ):
     journal, workbook, _ = stores
     settings = MailSettings(tmp_path / "opera", tmp_path, workbook.path, tmp_path, "Hoja1", 3)
+    settings.executable.write_bytes(b"")
     journal = BatchStateStore(journal.path, batch_scope(settings))
     journal.save([approved("TEST-1"), approved("TEST-2")])
     original = workbook.path.read_bytes()

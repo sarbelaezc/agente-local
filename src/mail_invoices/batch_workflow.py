@@ -128,27 +128,12 @@ def _process_invoice_batch(
         stored = {message.conversation: message for message in journal.load()}
         active = _active_messages(list(stored.values()), batch_size)
         missing_identity = []
-        if not resume:
-            report = simulate_classification(
-                replace(settings, batch_limit=batch_size), days, [], use_model,
-                include_review_items=True, attachment_dir=attachment_dir,
-            )
-            for raw in report["messages"]:
-                if not raw.get("conversation"):
-                    missing_identity.append(raw["errors"])
-                    continue
-                prepared = BatchMessage.from_report(raw)
-                existing = stored.get(prepared.conversation)
-                if existing is None or existing.state == "pending":
-                    journal.save([prepared])
-                    stored[prepared.conversation] = prepared
-            active = _active_messages(list(stored.values()), batch_size)
-            if missing_identity:
-                print(to_json({"untracked_errors": missing_identity}))
-        if not active:
+        if resume and not active:
             print(to_json({"messages": [], "message": "No hay correos pendientes"}))
-            return 1 if missing_identity else 0
-        # Browser remains owned by this run and is always closed, including cancellation.
+            return 0
+        if not settings.executable.is_file():
+            raise FileNotFoundError("Configured Opera executable does not exist")
+        # One browser session per run, always closed, including cancellation.
         with sync_playwright() as playwright:
             context = playwright.chromium.launch_persistent_context(
                 str(settings.profile_dir), executable_path=str(settings.executable),
@@ -157,6 +142,26 @@ def _process_invoice_batch(
             try:
                 page = outlook_page(context)
                 page.wait_for_selector(MESSAGE_SELECTOR, timeout=60000)
+                if not resume:
+                    report = simulate_classification(
+                        replace(settings, batch_limit=batch_size), days, [], use_model,
+                        include_review_items=True, attachment_dir=attachment_dir, page=page,
+                    )
+                    for raw in report["messages"]:
+                        if not raw.get("conversation"):
+                            missing_identity.append(raw["errors"])
+                            continue
+                        prepared = BatchMessage.from_report(raw)
+                        existing = stored.get(prepared.conversation)
+                        if existing is None or existing.state == "pending":
+                            journal.save([prepared])
+                            stored[prepared.conversation] = prepared
+                    active = _active_messages(list(stored.values()), batch_size)
+                    if missing_identity:
+                        print(to_json({"untracked_errors": missing_identity}))
+                if not active:
+                    print(to_json({"messages": [], "message": "No hay correos pendientes"}))
+                    return 1 if missing_identity else 0
                 folders = [folder.path for folder in discover_folders(page)]
                 window = BatchReviewWindow(active, folders, settings, journal, attachment_dir)
                 if not window.run():

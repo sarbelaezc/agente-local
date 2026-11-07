@@ -77,6 +77,24 @@ def test_zip_unpaired_pdf_is_parsed_even_when_counts_match():
         parse_document(stream.getvalue(), "invoice.zip")
 
 
+def test_zip_failed_pdf_is_reported_without_losing_valid_xml():
+    stream = BytesIO()
+    with ZipFile(stream, "w") as archive:
+        archive.writestr("invoice.xml", XML)
+        archive.writestr("other.pdf", _blank_pdf())
+    errors = []
+    candidates = parse_document(stream.getvalue(), "invoice.zip", member_errors=errors)
+    assert [(c.number, c.method) for c in candidates] == [("TEST-001", "xml")]
+    assert len(errors) == 1 and errors[0][0] == "invoice.zip:other.pdf"
+    assert "Scanned PDF" in errors[0][1]
+
+    stream = BytesIO()
+    with ZipFile(stream, "w") as archive:
+        archive.writestr("other.pdf", _blank_pdf())
+    with pytest.raises(DocumentError, match="Scanned PDF"):
+        parse_document(stream.getvalue(), "invoice.zip", member_errors=[])
+
+
 def test_zip_pdf_named_by_invoice_number_is_paired_once():
     stream = BytesIO()
     with ZipFile(stream, "w") as archive:
