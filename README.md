@@ -71,7 +71,7 @@ implementa.
 
     La configuración de pytest usa captura `sys`; no la cambies a `fd` para las pruebas gráficas de Windows.
 
-`scripts/run.ps1` inicia el agente de Teams, no el organizador de facturas. No lo ejecutes mientras Teams siga pausado. Los comandos de facturas se muestran en sus secciones y usan `config/settings.yaml`.
+Teams no tiene script de ejecución: está pausado y no debe iniciarse (`python -m app.main`). Los comandos de facturas se muestran en sus secciones y usan `config/settings.yaml`.
 
 ## Ejecución bajo demanda
 
@@ -94,8 +94,7 @@ El script requiere `.venv`, `config/settings.yaml`, Opera y la instancia local
 de Ollama de facturas en el endpoint configurado. Si falta la configuración,
 crea una copia de la plantilla y se detiene para que completes los valores.
 Cada ejecución abre la revisión supervisada; nada se escribe ni se mueve hasta
-que selecciones y apruebes los correos en la UI. `scripts/run.ps1` sigue siendo
-exclusivo de Teams y no debe usarse para facturas.
+que selecciones y apruebes los correos en la UI.
 Si la política de PowerShell bloquea los scripts `.ps1`, ejecuta el mismo modo
 directamente desde la raíz del repositorio:
 
