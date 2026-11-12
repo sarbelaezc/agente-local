@@ -31,7 +31,7 @@ def validate_local_url(url: str) -> str:
 class OllamaJsonModel:
     """Local Ollama client. It has no tools and its output is treated as untrusted."""
 
-    def __init__(self, url: str, model: str, timeout_seconds: float = 120.0) -> None:
+    def __init__(self, url: str, model: str, timeout_seconds: float = 600.0) -> None:
         self._url = validate_local_url(url)
         self._model = model
         self._timeout = timeout_seconds
