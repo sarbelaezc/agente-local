@@ -29,7 +29,7 @@ class MailSettings:
     sheet: str
     batch_limit: int
     ollama_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen2.5:7b"
+    ollama_model: str = "qwen3.5:9b"
     tesseract_executable: Path = Path(DEFAULT_TESSERACT)
     tessdata_dir: Path | None = None
     ocr_languages: str = "spa+eng"
@@ -77,7 +77,7 @@ def load_settings(path: Path) -> MailSettings:
         _path(raw["workbook"]), _path(raw["backup_dir"]),
         str(raw.get("sheet", "Hoja1")), limit,
         ollama_url=ollama_url,
-        ollama_model=str(ollama.get("model", "qwen2.5:7b")),
+        ollama_model=str(ollama.get("model", "qwen3.5:9b")),
         tesseract_executable=_path(str(ocr.get("tesseract_executable", DEFAULT_TESSERACT))),
         tessdata_dir=_path(str(tessdata)) if tessdata else None,
         ocr_languages=str(ocr.get("languages", "spa+eng")),

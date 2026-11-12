@@ -1,7 +1,10 @@
+from pathlib import Path
+
 import pytest
 import yaml
 
 from config.settings import load_settings
+from mail_invoices.settings import MailSettings
 from mail_invoices.settings import load_settings as load_mail_settings
 
 
@@ -50,6 +53,43 @@ def test_legacy_shared_ollama_is_assigned_only_to_invoices(tmp_path):
     assert load_settings(config).ollama_url == "http://127.0.0.1:11435"
     assert load_mail_settings(config).ollama_url == "http://localhost:11434"
     assert load_mail_settings(config).ollama_model == "legacy-model"
+
+
+@pytest.mark.parametrize("unified", [False, True])
+def test_invoice_model_defaults_preserve_teams(tmp_path, unified):
+    invoices = {
+        "opera_executable": "opera.exe", "profile_dir": "opera-profile",
+        "workbook": "book.xlsx", "backup_dir": "backups",
+    }
+    raw = invoices
+    if unified:
+        raw = {
+            "teams": {
+                "edge": {"executable": "edge.exe", "profile_dir": "edge-profile"},
+                "storage": {"database_path": "audit.db"},
+                "allowed_chats": [{"id": "test", "name": "Test"}],
+            },
+            "invoices": invoices,
+        }
+    config = tmp_path / "settings.yaml"
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    settings = load_mail_settings(config)
+    assert settings.ollama_model == "qwen3.5:9b"
+    assert MailSettings(
+        settings.executable, settings.profile_dir, settings.workbook,
+        settings.backup_dir, settings.sheet, settings.batch_limit,
+    ).ollama_model == "qwen3.5:9b"
+    if unified:
+        assert load_settings(config).ollama_model == "qwen2.5:7b"
+
+
+def test_example_uses_qwen35_only_for_invoices():
+    config = Path(__file__).resolve().parents[2] / "config" / "settings.example.yaml"
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+
+    assert load_mail_settings(config).ollama_model == "qwen3.5:9b"
+    assert raw["teams"]["ollama"]["model"] == "qwen2.5:7b"
 
 
 def test_unified_config_rejects_shared_ollama_instance(tmp_path):
