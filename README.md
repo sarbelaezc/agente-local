@@ -8,7 +8,7 @@ implementa.
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/run-invoice-batch.ps1` / `-Resume` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
-| Cierre mensual de gastos de Outlook con Ollama local | Importación de octubre verificada con corte por fechas; panel e inversiones disponibles; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
+| Cierre mensual de gastos de Outlook con Ollama local | Importación de septiembre y octubre verificada con corte por fechas; panel e inversiones disponibles; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
 
 ## Stack tecnológico
 
@@ -473,8 +473,19 @@ regresiones de la lista oculta, de la fila que crece por encima y de la visita q
 mueve la lista; las tres fallan sin su arreglo. Pasaron las 221 pruebas de
 cierre mensual. Una ejecución real en seco (sin Ollama ni escrituras en la base)
 recorrió las 15 carpetas sin errores: leyó 136 orígenes autorizados (1,5 s de
-media) y cortó por fecha en Entrada, Bancolombia, Dian e Inversiones. La
-importación real de septiembre y octubre queda pendiente.
+media) y cortó por fecha en Entrada, Bancolombia, Dian e Inversiones.
+
+Después, la importación real de septiembre y octubre (`-Start 2026-09-01
+-End 2026-11-01`) recorrió las 15 carpetas sin errores de interfaz. El primer
+intento se detuvo en la salvaguarda de evidencia literal (campo comercio, tras
+fallar también la corrección local). Un diagnóstico sin escrituras repitió la
+extracción del primer aviso pendiente y Ollama devolvió un comercio literal al
+primer intento: aun con temperatura 0, su respuesta no siempre se repite entre
+ejecuciones. No se relajó la salvaguarda. Al relanzar la importación, esta se
+reanudó desde el punto de reanudación y terminó; en ese intento hizo falta una
+corrección local, que sí aportó evidencia literal. Ninguna propuesta se aprobó
+automáticamente: las compras y los avisos sin clasificar quedan para decisión
+humana en el panel.
 
 Las instrucciones del proyecto incluyen ahora una regla explícita de no asumir
 hechos ni requisitos, verificar con evidencia y preguntar al usuario antes de
