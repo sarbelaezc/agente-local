@@ -883,22 +883,10 @@ confirmar los nombres que usan los proveedores reales.
 
 ### Ollama local y OCR
 
-El modelo predeterminado de **facturas** es `qwen3.5:9b`. Se selecciona en
-`invoices.ollama.model` de la configuración local. Las configuraciones heredadas
-también admiten `ollama.model` en la raíz, exclusivamente para facturas.
-Teams y cierre mensual conservan `qwen2.5:7b`. En la terminal de facturas
-(`OLLAMA_HOST=127.0.0.1:11434`), descárgalo con `ollama pull qwen3.5:9b`.
-El cliente conserva el razonamiento predeterminado del modelo y espera hasta
-**600 segundos por petición**; no interpreta el razonamiento como datos ni
-relaja la validación de la respuesta. Un fallo de Ollama sigue bloqueando el
-procesamiento afectado, sin sustituirlo por datos inventados.
-
-Verificado con inferencia local real y datos ficticios: completado de número,
-razón social, fecha, total y moneda con evidencia, revisión humana obligatoria
-y clasificación por contenido en una carpeta existente. **Falta repetir el
-piloto supervisado con correos reales usando Qwen 3.5.** No se elimina
-`qwen2.5:7b`; para volver al modelo anterior, cambia únicamente el modelo de
-facturas en la configuración local.
+Facturas usa `qwen2.5:7b`. Se evaluó `qwen3.5:9b` y se descartó: con datos
+sintéticos y el modelo 100 % en GPU dio las mismas respuestas, pero tardó 76,7 s
+en completar campos y 104,2 s en clasificar, frente a 7,4 s y 2,8 s con Qwen 2.5.
+El retraso procede de su razonamiento previo a la respuesta.
 
 Implementado y probado con datos sintéticos (aún no con facturas ni correos reales):
 
