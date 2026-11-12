@@ -176,7 +176,7 @@ def test_scan_allows_read_only_preflight_without_enabling_or_persisting(page, tm
         app.OutlookSourceReader, "read", lambda *args: pytest.fail("No debe abrirse el origen."),
     )
     settings = {
-        "outlook_url": URL, "ollama_url": "http://127.0.0.1:11436",
+        "outlook_url": URL, "ollama_url": "http://127.0.0.1:11434",
         "ollama_model": "local-test", "max_messages": 5,
         "folder_scan_verified": False,
     }
@@ -283,7 +283,7 @@ def test_scan_checks_ollama_before_opening_outlook(tmp_path, monkeypatch):
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"models": []})),
     ))
     settings = {
-        "folder_scan_verified": True, "ollama_url": "http://127.0.0.1:11436",
+        "folder_scan_verified": True, "ollama_url": "http://127.0.0.1:11434",
         "ollama_model": "local-test",
     }
     with pytest.raises(LocalModelError, match="no esta instalado"):
@@ -402,7 +402,7 @@ def test_scan_skips_newer_mail_and_stops_before_start_in_each_folder(
     monkeypatch.setattr(app, "require_model", lambda settings: None)
     app.scan(
         store, tmp_path, {
-            "outlook_url": URL, "ollama_url": "http://127.0.0.1:11436",
+            "outlook_url": URL, "ollama_url": "http://127.0.0.1:11434",
             "ollama_model": "local-test", "max_messages": 7, "folder_scan_verified": True,
         }, prefs, date(2026, 2, 1), date(2026, 3, 1),
     )
@@ -462,7 +462,7 @@ def test_real_scan_covers_spam_deleted_filters_dates_and_preserves_choices(page,
     monkeypatch.setattr(app, "OllamaJsonModel", Model)
     monkeypatch.setattr(app, "require_model", lambda settings: None)
     settings = {
-        "outlook_url": URL, "ollama_url": "http://127.0.0.1:11436",
+        "outlook_url": URL, "ollama_url": "http://127.0.0.1:11434",
         "ollama_model": "local-test", "max_messages": 6,
         "folder_scan_verified": True,
     }
@@ -733,7 +733,7 @@ def test_missing_dom_message_identity_stops(page):
 @pytest.mark.parametrize("limit,valid", [(10000, True), (10001, False), (0, False), (True, False)])
 def test_runtime_bounds_for_large_folder_trees(tmp_path, limit, valid):
     settings = {
-        "ollama_url": "http://127.0.0.1:11436", "ollama_model": "local-test",
+        "ollama_url": "http://127.0.0.1:11434", "ollama_model": "local-test",
         "browser_executable": sys.executable, "outlook_url": URL,
         "max_messages": limit,
     }
@@ -742,6 +742,22 @@ def test_runtime_bounds_for_large_folder_trees(tmp_path, limit, valid):
         assert app.runtime(tmp_path)["max_messages"] == limit
     else:
         with pytest.raises(ValueError, match="max_messages"):
+            app.runtime(tmp_path)
+
+
+@pytest.mark.parametrize(("port", "valid"), [(11434, True), (11435, False), (11436, False)])
+def test_runtime_requires_shared_invoice_ollama_endpoint(tmp_path, port, valid):
+    settings = {
+        "ollama_url": f"http://127.0.0.1:{port}", "ollama_model": "local-test",
+        "browser_executable": sys.executable, "outlook_url": URL,
+        "max_messages": 10,
+    }
+    (tmp_path / "runtime.json").write_text(json.dumps(settings), encoding="utf-8")
+
+    if valid:
+        assert app.runtime(tmp_path)["ollama_url"] == "http://127.0.0.1:11434"
+    else:
+        with pytest.raises(ValueError, match="11434"):
             app.runtime(tmp_path)
 
 

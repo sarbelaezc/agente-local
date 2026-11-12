@@ -1,5 +1,5 @@
 {
-  "ollama_url": "http://127.0.0.1:11436",
+  "ollama_url": "http://127.0.0.1:11434",
   "ollama_model": "qwen2.5:7b",
   "browser_executable": "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe",
   "outlook_url": "https://outlook.live.com/mail/0/",

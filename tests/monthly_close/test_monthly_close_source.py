@@ -603,7 +603,7 @@ def pilot(page, tmp_path, monkeypatch):
 
     monkeypatch.setattr(app, "browser", fake_browser)
     settings = {
-        "outlook_url": URL, "ollama_url": "http://127.0.0.1:11436",
+        "outlook_url": URL, "ollama_url": "http://127.0.0.1:11434",
         "ollama_model": "local-test",
     }
     return store, settings, tmp_path
