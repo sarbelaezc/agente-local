@@ -300,6 +300,49 @@ def test_source_read_restores_list_when_reading_view_appears_late(page):
     assert page.get_by_role("button", name="Cerrar", exact=True).count() == 0
 
 
+def test_source_read_returns_only_after_outlook_exposes_list_again(page):
+    page.evaluate(
+        """() => {
+          const list = document.querySelector('[data-app-section="MessageList"]');
+          const open = window.openSource;
+          window.openSource = () => {
+            open();
+            list.setAttribute('aria-hidden', 'true');
+            document.querySelector('[role="dialog"] button').addEventListener('click', () =>
+              setTimeout(() => list.removeAttribute('aria-hidden'), 200));
+          };
+        }"""
+    )
+    reader = OutlookSourceReader(page, URL, [CANDIDATE.sender])
+    assert reader.read(reader.candidate()).sender == CANDIDATE.sender
+    assert page.get_by_role("option").count() == 1
+
+
+def test_selection_keeps_clipped_row_visible_when_rows_above_grow(page):
+    page.evaluate(
+        """() => {
+          const row = document.querySelector('[data-convid]');
+          const scroller = document.createElement('div');
+          scroller.style = 'height:100px;overflow:auto;overflow-anchor:none';
+          const above = document.createElement('div'); above.style.height = '90px';
+          const below = document.createElement('div'); below.style.height = '100px';
+          row.style = 'display:block;padding-bottom:30px';
+          row.replaceWith(scroller); scroller.append(above, row, below);
+          row.addEventListener('click', () => {
+            const s = scroller.getBoundingClientRect();
+            let r = row.getBoundingClientRect();
+            window.rowVisibleOnClick = r.top >= s.top && r.bottom <= s.bottom;
+            above.style.height = '150px';  // Outlook enlarges rendered rows lazily.
+            r = row.getBoundingClientRect();
+            window.rowVisibleAfterGrowth = r.top < s.bottom && r.bottom > s.top;
+          }, true);
+        }"""
+    )
+    reader = OutlookSourceReader(page, URL, [CANDIDATE.sender])
+    assert reader.read(reader.candidate()).sender == CANDIDATE.sender
+    assert page.evaluate("[window.rowVisibleOnClick, window.rowVisibleAfterGrowth]") == [True, True]
+
+
 @pytest.mark.parametrize("block", ["always_closed", "selection", "sender", "dialog", "mfa", "open_menu"])
 def test_menu_retry_is_bounded_and_does_not_bypass_safety(page, block):
     page.evaluate(

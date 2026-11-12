@@ -334,6 +334,46 @@ def test_date_cutoff_does_not_hide_unvisited_positions(page):
         reader.walk_folders(5, lambda candidate: False)
 
 
+def test_walk_rereads_rows_after_a_visit_moves_the_list(page):
+    page.evaluate(
+        """sender => {
+          data['bandeja de entrada'] = Array.from({length: 12}, (_, i) =>
+            ({id: 'in-' + i, sender: i === 3 ? sender : 'other@example.test'}));
+          document.querySelector('[data-test-folder="bandeja de entrada"]').title =
+            names['bandeja de entrada'] + ' : Elementos 12 ';
+          const open = window.openFolder;
+          // Two-row window that follows scrollTop synchronously, so no frame timing is involved.
+          window.openFolder = key => {
+            open(key);
+            const scroller = pane.querySelector('[data-testid="virtuoso-scroller"]');
+            if (!scroller) return;
+            scroller.style = 'height:40px;overflow:auto;overflow-anchor:none';
+            scroller.onscroll = null;
+            const native = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+            Object.defineProperty(scroller, 'scrollTop', {
+              get() { return native.get.call(this); },
+              set(value) {
+                native.set.call(this, value);
+                const first = Math.min(Math.floor(native.get.call(this) / 20), data[key].length - 2);
+                pageIndex = Math.max(first, 0) / 2;
+                renderRows();
+              },
+            });
+          };
+          openFolder('bandeja de entrada');
+        }""",
+        SENDER,
+    )
+
+    def visit(candidate):
+        if candidate.item_id == "in-3":
+            # Outlook moves the list while reading, past the row the old snapshot ended on.
+            page.locator('[data-testid="virtuoso-scroller"]').evaluate("el => { el.scrollTop = 80; }")
+
+    reports = OutlookSourceReader(page, URL, [SENDER]).walk_folders(20, visit)
+    assert [report["rows"] for report in reports] == [12, 0, 1, 0]
+
+
 @pytest.mark.parametrize("processed_boundary", [False, True])
 def test_scan_skips_newer_mail_and_stops_before_start_in_each_folder(
     page, tmp_path, monkeypatch, processed_boundary,

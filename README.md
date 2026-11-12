@@ -450,6 +450,32 @@ a detenerse esperando el menú Ver. El fallo intermitente no está resuelto ni
 la importación completa validada. Los errores de validación muestran solo
 archivo y línea de los dos últimos puntos internos, sin contenido financiero.
 
+**Causas confirmadas con Outlook real (septiembre y octubre de 2026).** Los dos
+intentos de esta importación se detuvieron de forma segura: primero con «No se
+confirma el orden de fecha descendente» y después con un clic fallido sobre la
+fila del aviso. Se verificaron dos causas:
+
+- Tras cerrar «Ver origen», Outlook mantiene `aria-hidden` en la aplicación
+  durante un momento, y en ese intervalo no se encuentran los botones por rol.
+  Ahora la lectura espera a que la lista de mensajes deje de estar oculta.
+- Outlook agranda las filas de forma diferida (de 25 a 61 o 73 px), unos 5–10 s
+  después de abrir la carpeta, cuando las vuelve a renderizar. Una fila cerca del
+  borde inferior queda empujada fuera y se desmonta a mitad de la acción.
+  Además, Outlook recoloca arriba la fila seleccionada, así que el recorrido
+  continuaba desde una instantánea obsoleta y saltaba posiciones; la salvaguarda
+  de contigüidad lo detenía con «Hay posiciones sin verificar antes del corte por
+  fecha». Ahora la fila se desplaza al inicio de la lista antes del clic, y tras
+  cada aviso visitado se toma una instantánea nueva antes de seguir desplazando.
+
+Es probable que el desmontaje de filas explique también los fallos intermitentes
+«esperando Ver», pero eso no se ha comprobado por separado. Se añadieron
+regresiones de la lista oculta, de la fila que crece por encima y de la visita que
+mueve la lista; las tres fallan sin su arreglo. Pasaron las 221 pruebas de
+cierre mensual. Una ejecución real en seco (sin Ollama ni escrituras en la base)
+recorrió las 15 carpetas sin errores: leyó 136 orígenes autorizados (1,5 s de
+media) y cortó por fecha en Entrada, Bancolombia, Dian e Inversiones. La
+importación real de septiembre y octubre queda pendiente.
+
 Las instrucciones del proyecto incluyen ahora una regla explícita de no asumir
 hechos ni requisitos, verificar con evidencia y preguntar al usuario antes de
 actuar cuando quede una duda o se requiera una decisión.
@@ -733,6 +759,8 @@ vacío de carpetas personalizadas, siempre cotejado con total cero y selección
 exacta. En listas grandes, la cantidad de filas virtuales puede cambiar durante
 la iteración: se captura una instantánea de identidades y posiciones y se exige
 verificar todos los índices, sin declarar éxito si desaparecen filas sin cubrir.
+Abrir un aviso mueve la lista, así que tras cada visita se toma una instantánea
+nueva antes de desplazar.
 La identidad de fila usa el `id` del elemento; el `Message-ID` MIME sigue siendo
 la única identidad persistida para deduplicar y conservar decisiones.
 
