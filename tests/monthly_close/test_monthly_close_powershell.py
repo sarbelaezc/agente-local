@@ -41,6 +41,8 @@ def test_powershell_launcher_reuses_service_and_preserves_scan_result(
     fake.write_text(
         """if ($args -contains 'scan') {
     $args | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'scan.json')
+    @{host=$env:OLLAMA_HOST; models=$env:OLLAMA_MODELS} | ConvertTo-Json |
+        Set-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'ollama-env.json')
     exit """ + str(scan_code) + """
 }
 exit 0
@@ -113,6 +115,13 @@ function Start-Process {
             if read_only:
                 expected.append("--read-only")
             assert args[-len(expected):] == expected
+            ollama_env = json.loads(
+                (root / "ollama-env.json").read_text(encoding="utf-8-sig")
+            )
+            assert ollama_env == {
+                "host": f"http://127.0.0.1:{server.server_port}",
+                "models": str(root / "MailInvoiceAgent" / "OllamaModels"),
+            }
         assert thread.is_alive()
     finally:
         server.shutdown()

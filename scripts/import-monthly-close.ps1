@@ -36,7 +36,7 @@ try {
     $endpoint = $settings.ollama_url.TrimEnd("/")
     $uri = [Uri]$endpoint
     $env:OLLAMA_HOST = $endpoint
-    $env:OLLAMA_MODELS = Join-Path $data "OllamaModels"
+    $env:OLLAMA_MODELS = Join-Path $env:LOCALAPPDATA "MailInvoiceAgent\OllamaModels"
     $env:OLLAMA_NUM_PARALLEL = "1"
 
     $probe = New-Object System.Net.Sockets.TcpClient
@@ -63,7 +63,7 @@ try {
     } else {
         $ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
         if (-not (Test-Path -LiteralPath $ollama)) { throw "No se encuentra Ollama." }
-        Write-Output "Iniciando Ollama exclusivo para cierre mensual."
+        Write-Output "Iniciando Ollama compartido para facturas y cierre mensual."
         $ollamaProcess = Start-Process -FilePath $ollama -ArgumentList "serve" -NoNewWindow -PassThru
     }
     $deadline = (Get-Date).AddSeconds(30)

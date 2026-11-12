@@ -14,7 +14,7 @@ implementa.
 
 - **Python 3.12 o posterior**; empaquetado con `setuptools` y dependencias declaradas en `pyproject.toml`.
 - **Playwright para Python** automatiza los navegadores. Facturas usa Opera; Teams usa un perfil separado de Microsoft Edge y permanece pausado.
-- **Una instancia local de Ollama por feature**; `httpx` hace las llamadas y `PyYAML` gestiona la configuración existente. Teams usa `127.0.0.1:11435`; facturas usa `127.0.0.1:11434`; cierre mensual usa `127.0.0.1:11436` y configuración JSON independiente.
+- **Una instancia local de Ollama compartida por facturas y cierre mensual** en `127.0.0.1:11434`; ambos usan el almacén de modelos de facturas. Teams permanece pausado y, si se reactiva, conserva su instancia aislada en `127.0.0.1:11435`.
 - **Facturas:** `openpyxl` para Excel, `defusedxml` para XML, `pypdf` para PDF con texto, y `pypdfium2` más `Pillow` para renderizar PDF escaneados.
 - **Tkinter y SQLite** de la biblioteca estándar para interfaces y persistencia local; **pytest** para pruebas.
 - **Tesseract OCR** es una instalación externa opcional, necesaria solo para PDF escaneados. Opera, Edge y Ollama también se instalan aparte cuando se usa la función correspondiente.
@@ -43,7 +43,7 @@ implementa.
    }
    ```
 
-5. Inicia cada instancia de Ollama en una terminal PowerShell independiente, con puerto y directorio de modelos propios. Cierra la instancia automática de Ollama antes de levantar servicios manuales para evitar que ocupe el puerto `11434`.
+5. Inicia una sola instancia de Ollama para facturas y cierre mensual en una terminal PowerShell. Cierra la instancia automática de Ollama antes de levantarla manualmente si ya ocupa el puerto `11434`.
 
     Facturas:
 
@@ -53,7 +53,7 @@ implementa.
     ollama serve
     ```
 
-    Teams (solo cuando se reactive):
+    Teams (solo cuando se reactive; permanece separado):
 
     ```powershell
     $env:OLLAMA_HOST = "127.0.0.1:11435"
@@ -61,7 +61,7 @@ implementa.
     ollama serve
     ```
 
-    En otra terminal, define el mismo `OLLAMA_HOST` y ejecuta `ollama pull <modelo>` para descargar el modelo configurado en la sección correspondiente. Los modelos y sus datos permanecen separados. Consulta la [guía oficial de configuración de Ollama](https://docs.ollama.com/faq#how-do-i-configure-ollama-server) para más opciones en Windows.
+    En otra terminal, define el mismo `OLLAMA_HOST` y descarga el modelo compartido configurado por ambos features, actualmente `ollama pull qwen2.5:7b`. Las nuevas descargas usan un solo directorio. Consulta la [guía oficial de configuración de Ollama](https://docs.ollama.com/faq#how-do-i-configure-ollama-server) para más opciones en Windows.
 6. Para OCR en PDF escaneados, instala Tesseract y los datos de idioma siguiendo [Requisitos de OCR](#requisitos-de-ocr). Es opcional para las pruebas.
 7. Ejecuta las pruebas sin credenciales, correos ni libros personales:
 
@@ -106,10 +106,11 @@ directamente desde la raíz del repositorio:
 
 ### Alcance y reglas
 
-Nueva función separada de facturas y Teams. No requiere Microsoft Graph,
-credenciales de API ni conector de Gmail. Playwright lee Outlook Web en un perfil
-exclusivo. Usa un cliente local de Ollama con JSON Schema propio de este feature,
-sin modificar las integraciones de facturas ni Teams.
+Función con datos y flujo separados de facturas y Teams; comparte únicamente la
+instancia local de Ollama con facturas. No requiere Microsoft Graph, credenciales
+de API ni conector de Gmail. Playwright lee Outlook Web en un perfil exclusivo.
+Usa un cliente local de Ollama con JSON Schema propio, sin mezclar el contexto ni
+la persistencia de los otros features.
 No descarga adjuntos, envía correos, mueve mensajes ni modifica libros de facturas.
 Abrir un mensaje puede marcarlo como leído en Outlook.
 
@@ -242,21 +243,16 @@ su registro y auditoría; no hace falta reimportar.
    `discover` (búsqueda global con selectores propios) se retiró: nunca se calibró
    para este buzón y el panel no mostraba sus hallazgos. Las claves `selectors` y
    `selectors_verified` que queden en un `runtime.json` existente se ignoran.
-6. Inicia una tercera instancia de Ollama, separada de facturas (`11434`) y
-   Teams (`11435`). En otra terminal:
-
-   ```powershell
-   $env:OLLAMA_HOST = "127.0.0.1:11436"
-   $env:OLLAMA_MODELS = "$env:LOCALAPPDATA\MonthlyCloseAgent\OllamaModels"
-   ollama serve
-   ```
-
-   En otra consola con las mismas variables, descarga el modelo configurado:
-   `ollama pull qwen2.5:7b`. La descarga inicial necesita Internet; la inferencia
+6. Configura `%LOCALAPPDATA%\MonthlyCloseAgent\runtime.json` con
+   `"ollama_url": "http://127.0.0.1:11434"` y el mismo modelo de facturas,
+   actualmente `qwen2.5:7b`. No inicies otra instancia ni descargues otra copia.
+   `scripts/import-monthly-close.ps1` reutiliza el Ollama compartido; si no está
+   activo, lo inicia en el mismo endpoint con el almacén de modelos de facturas
+   y solo cierra el proceso que inició. El almacén mensual anterior se conserva
+   intacto y ya no se usa. Los comandos directos `scan`, `pilot` y
+   la tarea programada requieren el servicio ya activo. Antes de abrir Outlook,
+   verifican que el modelo exista; no lo descargan automáticamente. La inferencia
    usa únicamente loopback, sin proxies ni herramientas para el modelo.
-   `scan` (sin `-ReadOnly`), la tarea programada y `pilot` comprueban que esta
-   instancia tiene el modelo configurado **antes** de abrir Outlook; si no, se
-   detienen sin recorrer carpetas ni marcar cobertura.
 7. Importa de enero al mes anterior con `-Command scan` sin fechas, o indica
    `-Start` y `-End` (fin exclusivo). Ejemplo:
 
@@ -459,10 +455,11 @@ hechos ni requisitos, verificar con evidencia y preguntar al usuario antes de
 actuar cuando quede una duda o se requiera una decisión.
 El script usa la configuración privada predeterminada de MonthlyCloseAgent,
 su entorno `.venv` de Windows y el perfil exclusivo de Edge. Comprueba la
-configuración y el modelo instalado antes de importar. Si Ollama no responde,
-inicia la instalación local del usuario con el puerto configurado y el directorio
-de modelos exclusivo; no descarga modelos. Al terminar o fallar cierra únicamente
-la instancia de Ollama que él inició. Una instancia preexistente queda abierta.
+configuración y el modelo instalado antes de importar. Usa el endpoint y el
+directorio compartidos de Ollama de facturas (`11434` y
+`%LOCALAPPDATA%\MailInvoiceAgent\OllamaModels`). Si Ollama no responde, inicia
+el servicio en ese endpoint; no descarga modelos. Al terminar o fallar cierra
+únicamente el proceso de Ollama que inició. Una instancia preexistente queda abierta.
 Al terminar el intento de importación, incluso si el escaneo devuelve un error,
 inicia el panel en otra terminal y abre `http://127.0.0.1:8766` en el navegador
 predeterminado. Si ya está activo, lo reutiliza. Espera su respuesta antes de
@@ -586,8 +583,8 @@ adicionales ni lee cuerpos de remitentes fuera de esa lista.
 ```
 
 La primera variante verifica lectura e identidad en memoria, sin Ollama ni
-importación. La segunda comprueba primero que la instancia exclusiva tiene el
-modelo configurado y luego propone movimientos para revisión humana. Repetirla
+importación. La segunda comprueba primero que el endpoint compartido de Ollama
+tiene el modelo configurado y luego propone movimientos para revisión humana. Repetirla
 no duplica el mismo `Message-ID` ni reemplaza decisiones. Los avisos de dinero
 recibido y otros conceptos no contables deben devolver cero propuestas. Una
 propuesta sin evidencia literal o fuera de las categorías autorizadas se rechaza:
@@ -648,7 +645,7 @@ Estos datos no permiten activar el lector actual: necesita adaptación y nuevas
 pruebas, sin sustituir el identificador de mensaje por uno de conversación sin
 validar los hilos. `selectors_verified` sigue en `false`; no se instaló una tarea.
 
-**Corrección y repetición del piloto (2026-11-02):** se verificó un aviso real
+**Corrección y repetición del piloto (2026-11-02, antes de compartir Ollama):** se verificó un aviso real
 mediante origen MIME, remitente/asunto concordantes, `Message-ID` y recepción con
 zona horaria. La prueba de solo lectura terminó correctamente. Se levantó la
 instancia exclusiva de Ollama en `11436` y se descargó el modelo configurado en
@@ -1140,8 +1137,10 @@ no se ha repetido con el lote de un correo. Para consultas de solo lectura sigue
    desde `C:\Program Files\Tesseract-OCR\tessdata`.
 3. Ajusta la sección `invoices.ocr` de `config/settings.yaml` si usas otras rutas.
 
-La instancia Ollama de facturas debe estar activa en `invoices.ollama`; Teams
-usa de forma independiente `teams.ollama`. Cada sección define su URL y modelo.
+La instancia Ollama de facturas es compartida con cierre mensual: su endpoint en
+`invoices.ollama` debe coincidir con `ollama_url` de
+`%LOCALAPPDATA%\MonthlyCloseAgent\runtime.json`, y ambos usan el mismo tag de
+modelo. Teams usa de forma independiente `teams.ollama`.
 
 El registro preparado utiliza `Hoja1`, encabezados en B2:E2 y añade
 `Número de factura` en F2 solo al guardar un lote aprobado. Conserva las filas
@@ -1170,13 +1169,14 @@ como se indica arriba.
 La configuración personal está en `config/settings.yaml`, excluida de Git.
 Ambos módulos usan este archivo: `teams` contiene los ajustes de Teams y su
 instancia `ollama`; `invoices` contiene Hotmail, Excel (incluidos `ocr` y
-`approver`) y su propia instancia `ollama`. Las URLs deben ser distintas. La
-unificación no activa Teams, que sigue pausado.
+`approver`) y el endpoint compartido de Ollama para facturas y cierre mensual.
+`teams.ollama` permanece en una URL distinta. La unificación no activa Teams,
+que sigue pausado.
 Los lectores conservan compatibilidad con archivos planos anteriores mediante
-`--config`; para migrarlos, agrupe sus ajustes en las secciones indicadas,
-conserve todos los valores personales y configure una instancia Ollama separada
-para cada feature. En configuraciones antiguas, el bloque global `ollama` se
-conserva como instancia de facturas; Teams usa su endpoint nuevo por defecto.
+`--config`; para migrarlos, agrupe sus ajustes en las secciones indicadas y
+conserve todos los valores personales. En configuraciones antiguas, el bloque global `ollama` se
+conserva como endpoint compartido de facturas y cierre mensual; Teams usa su
+endpoint nuevo por defecto.
 No copie la plantilla encima de una configuración personal existente.
 La plantilla es `config/settings.example.yaml`. El perfil de Opera y las
 copias locales están bajo `%LOCALAPPDATA%\MailInvoiceAgent`, fuera de los

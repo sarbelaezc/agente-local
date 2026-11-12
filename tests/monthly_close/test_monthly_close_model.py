@@ -26,7 +26,7 @@ def test_model_requires_boolean_and_all_event_fields_without_proxy(monkeypatch):
         return real_client(transport=httpx.MockTransport(handle), **kwargs)
 
     monkeypatch.setattr(httpx, "Client", client)
-    assert OllamaJsonModel("http://127.0.0.1:11436", "test").complete_json("system", USER) == {
+    assert OllamaJsonModel("http://127.0.0.1:11434", "test").complete_json("system", USER) == {
         "events": [],
     }
     schema = seen[0]["format"]
@@ -54,7 +54,7 @@ def test_model_rejects_bad_envelopes(monkeypatch, payload):
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload)), **kwargs,
     ))
     with pytest.raises(LocalModelError):
-        OllamaJsonModel("http://127.0.0.1:11436", "test").complete_json("system", USER)
+        OllamaJsonModel("http://127.0.0.1:11434", "test").complete_json("system", USER)
 
 
 @pytest.mark.parametrize("source,expected", [
@@ -78,7 +78,7 @@ def test_amount_constraints_only_use_literal_currency_marked_amounts(
     ))
     context = json.loads(USER)
     context["untrusted_email"] = source
-    OllamaJsonModel("http://127.0.0.1:11436", "test").complete_json(
+    OllamaJsonModel("http://127.0.0.1:11434", "test").complete_json(
         "system", json.dumps(context),
     )
     properties = seen[0]["format"]["properties"]["events"]["items"]["properties"]

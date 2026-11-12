@@ -91,7 +91,7 @@ def test_scan_rejects_sender_before_opening_body(page, tmp_path, monkeypatch):
     )
     settings = {
         "folder_scan_verified": True, "outlook_url": URL,
-        "ollama_url": "http://127.0.0.1:11436", "ollama_model": "fake", "max_messages": 10,
+        "ollama_url": "http://127.0.0.1:11434", "ollama_model": "fake", "max_messages": 10,
     }
     store = Store(tmp_path / "test.sqlite3")
     with pytest.raises(OutlookError, match="no autorizado"):

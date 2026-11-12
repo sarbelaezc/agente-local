@@ -45,10 +45,10 @@ def runtime(data_dir: Path) -> dict:
     url = validate_local_url(raw.get("ollama_url", ""))
     endpoint = urlparse(url)
     if (
-        endpoint.port in (None, 11434, 11435) or endpoint.username or endpoint.password
+        endpoint.port != 11434 or endpoint.username or endpoint.password
         or endpoint.path or endpoint.query or endpoint.fragment
     ):
-        raise ValueError("Ollama requiere un puerto exclusivo (11436), sin ruta ni credenciales.")
+        raise ValueError("Cierre mensual debe compartir Ollama de facturas en el puerto 11434.")
     validate_url(raw.get("outlook_url", ""))
     executable = raw.get("browser_executable")
     if not isinstance(executable, str):
@@ -178,20 +178,20 @@ def scan(
 
 
 def require_model(settings: dict) -> None:
-    """Fail before opening Outlook if the exclusive Ollama instance lacks the model."""
+    """Fail before opening Outlook if the configured Ollama endpoint lacks the model."""
     try:
         with httpx.Client(timeout=10, trust_env=False) as client:
             response = client.get(settings["ollama_url"] + "/api/tags")
             response.raise_for_status()
         payload = response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        raise LocalModelError("Se requiere la instancia exclusiva de Ollama activa.") from exc
+        raise LocalModelError("Se requiere Ollama activo en el endpoint configurado.") from exc
     models = payload.get("models") if isinstance(payload, dict) else None
     if not isinstance(models, list) or not any(
         isinstance(model, dict) and model.get("name") == settings["ollama_model"]
         for model in models
     ):
-        raise LocalModelError("El modelo configurado no esta instalado en Ollama del cierre mensual.")
+        raise LocalModelError("El modelo configurado no esta instalado en el endpoint de Ollama.")
 
 
 def run_pilot(store: Store, data_dir: Path, settings: dict, read_only: bool) -> None:
