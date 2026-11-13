@@ -51,6 +51,12 @@ Formato: {"events":[{"merchant":"texto literal", "account":"alias autorizado o D
 No emitas eventos sin un monto explicito. Si no hay ninguno, devuelve events vacio.
 approved_notice_examples contiene ejemplos ficticios aprobados para interpretar
 la estructura del aviso. No son movimientos reales ni evidencia de este correo.
+
+Comprobacion final obligatoria: un pago o abono a la deuda de una tarjeta de
+credito NO es una compra. Si identificaste card_payment, no lo incluyas en events,
+ni una ni varias veces, aunque encaje en varias categorias. Si el correo solo
+avisa ese pago, la respuesta completa debe ser {"events":[]}.
+No repitas la misma operacion con categorias diferentes.
 """
 
 

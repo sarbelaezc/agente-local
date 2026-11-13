@@ -437,6 +437,21 @@ Con Ollama local se verificaron dos abonos ficticios (con y sin tilde en
 «crédito») y una compra de control: los abonos devolvieron cero eventos y la
 compra produjo una propuesta pendiente. No se reprodujeron ni modificaron
 automáticamente los movimientos bancarios ya importados del usuario.
+Al diagnosticar un bloqueo de la importación de enero a agosto, se reprodujo
+que Ollama devolvía dos `card_payment` para un mismo abono, solo con categorías
+distintas. El aviso coincidía con el patrón «Pagaste … en la tarjeta de crédito …
+desde la cuenta». Se reforzó la comprobación final del prompt: no emitir abonos
+a la deuda ni repetir una operación con categorías distintas. Con ese mismo
+aviso y Ollama local, la respuesta pasó de dos propuestas rechazadas a
+`events: []`, sin escrituras en SQLite. No se eliminan duplicados por código:
+si el modelo vuelve a producir movimientos indistinguibles, el escaneo se
+detiene sin importar ese aviso y conserva el punto de reanudación.
+Tras el ajuste pasaron 106 pruebas de extracción, persistencia y API. El control
+con Ollama local mantuvo dos abonos sin eventos y una compra como propuesta
+pendiente. Al reanudar la importación real se guardaron 54 propuestas nuevas:
+un primer intento terminó por un fallo de apertura del origen de Outlook y el
+segundo por un comercio sin evidencia literal, incluso tras su corrección local.
+No se declara terminado el rango enero-agosto ni se relaja esa salvaguarda.
 La recuperación de espacios y la corrección dirigida se verificaron con correos
 reales que bloqueaban octubre. En la última validación se solicitó una corrección,
 se superó la validación y el recorrido continuó: se procesaron 14 correos adicionales
