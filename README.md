@@ -8,7 +8,7 @@ implementa.
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/run-invoice-batch.ps1` / `-Resume` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
-| Cierre mensual de gastos de Outlook con Ollama local | Importación de septiembre y octubre verificada con corte por fechas; panel e inversiones disponibles; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
+| Cierre mensual de gastos de Outlook con Ollama local | Importación de septiembre y octubre verificada; decisiones USD con tasa manual a COP; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
 
 ## Stack tecnológico
 
@@ -130,7 +130,8 @@ El panel local ofrece:
   no solo el mes del selector.
 
 Los importes se calculan con enteros en centésimas, no con aritmética del modelo.
-No se convierten ni mezclan monedas; cada configuración importa una sola moneda,
+No se mezclan importes de monedas distintas. Un cierre configurado en COP admite
+avisos USD y su conversión estimada mediante tasa manual, conservando el original
 con hasta dos decimales. Fechas ISO con zona explícita se convierten a la zona
 IANA elegida. No se supone que una fecha de la interfaz de Outlook esté en UTC.
 Si el aviso no contiene fecha de compra reconocible, se usa la fecha local del
@@ -143,6 +144,37 @@ propias o cuentas excluidas solo permiten Familiar o No cuenta.
 humana, incluso si se eligió considerar transferencias personales por defecto.
 Una clasificación de Ollama no equivale a aprobación. Revisa posibles avisos
 duplicados de la misma compra antes de aprobarlos.
+
+### Compras USD y tasa estimada manual
+
+- **Alcance:** en cierres configurados en COP, la extracción conserva USD cuando
+  el aviso contiene `USD` o `US$`, en lugar de obligar al modelo a etiquetarlo COP.
+  El nombre del comercio (incluido AMAZON MKTPLACE) nunca determina la moneda.
+  Un aviso con marcadores COP y USD se detiene por ambigüedad, sin conversión.
+- **Configuración y uso:** en **Decisión**, los movimientos USD también aparecen
+  al seleccionar COP. Ingresa la **tasa estimada COP por USD para la fecha del
+  movimiento**, por ejemplo `4200,50`, y confirma Personal, Familiar o la decisión
+  correspondiente. Acepta punto o coma decimal, sin separadores de miles y con
+  hasta seis decimales. No cuenta permite excluir el movimiento sin tasa.
+  Reinicia el servidor del panel tras actualizar el código; recargar solo la
+  página no actualiza el proceso Python. Si detecta un servidor anterior,
+  el panel bloquea las decisiones y pide reiniciarlo.
+- El importe USD permanece intacto. SQLite conserva la tasa manual y el
+  equivalente COP, redondeado a centésimas con aritmética decimal. Los totales,
+  gráficos mensuales/anuales y el resumen usan ese equivalente una sola vez en
+  COP. Sin tasa, el importe permanece en USD y no se suma a COP.
+- **Registros anteriores:** si un aviso USD quedó etiquetado como COP, comprueba
+  primero el correo original, cambia **Moneda original del aviso** a USD e ingresa
+  la tasa al guardar la decisión. No cambies todas las compras de Amazon por su
+  nombre. Abrir el panel o reimportar no corrige ni reclasifica registros.
+- **Seguridad:** solo el usuario proporciona la tasa y confirma la decisión;
+  no se consulta una tasa externa ni se permite al modelo inventarla. El cambio
+  de moneda/tasa se audita junto con la decisión local. Las bases anteriores
+  incorporan columnas opcionales sin cambiar sus importes ni sus decisiones.
+- **Validación:** pruebas sintéticas de USD explícito, rechazo de COP incorrecto,
+  persistencia, migración, tasa inválida, redondeo, API y flujo del navegador.
+  Pendiente: verificar avisos USD reales y las tasas elegidas por el usuario;
+  no se modificaron sus registros ni se ejecutó otra importación real.
 
 ### Usabilidad y recuperación del panel
 

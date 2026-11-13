@@ -337,7 +337,7 @@
         </section>
 
         <section id="panel-decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden>
-          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Se muestran todos los meses de la moneda seleccionada. Las categorías solo se cuentan en gastos si eliges Personal o Familiar.</p></div></div>
+          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Se muestran todos los meses de la moneda seleccionada; en COP también aparecen los movimientos USD para ingresar su tasa estimada. Las categorías solo se cuentan en gastos si eliges Personal o Familiar.</p></div></div>
           <div id="pending-list" class="decision-list"></div>
           <details class="history-detail" id="decision-history">
             <summary>Decisiones anteriores · cambiar una decisión</summary>
@@ -413,10 +413,14 @@
 
       function safeArray(value) { return Array.isArray(value) ? value : []; }
       function txCurrency(tx) { return typeof tx.currency === "string" ? tx.currency : ""; }
+      function reportingCurrency(tx) {
+        return txCurrency(tx) === "USD" && Number.isSafeInteger(tx.cop_amount_minor) ? "COP" : txCurrency(tx);
+      }
       function transactions() {
         return safeArray(state.data && state.data.transactions).filter(tx =>
-          tx && typeof tx === "object" && Number.isSafeInteger(tx.amount_minor) && txCurrency(tx) === state.currency
-        );
+          tx && typeof tx === "object" && Number.isSafeInteger(tx.amount_minor) && reportingCurrency(tx) === state.currency
+        ).map(tx => reportingCurrency(tx) !== txCurrency(tx)
+          ? { ...tx, amount_minor: tx.cop_amount_minor, currency: "COP" } : tx);
       }
       function isExcludedAccount(tx) {
         const account = typeof tx.account === "string" ? tx.account.trim().toLocaleLowerCase() : "";
@@ -483,6 +487,9 @@
           const data = await response.json();
           if (!data || typeof data.configured !== "boolean" || !Array.isArray(data.transactions) || !Array.isArray(data.categories) || !Array.isArray(data.coverage)) {
             throw new Error("La respuesta de /api/state no coincide con el contrato esperado.");
+          }
+          if (data.transactions.some(tx => !tx || !("exchange_rate" in tx) || !("cop_amount_minor" in tx))) {
+            throw new Error("Reinicia el servidor del panel para habilitar las tasas manuales USD/COP");
           }
           state.data = data;
           if (!quiet) showMessage("");
@@ -998,7 +1005,7 @@
             buckets[index].categories.set(category, (buckets[index].categories.get(category) || 0) + tx.amount_minor);
           }
         });
-        const available = buckets.filter(bucket => safeArray(state.data.transactions).some(tx => tx && monthOf(tx) === bucket.month && txCurrency(tx) === state.currency));
+        const available = buckets.filter(bucket => items.some(tx => monthOf(tx) === bucket.month));
         const completedTotals = available.map(bucket => sum(bucket.personal) + sum(bucket.family));
         const average = completedTotals.length ? Math.round(completedTotals.reduce((a, b) => a + b, 0) / completedTotals.length) : 0;
         const highest = available.length ? available.reduce((best, bucket) => sum(bucket.personal) + sum(bucket.family) > sum(best.personal) + sum(best.family) ? bucket : best) : null;
@@ -1091,9 +1098,7 @@
         const current = currentMonth();
         const elapsedUnverified = [];
         const coverageByMonth = new Map(safeArray(state.data.coverage).filter(entry => entry && typeof entry.month === "string").map(entry => [entry.month, entry]));
-        const importedMonths = new Set(safeArray(state.data.transactions)
-          .filter(tx => tx && txCurrency(tx) === state.currency)
-          .map(monthOf).filter(Boolean));
+        const importedMonths = new Set(transactions().map(monthOf).filter(Boolean));
         $("#year-coverage-note").textContent = `Los meses transcurridos que no aparecen como verificados manualmente no deben interpretarse como gasto cero. “Sin importación” indica que no hay movimientos de esta moneda registrados para ese mes.`;
         const table = document.createElement("table");
         const head = document.createElement("thead");
@@ -1133,7 +1138,10 @@
       }
 
       function renderDecisions() {
-        const all = transactions();
+        const all = safeArray(state.data.transactions).filter(tx => tx && (
+          txCurrency(tx) === state.currency ||
+          (state.currency === "COP" && txCurrency(tx) === "USD")
+        ));
         const pending = all.filter(tx => tx.decision == null).sort((a, b) => String(a.day || "").localeCompare(String(b.day || "")));
         const host = $("#pending-list");
         host.replaceChildren();
@@ -1151,7 +1159,10 @@
         const card = el("article", "decision-card");
         const meta = el("div", "decision-meta");
         meta.append(el("span", "", tx.day || "Fecha no disponible"), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
-        card.append(meta, el("h3", "", itemText(tx.merchant)), el("strong", "", formatMoney(tx.amount_minor)));
+        card.append(meta, el("h3", "", itemText(tx.merchant)), el("strong", "", formatMoney(tx.amount_minor, txCurrency(tx))));
+        if (txCurrency(tx) === "USD" && Number.isSafeInteger(tx.cop_amount_minor)) {
+          card.append(el("p", "hint", `Estimado: ${formatMoney(tx.cop_amount_minor, "COP")} · Tasa manual: ${tx.exchange_rate} COP por USD.`));
+        }
         const reason = typeof tx.reason === "string" && tx.reason.trim() ? tx.reason : "Sin motivo anotado.";
         card.append(el("p", "reason", reason));
         const categoryField = el("div", "field decision-category");
@@ -1172,6 +1183,35 @@
         });
         categoryField.append(categoryLabel, categorySelect);
         card.append(categoryField);
+        let currencySelect = null, rateInput = null;
+        if (state.data.config.currency === "COP" && ["COP", "USD"].includes(txCurrency(tx))) {
+          const currencyField = el("div", "field decision-category");
+          const currencyLabel = el("label", "", "Moneda original del aviso");
+          currencyLabel.htmlFor = `decision-currency-${decisionCardSequence++}`;
+          currencySelect = document.createElement("select");
+          currencySelect.id = currencyLabel.htmlFor;
+          ["COP", "USD"].forEach(code => {
+            const option = el("option", "", code);
+            option.value = code;
+            option.selected = code === txCurrency(tx);
+            currencySelect.append(option);
+          });
+          currencyField.append(currencyLabel, currencySelect);
+          card.append(currencyField, el("p", "hint", "Corrige la moneda solo después de comprobar el aviso original; el nombre del comercio no determina la moneda."));
+          const rateField = el("div", "field decision-category");
+          const rateLabel = el("label", "", `Tasa estimada COP por USD para ${tx.day}`);
+          rateLabel.htmlFor = `decision-rate-${decisionCardSequence++}`;
+          rateInput = document.createElement("input");
+          rateInput.id = rateLabel.htmlFor;
+          rateInput.type = "text";
+          rateInput.inputMode = "decimal";
+          rateInput.placeholder = "Ejemplo: 4200,50";
+          rateInput.value = tx.exchange_rate || "";
+          rateField.append(rateLabel, rateInput, el("p", "hint", "Estimación ingresada por ti para la fecha del movimiento; no se consulta ni se calcula una tasa automáticamente."));
+          rateField.hidden = currencySelect.value !== "USD";
+          currencySelect.addEventListener("change", () => { rateField.hidden = currencySelect.value !== "USD"; });
+          card.append(rateField);
+        }
         const options = decisionOptions(tx);
         if (nonExpenseKinds.has(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "")) {
           card.append(el("p", "hint", "Este tipo no se cuenta como gasto; solo puedes marcarlo «No cuenta»."));
@@ -1187,7 +1227,12 @@
           button.type = "button";
           button.setAttribute("aria-pressed", String(tx.decision === decision || (tx.decision === "cash_withdrawal" && decision === "personal")));
           button.addEventListener("click", async () => {
-            await postJson("/api/decision", { id: tx.id, decision, category: categorySelect.value }, isPrevious ? "Decisión actualizada." : "Decisión guardada.");
+            const payload = { id: tx.id, decision, category: categorySelect.value };
+            if (currencySelect) {
+              payload.currency = currencySelect.value;
+              payload.exchange_rate = currencySelect.value === "USD" ? rateInput.value.trim() : "";
+            }
+            await postJson("/api/decision", payload, isPrevious ? "Decisión actualizada." : "Decisión guardada.");
           });
           actions.append(button);
         });

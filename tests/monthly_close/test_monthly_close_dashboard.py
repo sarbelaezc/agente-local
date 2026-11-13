@@ -102,6 +102,78 @@ def test_decision_persists_and_updates_totals(dashboard):
     assert not errors
 
 
+def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
+    page, store, month, errors = dashboard
+    store.import_message("usd", [{
+        "id": "usd", "message_id": "usd", "day": month + "-06",
+        "merchant": "AMAZON MKTPLACE", "account": "Tarjeta A",
+        "amount_minor": 1234, "currency": "USD", "category": "Compras",
+        "kind": "purchase", "decision": None, "reason": "Aviso USD.",
+    }])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.locator("#tab-decisions").click()
+    card = page.locator("#pending-list .decision-card").filter(has_text="AMAZON MKTPLACE")
+    assert "USD" in card.inner_text()
+    with page.expect_response(lambda response: response.url.endswith("/api/decision")) as saved:
+        card.get_by_role("button", name="Gasto personal", exact=True).click()
+    assert saved.value.status == 400
+    assert next(t for t in store.state()["transactions"] if t["id"] == "usd")["decision"] is None
+    card.get_by_label(re.compile("Tasa estimada COP por USD")).fill("4200,50")
+    with page.expect_response(lambda response: response.url.endswith("/api/decision")) as saved:
+        card.get_by_role("button", name="Gasto personal", exact=True).click()
+    assert saved.value.status == 200
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    # Existing COP expenses (1500.57) plus the USD estimate (51834.17).
+    assert re.search(r"\b53[.\s]?334,74", page.locator("#month-metrics").inner_text())
+    page.locator("#tab-year").click()
+    assert re.search(r"\b53[.\s]?334,74", page.locator("#year-metrics").inner_text())
+    page.locator("#tab-decisions").click()
+    page.locator("#decision-history summary").click()
+    history = page.locator("#history-list .decision-card").filter(has_text="AMAZON MKTPLACE")
+    assert "12,34" in history.inner_text()
+    assert re.search(r"51[.\s]?834,17", history.inner_text())
+    assert history.get_by_label(re.compile("Tasa estimada COP por USD")).input_value() == "4200.50"
+    assert not errors
+
+
+def test_legacy_cop_record_can_be_corrected_to_usd_only_on_decision(dashboard):
+    page, store, _, errors = dashboard
+    page.locator("#tab-decisions").click()
+    card = page.locator("#pending-list .decision-card").first
+    card.get_by_label("Moneda original del aviso", exact=True).select_option("USD")
+    assert store.state()["transactions"][0]["currency"] == "COP"
+    card.get_by_label(re.compile("Tasa estimada COP por USD")).fill("4000")
+    with page.expect_response(lambda response: response.url.endswith("/api/decision")) as saved:
+        card.get_by_role("button", name="Familiar", exact=True).click()
+    assert saved.value.status == 200
+    row = next(tx for tx in store.state()["transactions"] if tx["id"] == "0")
+    assert row["currency"] == "USD"
+    assert row["amount_minor"] == 50002
+    assert row["cop_amount_minor"] == 200008000
+    assert not errors
+
+
+def test_stale_backend_cannot_silently_ignore_exchange_fields(dashboard):
+    page, _, _, errors = dashboard
+
+    def stale_state(route):
+        response = route.fetch()
+        data = response.json()
+        for tx in data["transactions"]:
+            tx.pop("exchange_rate")
+            tx.pop("cop_amount_minor")
+        route.fulfill(response=response, json=data)
+
+    page.route("**/api/state", stale_state)
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    assert "Reinicia el servidor" in page.locator("body").inner_text()
+    assert not page.locator("#dashboard-area").is_visible()
+    assert not errors
+
+
 def test_investment_choice_updates_separate_month_year_totals_and_history(dashboard):
     page, store, month, errors = dashboard
     page.get_by_role("tab", name=re.compile("Decisi")).click()

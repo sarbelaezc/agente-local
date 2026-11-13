@@ -83,7 +83,15 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                     category = raw.get("category")
                     if category is not None and not isinstance(category, str):
                         raise ValueError("Categoria invalida.")
-                    store.decide(event_id, decision, category)
+                    currency, exchange_rate = raw.get("currency"), raw.get("exchange_rate")
+                    if currency is not None and not isinstance(currency, str):
+                        raise ValueError("Moneda invalida.")
+                    if exchange_rate is not None and not isinstance(exchange_rate, str):
+                        raise ValueError("Tasa invalida: debe enviarse como texto decimal.")
+                    store.decide(
+                        event_id, decision, category,
+                        currency=currency, exchange_rate=exchange_rate,
+                    )
                 elif self.path == "/api/coverage":
                     if raw.get("status") != "reviewed":
                         raise ValueError("Solo se permite confirmar una revision manual.")

@@ -10,7 +10,7 @@ from datetime import date, datetime
 from mail_invoices.local_model import JsonModel
 from monthly_close.domain import (
     KINDS, NON_EXPENSES, Preferences, amount_minor, clean_text,
-    decision_reason, received_local,
+    decision_reason, notice_currency, received_local,
 )
 
 SYSTEM = """Eres un asistente de cierre mensual. Responde en espanol, solo JSON.
@@ -37,6 +37,8 @@ simbolos, separadores o decimales. Copia la categoria de la lista autorizada.
 amount_text debe ser una subcadena exacta del correo: no antepongas COP ni otra
 moneda si no aparece junto al monto. Por ejemplo, si dice $12.345,67, copia
 "$12.345,67", nunca "COP 12.345,67" ni "$ 12.345,67". currency va por separado.
+Si el correo indica USD o US$, conserva USD. No conviertas importes ni supongas
+que el comercio determina la moneda. La tasa de cambio la ingresa el usuario.
 merchant debe copiar el nombre o concepto tal como aparece en un fragmento del
 correo. No lo resumas ni agregues palabras para describir la operacion.
 Si recibes correction, corrige el campo indicado copiando evidencia del correo;
@@ -159,9 +161,8 @@ def _proposals(
         if account not in preferences.accounts + preferences.excluded_accounts + ["Desconocida"]:
             raise ValueError("Ollama propuso una cuenta no configurada.")
         currency = clean_text(event.get("currency"), 3).upper()
-        # No exchange conversion or inferred alternate currencies.
-        if currency != preferences.currency:
-            raise ValueError("Moneda distinta a la configurada: requiere revision manual.")
+        if currency != notice_currency(source, preferences.currency):
+            raise ValueError("Moneda sin evidencia en el aviso: requiere revision manual.")
         category = clean_text(event.get("category"), 150)
         if category not in preferences.categories:
             raise ValueError("Categoria no autorizada.")
