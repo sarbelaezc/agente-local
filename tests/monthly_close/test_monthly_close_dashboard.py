@@ -139,7 +139,7 @@ def test_dashboard_mobile_and_desktop_screenshots(dashboard, tmp_path):
     page, _, _, errors = dashboard
     output = Path(os.environ.get("MONTHLY_CLOSE_SCREENSHOTS", str(tmp_path)))
     output.mkdir(parents=True, exist_ok=True)
-    for width, label in [(1440, "desktop"), (390, "mobile")]:
+    for width, label in [(1440, "desktop"), (390, "mobile"), (320, "narrow")]:
         page.set_viewport_size({"width": width, "height": 1000})
         for index, tab in enumerate(["month", "year", "decisions"]):
             page.locator("#tab-" + tab).click()
@@ -151,6 +151,102 @@ def test_dashboard_mobile_and_desktop_screenshots(dashboard, tmp_path):
     page.locator("#tab-month").click()
     page.screenshot(path=str(output / "mobile-dark.png"), full_page=True)
     assert not errors
+
+
+def test_legacy_cash_withdrawal_updates_cumulative_personal_total(dashboard):
+    page, store, _, errors = dashboard
+    store.decide("0", "cash_withdrawal")
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    text = page.locator("#cumulative-chart .legend-row").inner_text()
+    assert re.search(r"Personal\s+1[.\s]?700,58", text), text
+    assert "Familiar 300,01" in text
+    assert not errors
+
+
+@pytest.mark.parametrize("configured", [True, False])
+def test_failed_state_load_can_be_retried(dashboard, configured):
+    page, store, _, errors = dashboard
+    if not configured:
+        with store.connect() as db:
+            db.execute("DELETE FROM settings")
+    page.route("**/api/state", lambda route: route.abort())
+    page.reload()
+    page.locator("#load-error").wait_for(state="visible")
+    retry = page.get_by_role("button", name="Actualizar", exact=True)
+    assert retry.is_visible()
+    page.unroute("**/api/state")
+    retry.click()
+    page.locator("#dashboard-area" if configured else "#setup-area").wait_for(state="visible")
+    assert page.locator("#load-error").is_hidden()
+    assert not errors
+
+
+def test_saving_blocks_duplicate_decisions_and_recovers_after_error(dashboard):
+    page, store, _, errors = dashboard
+    requests = []
+    page.route("**/api/decision", lambda route: requests.append(route))
+    page.locator("#tab-decisions").click()
+    button = page.locator("#pending-list").get_by_role("button", name="Gasto personal", exact=True)
+    button.evaluate("""button => {
+        button.click();
+        button.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+    }""")
+    page.wait_for_function("() => document.querySelector('#refresh-button').disabled")
+    assert len(requests) == 1
+    assert page.locator(
+        "button:not(#theme-toggle):enabled, input:enabled, select:enabled, textarea:enabled"
+    ).count() == 0
+    requests[0].fulfill(status=500, json={"error": "Fallo simulado."})
+    page.wait_for_function("() => !document.querySelector('#refresh-button').disabled")
+    assert "Fallo simulado" in page.locator("#global-message").inner_text()
+    assert next(tx for tx in store.state()["transactions"] if tx["id"] == "0")["decision"] is None
+    assert button.is_enabled()
+    assert not errors
+
+
+def test_category_chart_identifies_every_segment(dashboard):
+    page, store, month, errors = dashboard
+    original = next(tx for tx in store.state()["transactions"] if tx["id"] == "1")
+    categories = CATEGORIES + ["Categoria adicional A", "Categoria adicional B"]
+    store.configure({**store.preferences().to_dict(), "categories": categories})
+    for index, category in enumerate(categories):
+        event_id = f"legend-{index}"
+        store.import_message(event_id, [{
+            **original, "id": event_id, "message_id": event_id,
+            "day": month + "-06", "category": category, "amount_minor": 100,
+        }])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    labels = page.locator("#category-chart .legend-label").all_text_contents()
+    assert set(labels) == set(categories)
+    assert not errors
+
+
+def test_primary_buttons_have_readable_contrast_in_both_themes(dashboard):
+    page, _, _, _ = dashboard
+    for theme in ["light", "dark"]:
+        if theme == "dark":
+            page.locator("#theme-toggle").click()
+        contrast = page.locator("#coverage-form button").evaluate("""button => {
+            const luminance = color => {
+                const channels = color.match(/[\\d.]+/g).slice(0, 3).map(Number)
+                    .map(value => value / 255)
+                    .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+                return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
+            };
+            const style = getComputedStyle(button);
+            const values = [luminance(style.color), luminance(style.backgroundColor)];
+            return (Math.max(...values) + .05) / (Math.min(...values) + .05);
+        }""")
+        assert contrast >= 4.5, (theme, contrast)
+
+
+def test_closing_configuration_returns_keyboard_focus(dashboard):
+    page, _, _, _ = dashboard
+    page.locator("#edit-config-button").click()
+    page.locator("#close-config-button").click()
+    assert page.locator("#edit-config-button").evaluate("button => button === document.activeElement")
 
 
 @pytest.mark.parametrize("decision,label,category", [

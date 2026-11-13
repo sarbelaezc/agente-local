@@ -126,7 +126,8 @@ El panel local ofrece:
   tabla personal/familiar/pendiente. Los meses no conciliados llevan advertencia.
 - **Decisión:** confirmar gasto personal, familiar o no contable y corregir categoría.
   Las decisiones se guardan en SQLite y pueden revisarse después. Reimportar no
-  las reemplaza.
+  las reemplaza. Esta vista muestra todos los meses de la moneda seleccionada,
+  no solo el mes del selector.
 
 Los importes se calculan con enteros en centésimas, no con aritmética del modelo.
 No se convierten ni mezclan monedas; cada configuración importa una sola moneda,
@@ -142,6 +143,26 @@ propias o cuentas excluidas solo permiten Familiar o No cuenta.
 humana, incluso si se eligió considerar transferencias personales por defecto.
 Una clasificación de Ollama no equivale a aprobación. Revisa posibles avisos
 duplicados de la misma compra antes de aprobarlos.
+
+### Usabilidad y recuperación del panel
+
+El panel conserva la aprobación humana y no cambia datos anteriores al abrirse:
+
+- Durante una carga o guardado bloquea los controles de datos y las decisiones
+  para evitar solicitudes simultáneas; el selector de tema sigue disponible.
+  Si falla un guardado, muestra el error y vuelve a habilitar los controles.
+- Si falla la carga, **Actualizar** permite reintentar sin recargar la página,
+  incluso antes de completar la configuración inicial.
+- El tema oscuro utiliza texto contrastante en los botones principales. Al cerrar
+  Configuración, el foco del teclado vuelve al botón que la abrió.
+- La dona tiene tamaño acotado y una leyenda para todas las categorías graficadas,
+  también cuando hay más de ocho. No oculta importes por el límite de la leyenda.
+  Los encabezados y las leyendas se redistribuyen en pantallas estrechas.
+- El acumulado personal incluye los retiros en efectivo antiguos, igual que las
+  tarjetas de totales, el calendario y el resumen anual; no modifica sus registros.
+
+Estas mejoras no añaden dependencias ni acceso al correo, y no permiten guardar
+decisiones sin pulsar explícitamente un botón de aprobación.
 
 ### Aportes a inversiones
 
@@ -599,7 +620,12 @@ Se validan reglas, importes, zona horaria, decisiones persistentes, exclusión d
 remitentes no autorizados, protección del panel y DOM sintético con Playwright.
 También se prueban el formulario inicial, los cambios de configuración, los
 totales con centavos, las decisiones desde el navegador y las etiquetas de los
-gráficos. Se revisaron capturas a 1440 y 390 píxeles, en modo claro y oscuro.
+gráficos. También se verifican el reintento tras fallos de carga, el bloqueo de
+guardados duplicados, la recuperación tras un error de guardado, los acumulados
+con retiros en efectivo antiguos, la leyenda completa y el retorno de foco.
+El contraste de texto de los botones principales se comprueba con un mínimo de
+4,5:1 en ambos temas. Se revisaron capturas a 1440, 390 y 320 píxeles en modo claro,
+y capturas móviles en modo oscuro, con datos sintéticos.
 Las pruebas gráficas usan Chromium instalado por `bootstrap.ps1`.
 **Pendiente de validar con el usuario:** selectores de su Outlook, cobertura real
 de Spam/Eliminados, resultados del modelo local y ejecución de la tarea instalada.
