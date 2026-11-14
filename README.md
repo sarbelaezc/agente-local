@@ -6,15 +6,15 @@ implementa.
 
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
-| Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/run-invoice-batch.ps1` / `-Resume` |
-| Cierre mensual de gastos de Outlook con Ollama local | Importación de septiembre y octubre verificada con el lector de navegador; lector por Microsoft Graph implementado y probado, pendiente de validar con `scan -ReadOnly`; tasa manual USD/COP y cola de extracciones sin evidencia; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
+| Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
+| Cierre mensual de gastos de Outlook con Ollama local | Importación de septiembre y octubre verificada con el lector de navegador; lector por Microsoft Graph implementado y validado con `scan -ReadOnly` real (primera importación por Graph pendiente); tasa manual USD/COP y cola de extracciones sin evidencia; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` |
 
 ## Stack tecnológico
 
 - **Python 3.12 o posterior**; empaquetado con `setuptools` y dependencias declaradas en `pyproject.toml`.
 - **Playwright para Python** automatiza los navegadores. Facturas usa Opera; el lector alternativo del cierre mensual (`source: browser`) usa un perfil exclusivo de Microsoft Edge.
 - **Microsoft Graph con `msal`** (solo lectura, permiso `Mail.Read`) lee el buzón del cierre mensual cuando `source` es `graph`; no usa navegador.
-- **Una instancia local de Ollama compartida por facturas y cierre mensual** en `127.0.0.1:11434`; ambos usan el almacén de modelos de facturas.
+- **Una instancia local de Ollama compartida por facturas y cierre mensual** en `127.0.0.1:11434`; `scripts/agente-local.ps1` la inicia cuando un comando la necesita y no está activa, con el almacén de modelos predeterminado de Ollama.
 - **Facturas:** `openpyxl` para Excel, `defusedxml` para XML, `pypdf` para PDF con texto, y `pypdfium2` más `Pillow` para renderizar PDF escaneados.
 - **Tkinter y SQLite** de la biblioteca estándar para interfaces y persistencia local; **pytest** para pruebas.
 - **Tesseract OCR** es una instalación externa opcional, necesaria solo para PDF escaneados. Opera, Edge y Ollama también se instalan aparte cuando se usa la función correspondiente.
@@ -43,17 +43,7 @@ implementa.
    }
    ```
 
-5. Inicia una sola instancia de Ollama para facturas y cierre mensual en una terminal PowerShell. Cierra la instancia automática de Ollama antes de levantarla manualmente si ya ocupa el puerto `11434`.
-
-    Facturas:
-
-    ```powershell
-    $env:OLLAMA_HOST = "127.0.0.1:11434"
-    $env:OLLAMA_MODELS = "$env:LOCALAPPDATA\MailInvoiceAgent\OllamaModels"
-    ollama serve
-    ```
-
-    En otra terminal, define el mismo `OLLAMA_HOST` y descarga el modelo compartido configurado por ambos features, actualmente `ollama pull qwen2.5:7b`. Las nuevas descargas usan un solo directorio. Consulta la [guía oficial de configuración de Ollama](https://docs.ollama.com/faq#how-do-i-configure-ollama-server) para más opciones en Windows.
+5. Descarga una sola vez el modelo compartido por ambos features, actualmente `ollama pull qwen2.5:7b`. No hace falta iniciar Ollama a mano: `scripts/agente-local.ps1` reutiliza la instancia activa en `127.0.0.1:11434` o, si no hay ninguna, la inicia y la cierra al terminar. Usa el almacén de modelos predeterminado de Ollama; si defines `OLLAMA_MODELS`, se respeta. Consulta la [guía oficial de configuración de Ollama](https://docs.ollama.com/faq#how-do-i-configure-ollama-server) para más opciones en Windows.
 6. Para OCR en PDF escaneados, instala Tesseract y los datos de idioma siguiendo [Requisitos de OCR](#requisitos-de-ocr). Es opcional para las pruebas.
 7. Ejecuta las pruebas sin credenciales, correos ni libros personales:
 
@@ -65,25 +55,49 @@ implementa.
 
 Los comandos de facturas se muestran en sus secciones y usan `config/settings.yaml`.
 
+## Lanzador único
+
+`scripts/agente-local.ps1` es el único punto de entrada de ambos features.
+Sustituye a `run-monthly-close.ps1`, `import-monthly-close.ps1` y
+`run-invoice-batch.ps1`, que se eliminaron.
+
+| Comando | Qué hace | Ollama |
+|---|---|---|
+| `serve` (predeterminado) | Panel local del cierre mensual | No |
+| `login` | Inicio de sesión manual del buzón | No |
+| `check-config` | Comprueba el paso 0 y la configuración | No |
+| `scan` / `pilot` | Recorrido o piloto de un aviso | Sí, salvo con `-ReadOnly` |
+| `import` | `check-config`, `scan` y apertura del panel | Sí |
+| `summary -Month AAAA-MM` | Resumen de un mes | No |
+| `scheduled` | Cierre de la tarea programada | Solo en la hora de cierre |
+| `invoices` | Lote de facturas (`-BatchSize`, `-Days`, `-Resume`) | Sí |
+
+Cuando un comando necesita Ollama, el lanzador reutiliza la instancia que ya
+responda en el endpoint configurado y no la cierra. Si no hay ninguna, inicia
+`ollama serve` en ese endpoint y al terminar o fallar cierra únicamente el
+proceso que inició. En el cierre mensual comprueba además que el modelo
+configurado esté instalado; nunca lo descarga. No cambia `OLLAMA_MODELS` y
+restaura las variables de entorno que modifica.
+
 ## Ejecución bajo demanda
 
 La función de facturas no tiene servicio residente ni tarea programada. Para iniciar manualmente una
 revisión de hasta 3 correos de los últimos 30 días:
 
 ```powershell
-.\scripts\run-invoice-batch.ps1
+.\scripts\agente-local.ps1 invoices
 ```
 
 Ajusta el tamaño (1 a 5) y el rango (1 a 365 días) cuando lo necesites; usa
 `-Resume` para retomar aprobaciones persistidas sin volver a escanear:
 
 ```powershell
-.\scripts\run-invoice-batch.ps1 -BatchSize 5 -Days 30
-.\scripts\run-invoice-batch.ps1 -Resume -BatchSize 5
+.\scripts\agente-local.ps1 invoices -BatchSize 5 -Days 30
+.\scripts\agente-local.ps1 invoices -Resume -BatchSize 5
 ```
 
-El script requiere `.venv`, `config/settings.yaml`, Opera y la instancia local
-de Ollama de facturas en el endpoint configurado. Si falta la configuración,
+El comando requiere `.venv`, `config/settings.yaml` y Opera; inicia Ollama en el
+endpoint de `invoices.ollama` si no está activo. Si falta la configuración,
 crea una copia de la plantilla y se detiene para que completes los valores.
 Cada ejecución abre la revisión supervisada; nada se escribe ni se mueve hasta
 que selecciones y apruebes los correos en la UI.
@@ -145,7 +159,7 @@ portal.azure.com, Microsoft Entra ID, App registrations, New registration:
 o `common`. `browser_executable` no se necesita. `outlook_url` es opcional: si se
 indica, su host forma parte de la identidad de cada mensaje.
 
-**Sesión y seguridad.** `-Command login` abre el navegador del sistema para que
+**Sesión y seguridad.** `login` abre el navegador del sistema para que
 inicies sesión y concedas `Mail.Read`; el agente nunca ve tu contraseña. Los
 tokens quedan en `%LOCALAPPDATA%\MonthlyCloseAgent\graph_token_cache.bin`: es un
 dato sensible local, fuera de Git; borrarlo cierra la sesión. `scan` y la tarea
@@ -172,9 +186,10 @@ puntos de reanudación del lector de navegador no se reutilizan.
 de carpetas, y 10 de 10 mensajes de `Dinero/Bancolombia` (los 5 más recientes y
 los 5 más antiguos, 2019 a 2026) pasan `parse_source`. Probado con un Graph
 simulado: recorrido, instantánea, cortes por fecha, errores, cliente HTTP,
-autenticación y un escaneo completo. **Pendiente de validar:** `scan -ReadOnly`
-real, para confirmar que el total de cada carpeta coincide con su listado y
-poder establecer `folder_scan_verified: true`, y la primera importación.
+autenticación y un escaneo completo. **`scan -ReadOnly` real validado
+(2026-11-14):** terminó con código 0 en las 15 carpetas del alcance y 8303 filas
+de metadatos, 1716 de remitentes autorizados; el total de cada carpeta coincidió
+con su listado. **Pendiente de validar:** la primera importación con Graph.
 
 El panel local ofrece:
 
@@ -320,7 +335,7 @@ su registro y auditoría; no hace falta reimportar.
    if (-not (Test-Path (Join-Path $data "runtime.json"))) {
      Copy-Item config\monthly-close.example.json (Join-Path $data "runtime.json")
    }
-   .\scripts\run-monthly-close.ps1
+   .\scripts\agente-local.ps1
    ```
 
    Abre en el navegador la dirección local indicada en consola y completa el
@@ -331,7 +346,7 @@ su registro y auditoría; no hace falta reimportar.
    `browser` (configura `browser_executable`). Luego inicia sesión manualmente:
 
    ```powershell
-   .\scripts\run-monthly-close.ps1 -Command login
+   .\scripts\agente-local.ps1 login
    ```
 
    Con `graph`, abre el navegador del sistema para el inicio de sesión de Microsoft.
@@ -346,7 +361,7 @@ su registro y auditoría; no hace falta reimportar.
    de lectura antiguo.
 
    ```powershell
-   .\scripts\run-monthly-close.ps1 -Command scan -ReadOnly -Start 2026-10-01 -End 2026-11-01
+   .\scripts\agente-local.ps1 scan -ReadOnly -Start 2026-10-01 -End 2026-11-01
    ```
 
    Comprueba explícitamente Bandeja de entrada, Correo no deseado, Elementos
@@ -365,18 +380,17 @@ su registro y auditoría; no hace falta reimportar.
 6. Configura `%LOCALAPPDATA%\MonthlyCloseAgent\runtime.json` con
    `"ollama_url": "http://127.0.0.1:11434"` y el mismo modelo de facturas,
    actualmente `qwen2.5:7b`. No inicies otra instancia ni descargues otra copia.
-   `scripts/import-monthly-close.ps1` reutiliza el Ollama compartido; si no está
-   activo, lo inicia en el mismo endpoint con el almacén de modelos de facturas
-   y solo cierra el proceso que inició. El almacén mensual anterior se conserva
-   intacto y ya no se usa. Los comandos directos `scan`, `pilot` y
-   la tarea programada requieren el servicio ya activo. Antes de abrir Outlook,
+   `scripts/agente-local.ps1` reutiliza el Ollama compartido; si no está
+   activo, lo inicia en el mismo endpoint y solo cierra el proceso que inició.
+   Esto aplica a `import`, `scan`, `pilot` y a la tarea programada en su hora de
+   cierre. Antes de leer el buzón,
    verifican que el modelo exista; no lo descargan automáticamente. La inferencia
    usa únicamente loopback, sin proxies ni herramientas para el modelo.
-7. Importa de enero al mes anterior con `-Command scan` sin fechas, o indica
+7. Importa de enero al mes anterior con `scan` sin fechas, o indica
    `-Start` y `-End` (fin exclusivo). Ejemplo:
 
    ```powershell
-   .\scripts\run-monthly-close.ps1 -Command scan -Start 2026-01-01 -End 2026-11-01
+   .\scripts\agente-local.ps1 scan -Start 2026-01-01 -End 2026-11-01
    ```
 
    El límite predeterminado es **200 filas en total entre todas las carpetas del alcance**,
@@ -444,7 +458,7 @@ Desde la raíz del proyecto, en **PowerShell**:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
-.\scripts\import-monthly-close.ps1 -Start 2026-01-01 -End 2026-11-01
+.\scripts\agente-local.ps1 import -Start 2026-01-01 -End 2026-11-01
 ```
 
 El cambio de política solo afecta a esa terminal y desaparece al cerrarla.
@@ -455,13 +469,13 @@ No hay un lanzador Python adicional ni dependencia de Bash.
 Desde **CMD**, puedes ejecutar el mismo script:
 
 ```cmd
-powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File scripts\import-monthly-close.ps1 -Start 2026-01-01 -End 2026-11-01
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File scripts\agente-local.ps1 import -Start 2026-01-01 -End 2026-11-01
 ```
 
 Desde **Git Bash**:
 
 ```bash
-powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File scripts/import-monthly-close.ps1 -Start 2026-01-01 -End 2026-11-01
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File scripts/agente-local.ps1 import -Start 2026-01-01 -End 2026-11-01
 ```
 
 El fin es exclusivo. Sin fechas importa desde enero del año local hasta el mes
@@ -469,7 +483,7 @@ anterior. Usa `-End 2026-11-03` para incluir el 2 de noviembre.
 Para importar solo desde octubre hasta esa fecha:
 
 ```powershell
-.\scripts\import-monthly-close.ps1 -Start 2026-10-01 -End 2026-11-03
+.\scripts\agente-local.ps1 import -Start 2026-10-01 -End 2026-11-03
 ```
 
 Cuando el correo contiene montos con símbolo monetario o el código configurado,
@@ -644,10 +658,10 @@ hechos ni requisitos, verificar con evidencia y preguntar al usuario antes de
 actuar cuando quede una duda o se requiera una decisión.
 El script usa la configuración privada predeterminada de MonthlyCloseAgent,
 su entorno `.venv` de Windows y el perfil exclusivo de Edge. Comprueba la
-configuración y el modelo instalado antes de importar. Usa el endpoint y el
-directorio compartidos de Ollama de facturas (`11434` y
-`%LOCALAPPDATA%\MailInvoiceAgent\OllamaModels`). Si Ollama no responde, inicia
-el servicio en ese endpoint; no descarga modelos. Al terminar o fallar cierra
+configuración y el modelo instalado antes de importar. Usa el endpoint
+compartido de Ollama (`11434`) y su almacén de modelos predeterminado; el
+directorio `%LOCALAPPDATA%\MailInvoiceAgent\OllamaModels` ya no se usa. Si
+Ollama no responde, inicia el servicio en ese endpoint; no descarga modelos. Al terminar o fallar cierra
 únicamente el proceso de Ollama que inició. Una instancia preexistente queda abierta.
 Al terminar el intento de importación, incluso si el escaneo devuelve un error,
 inicia el panel en otra terminal y abre `http://127.0.0.1:8766` en el navegador
@@ -701,7 +715,7 @@ de Claude. Persiste al cerrar VS Code. Una comprobación horaria solo inicia
 lectura **el último día del mes, durante las 22:00 de la zona configurada**.
 Python aplica las reglas de zona/horario de verano; las demás ejecuciones no
 abren el navegador. Requiere Windows con sesión interactiva abierta, equipo
-encendido y Ollama funcionando. Si falta autenticación o cambia Outlook, falla
+encendido y Ollama instalado (el lanzador lo inicia en la hora de cierre si no está activo). Si falta autenticación o cambia Outlook, falla
 sin continuar. No instala servicios ni tareas sin ejecutar este script.
 
 Cada ejecución carga desde disco las respuestas, reglas, categorías y remitentes.
@@ -711,7 +725,7 @@ El resumen queda en `last-close.txt` dentro del directorio privado de datos.
 También se consulta con:
 
 ```powershell
-.\scripts\run-monthly-close.ps1 -Command summary -Month 2026-10
+.\scripts\agente-local.ps1 summary -Month 2026-10
 .\scripts\register-monthly-close.ps1 -Remove
 ```
 
@@ -772,8 +786,8 @@ los remitentes configurados y elige su primera fila visible. No busca mensajes
 adicionales ni lee cuerpos de remitentes fuera de esa lista.
 
 ```powershell
-.\scripts\run-monthly-close.ps1 -Command pilot -ReadOnly
-.\scripts\run-monthly-close.ps1 -Command pilot
+.\scripts\agente-local.ps1 pilot -ReadOnly
+.\scripts\agente-local.ps1 pilot
 ```
 
 La primera variante verifica lectura e identidad en memoria, sin Ollama ni
@@ -961,7 +975,7 @@ salida del modelo para ese aviso antes de repetir una importación completa;
 no se habilita saltar avisos inválidos para aparentar éxito.
 
 **Preparación de uso y repetición desde el lanzador:** se ejecutó
-`scripts\import-monthly-close.ps1` contra el buzón real. Se verificaron el
+`scripts\import-monthly-close.ps1` (hoy `scripts\agente-local.ps1 import`) contra el buzón real. Se verificaron el
 arranque y cierre de su instancia de Ollama, la apertura real del panel y la
 reutilización de un panel existente. El panel queda disponible para revisión
 manual aunque el escaneo termine con error; no equivale a importación completa.

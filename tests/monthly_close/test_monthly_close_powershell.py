@@ -29,7 +29,7 @@ def test_powershell_launcher_reuses_service_and_preserves_scan_result(
     root = tmp_path / "project with spaces"
     scripts = root / "scripts"
     scripts.mkdir(parents=True)
-    original = Path(__file__).parents[2] / "scripts" / "import-monthly-close.ps1"
+    original = Path(__file__).parents[2] / "scripts" / "agente-local.ps1"
     script = scripts / original.name
     script.write_text(
         original.read_text().replace(".venv\\Scripts\\python.exe", ".venv\\Scripts\\python.ps1")
@@ -89,7 +89,7 @@ function Start-Process {
         return [PSCustomObject]@{HasExited=$false; Id=-1}
     }
 }
-& (Join-Path $PSScriptRoot 'scripts\\import-monthly-close.ps1') """ +
+& (Join-Path $PSScriptRoot 'scripts\\agente-local.ps1') import """ +
         "-Start 2026-01-01 -End 2026-11-01" + (" -ReadOnly" if read_only else "")
         + "\nexit $LASTEXITCODE\n",
         encoding="utf-8",
@@ -120,7 +120,7 @@ function Start-Process {
             )
             assert ollama_env == {
                 "host": f"http://127.0.0.1:{server.server_port}",
-                "models": str(root / "MailInvoiceAgent" / "OllamaModels"),
+                "models": os.environ.get("OLLAMA_MODELS"),
             }
         assert thread.is_alive()
     finally:
