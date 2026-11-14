@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS transactions (
     decision TEXT, reason TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS processed (message_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS extraction_failures (
+    message_id TEXT PRIMARY KEY, sender TEXT NOT NULL, subject TEXT NOT NULL,
+    received TEXT NOT NULL, day TEXT NOT NULL, folder TEXT NOT NULL,
+    field TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS scan_progress (
     scope TEXT NOT NULL, item TEXT NOT NULL, status TEXT NOT NULL,
     PRIMARY KEY (scope, item)
@@ -108,6 +113,26 @@ class Store:
         with self.connect() as db:
             db.execute("DELETE FROM scan_progress WHERE scope=?", (scope,))
 
+    def record_extraction_failure(
+        self, message_id: str, sender: str, subject: str, received: str,
+        day: str, folder: str, field: str,
+    ) -> None:
+        """Retain only metadata needed to locate and retry an unimported notice."""
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO extraction_failures VALUES (?,?,?,?,?,?,?)
+                ON CONFLICT(message_id) DO UPDATE SET sender=excluded.sender,
+                subject=excluded.subject,received=excluded.received,day=excluded.day,
+                folder=excluded.folder,field=excluded.field""",
+                (message_id, sender, subject, received, day, folder, field),
+            )
+            db.execute(
+                """UPDATE coverage SET status='partial',
+                note='Hay avisos pendientes de extraccion; faltan movimientos por revisar.'
+                WHERE month=?""", (day[:7],),
+            )
+            self._audit(db, "extraction-pending", message_id, field)
+
     def import_message(self, message_id: str, events: list[dict]) -> None:
         with self.connect() as db:
             if db.execute("SELECT 1 FROM processed WHERE message_id=?", (message_id,)).fetchone():
@@ -126,6 +151,7 @@ class Store:
                     WHERE month=? AND status='reviewed'""", (event["day"][:7],),
                 )
             db.execute("INSERT INTO processed VALUES (?)", (message_id,))
+            db.execute("DELETE FROM extraction_failures WHERE message_id=?", (message_id,))
             self._audit(db, "import", message_id, str(len(events)))
 
     def decide(
@@ -232,6 +258,10 @@ class Store:
             raise ValueError("Estado de cobertura invalido.")
         note = clean_text(note, 1000)
         with self.connect() as db:
+            if status == "reviewed" and db.execute(
+                "SELECT 1 FROM extraction_failures WHERE day LIKE ? LIMIT 1", (month + "-%",),
+            ).fetchone():
+                raise ValueError("Hay avisos pendientes de extraccion en este mes; reintenta su importacion.")
             # Repeated scans must not erase a person's reconciliation or warning.
             if status != "reviewed":
                 db.execute("INSERT OR IGNORE INTO coverage VALUES (?,?,?)", (month, status, note))
@@ -257,6 +287,11 @@ class Store:
                     )
                 ],
                 "coverage": [dict(row) for row in db.execute("SELECT * FROM coverage ORDER BY month")],
+                "extraction_failures": [
+                    dict(row) for row in db.execute(
+                        "SELECT * FROM extraction_failures ORDER BY day,received,message_id",
+                    )
+                ],
             }
 
     def summary(self, month: str) -> str:
@@ -293,7 +328,11 @@ class Store:
                 f"retiro en efectivo {Decimal(cash) / 100:.2f} (incluido en gastos)"
             )
         pending = sum(row["decision"] is None for row in rows)
+        unresolved = sum(
+            failure["day"].startswith(month) for failure in self.state()["extraction_failures"]
+        )
         return (
             f"Cierre {month}: " + (" | ".join(parts) or "sin gastos confirmados") +
-            f"\nDudas abiertas: {pending}. Cobertura no garantizada; revisa el panel."
+            f"\nDudas abiertas: {pending}. Avisos sin extraer: {unresolved}. "
+            "Cobertura no garantizada; revisa el panel."
         )

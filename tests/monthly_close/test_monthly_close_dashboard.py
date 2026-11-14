@@ -85,6 +85,29 @@ def test_dashboard_renders_without_scripts_from_untrusted_text(dashboard):
     assert "500,02" in text
 
 
+def test_extraction_review_is_visible_across_currencies_and_renders_only_text(dashboard):
+    page, store, month, errors = dashboard
+    store.record_extraction_failure(
+        "blocked", "avisos@example.test", "<img src=x onerror=alert(1)> Aviso bloqueado",
+        month + "-06T12:00:00-05:00", month + "-06", "dinero / banco", "merchant",
+    )
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    assert "1 aviso(s) sin extraer" in page.locator("#extraction-warning").inner_text()
+    page.locator("#tab-decisions").click()
+    review = page.locator("#extraction-review")
+    assert review.is_visible()
+    assert "Aviso bloqueado" in review.inner_text()
+    assert "avisos@example.test" in review.inner_text()
+    assert "dinero / banco" in review.inner_text()
+    assert review.locator("img, button").count() == 0
+    store.import_message("blocked", [])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    assert not page.locator("#extraction-warning").is_visible()
+    assert not errors
+
+
 def test_decision_persists_and_updates_totals(dashboard):
     page, store, _, errors = dashboard
     page.get_by_role("tab", name=re.compile("Decisi")).click()

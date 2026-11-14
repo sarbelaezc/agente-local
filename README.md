@@ -8,7 +8,7 @@ implementa.
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/run-invoice-batch.ps1` / `-Resume` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
-| Cierre mensual de gastos de Outlook con Ollama local | Importación de septiembre y octubre verificada; decisiones USD con tasa manual a COP; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
+| Cierre mensual de gastos de Outlook con Ollama local | Importación de septiembre y octubre verificada; tasa manual USD/COP y cola de extracciones sin evidencia; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
 
 ## Stack tecnológico
 
@@ -420,8 +420,25 @@ Si aún falla la evidencia literal de comercio o monto, se registra una adverten
 sin contenido financiero y se solicita **una sola corrección local** a Ollama con
 el campo inválido y la propuesta previa. Se vuelve a validar toda la respuesta;
 la corrección no puede eliminar movimientos ni cambiar otros campos. Nada se
-guarda hasta superar la validación. Si vuelve a fallar, se detiene y el correo
-queda sin marcar como procesado. No hay reintentos ilimitados ni omisión automática.
+guarda hasta superar la validación. Si vuelve a fallar, la propuesta se rechaza y
+el correo queda sin marcar como procesado. En cierre mensual, el rechazo final de evidencia
+ya no detiene los demás avisos: guarda únicamente identificador, carpeta,
+remitente, asunto, fecha y campo rechazado en una cola visible en **Decisión**.
+No se conserva cuerpo ni propuesta inválida. La consola identifica el aviso y
+advierte cuántos quedaron sin extraer; el panel avisa que faltan movimientos
+en los totales. No hay reintentos ilimitados ni omisión silenciosa.
+Repite el rango original para reintentar los pendientes: solo se retiran de la
+cola tras una extracción válida e importación atómica (incluido cero eventos).
+Mientras existan pendientes, no se permite marcar su mes como revisado.
+Reinicia el servidor del panel después de actualizar para habilitar la cola.
+Esta excepción, autorizada por el usuario, aplica solo a `EvidenceError` tras
+la corrección local: autenticación, interfaz, selectores ambiguos y las demás
+validaciones siguen deteniendo la ejecución. Los correos que fallaron antes
+de esta actualización aparecerán al volver a ejecutar su rango.
+Pruebas sintéticas verifican continuación, persistencia de metadatos sin cuerpo
+ni propuesta inválida, reintento sin duplicados ni pérdida de decisiones, bloqueo
+de conciliación, resolución con cero eventos y visualización segura en el panel.
+Identificar un aviso real no implica haber completado el rango ni conciliado el mes.
 El contexto de Ollama distingue los avisos «Pagaste [monto] en la tarjeta de
 crédito [tarjeta] desde la cuenta [cuenta]» como abonos a la deuda, no compras:
 deben producir `events: []` para evitar contar dos veces el gasto. La regla no
@@ -445,7 +462,8 @@ a la deuda ni repetir una operación con categorías distintas. Con ese mismo
 aviso y Ollama local, la respuesta pasó de dos propuestas rechazadas a
 `events: []`, sin escrituras en SQLite. No se eliminan duplicados por código:
 si el modelo vuelve a producir movimientos indistinguibles, el escaneo se
-detiene sin importar ese aviso y conserva el punto de reanudación.
+detiene sin importar ese aviso y conserva el punto de reanudación. Los rechazos
+de evidencia literal se gestionan aparte en la cola de revisión descrita arriba.
 Tras el ajuste pasaron 106 pruebas de extracción, persistencia y API. El control
 con Ollama local mantuvo dos abonos sin eventos y una compra como propuesta
 pendiente. Al reanudar la importación real se guardaron 54 propuestas nuevas:

@@ -262,6 +262,7 @@
           </div>
           <div id="coverage-summary" class="hint" aria-live="polite"></div>
         </div>
+        <p id="extraction-warning" class="hint" role="status" hidden></p>
         <div id="month-chips" class="month-chips" role="group" aria-label="Seleccionar mes"></div>
         <div class="tabs" role="tablist" aria-label="Vista del cierre">
           <button class="tab" id="tab-month" type="button" role="tab" aria-selected="true" aria-controls="panel-month" tabindex="0">Mes</button>
@@ -338,6 +339,11 @@
 
         <section id="panel-decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden>
           <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Se muestran todos los meses de la moneda seleccionada; en COP también aparecen los movimientos USD para ingresar su tasa estimada. Las categorías solo se cuentan en gastos si eliges Personal o Familiar.</p></div></div>
+          <section id="extraction-review" hidden>
+            <h3>Avisos sin extraer · revisión pendiente</h3>
+            <p>No se importaron sus propuestas. Busca el aviso en Outlook por estos datos y repite su rango para reintentar. No se incluyen en los totales ni permiten aprobar datos inválidos.</p>
+            <div id="extraction-list" class="decision-list"></div>
+          </section>
           <div id="pending-list" class="decision-list"></div>
           <details class="history-detail" id="decision-history">
             <summary>Decisiones anteriores · cambiar una decisión</summary>
@@ -490,6 +496,9 @@
           }
           if (data.transactions.some(tx => !tx || !("exchange_rate" in tx) || !("cop_amount_minor" in tx))) {
             throw new Error("Reinicia el servidor del panel para habilitar las tasas manuales USD/COP");
+          }
+          if (!Array.isArray(data.extraction_failures)) {
+            throw new Error("Reinicia el servidor del panel para mostrar los avisos pendientes de extraccion");
           }
           state.data = data;
           if (!quiet) showMessage("");
@@ -690,6 +699,9 @@
           return;
         }
         $("#sender-warning").hidden = safeArray(data.config.approved_senders).length > 0;
+        const failures = safeArray(data.extraction_failures);
+        $("#extraction-warning").hidden = failures.length === 0;
+        $("#extraction-warning").textContent = `${failures.length} aviso(s) sin extraer: faltan movimientos en los totales. Revisa Decisión; la cobertura sigue parcial.`;
         const currencies = Array.from(new Set(safeArray(data.transactions).map(tx => tx && tx.currency).filter(currency => typeof currency === "string" && currency)));
         if (typeof data.config.currency === "string" && data.config.currency && !currencies.includes(data.config.currency)) currencies.unshift(data.config.currency);
         if (!currencies.length) currencies.push(typeof data.config.currency === "string" && data.config.currency ? data.config.currency : "MXN");
@@ -1138,6 +1150,20 @@
       }
 
       function renderDecisions() {
+        const failures = safeArray(state.data.extraction_failures);
+        $("#extraction-review").hidden = failures.length === 0;
+        const failureHost = $("#extraction-list");
+        failureHost.replaceChildren();
+        failures.forEach(failure => {
+          const card = el("article", "decision-card");
+          card.append(
+            el("h4", "", itemText(failure.subject)),
+            el("p", "", `${failure.received} · ${failure.sender}`),
+            el("p", "", `Carpeta: ${failure.folder}`),
+            el("p", "hint", `Evidencia no literal: ${failure.field}. Sin movimientos importados.`)
+          );
+          failureHost.append(card);
+        });
         const all = safeArray(state.data.transactions).filter(tx => tx && (
           txCurrency(tx) === state.currency ||
           (state.currency === "COP" && txCurrency(tx) === "USD")

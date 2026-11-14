@@ -98,6 +98,138 @@ def test_scan_resumes_failed_notice_without_rereading_completed_or_losing_decisi
         assert db.execute("SELECT COUNT(*) FROM scan_progress").fetchone()[0] == 0
 
 
+def test_scan_queues_invalid_evidence_continues_and_retries_without_losing_decisions(
+    tmp_path, preferences, monkeypatch, capsys,
+):
+    from contextlib import nullcontext
+    store = Store(tmp_path / "evidence-queue.sqlite3")
+    store.configure(preferences.to_dict())
+    reads = []
+    invalid = [True]
+
+    class Reader:
+        active_folder = ("dinero", "banco")
+
+        def __init__(self, *args):
+            pass
+
+        def checkpoint_key(self, candidate):
+            return candidate.item_id
+
+        def read(self, candidate):
+            reads.append(candidate.item_id)
+            return Mail(candidate.item_id, preferences.approved_senders[0],
+                        "<img src=x> Aviso", "2026-02-15T12:00:00Z",
+                        "Tienda $ 1.234,56 CUERPO_PRIVADO")
+
+        def walk_folders(self, limit, visit):
+            for identity in ["bad", "good"]:
+                visit(Candidate(identity, preferences.approved_senders[0], "Aviso"))
+            return []
+
+    def extraction(mail, prefs, model):
+        chosen = Model(merchant="Inventado") if mail.id == "bad" and invalid[0] else Model()
+        return extract(mail, prefs, chosen)
+
+    monkeypatch.setattr(app, "browser", lambda *args: nullcontext(None))
+    monkeypatch.setattr(app, "OutlookSourceReader", Reader)
+    monkeypatch.setattr(app, "extract", extraction)
+    monkeypatch.setattr(app, "OllamaJsonModel", lambda *args: Model())
+    monkeypatch.setattr(app, "require_model", lambda settings: None)
+    settings = {"folder_scan_verified": True, "outlook_url": "https://outlook.live.com/mail/0/",
+                "ollama_url": "http://127.0.0.1:11434", "ollama_model": "test", "max_messages": 10}
+    args = (store, tmp_path, settings, preferences, date(2026, 2, 1), date(2026, 3, 1))
+    app.scan(*args)
+    state = store.state()
+    assert len(state["transactions"]) == 1
+    assert not store.seen("bad")
+    failure = state["extraction_failures"][0]
+    assert failure["folder"] == "dinero / banco"
+    assert failure["field"] == "merchant"
+    assert "CUERPO_PRIVADO" not in json.dumps(state)
+    assert "Inventado" not in json.dumps(state)
+    output = capsys.readouterr().out
+    assert "Aviso" in output
+    assert "1 aviso(s) sin extraer" in output
+    assert "CUERPO_PRIVADO" not in output
+    assert "Avisos sin extraer: 1" in store.summary("2026-02")
+    with pytest.raises(ValueError, match="pendientes de extraccion"):
+        store.coverage("2026-02", "reviewed", "Revisado")
+    row = state["transactions"][0]
+    store.decide(row["id"], "family")
+    app.scan(*args)
+    assert len(store.state()["extraction_failures"]) == 1
+    invalid[0] = False
+    app.scan(*args)
+    assert store.state()["extraction_failures"] == []
+    assert store.seen("bad")
+    assert len(store.state()["transactions"]) == 2
+    assert next(t for t in store.state()["transactions"] if t["id"] == row["id"])["decision"] == "family"
+    store.coverage("2026-02", "reviewed", "Revisado")
+    assert store.state()["coverage"][0]["status"] == "reviewed"
+
+
+def test_extraction_failure_invalidates_review_and_empty_import_resolves_queue(
+    tmp_path, preferences,
+):
+    store = Store(tmp_path / "failure.sqlite3")
+    store.configure(preferences.to_dict())
+    store.coverage("2026-02", "reviewed", "Revisado")
+    store.record_extraction_failure(
+        "message", preferences.approved_senders[0], "Aviso", "2026-02-15T12:00:00Z",
+        "2026-02-15", "dinero / banco", "amount_text",
+    )
+    assert Store(store.path).state()["coverage"][0]["status"] == "partial"
+    assert Store(store.path).state()["extraction_failures"][0]["message_id"] == "message"
+    store.import_message("message", [])
+    assert store.seen("message")
+    assert store.state()["extraction_failures"] == []
+
+
+@pytest.mark.parametrize("error", [
+    ValueError("Cuenta no autorizada"),
+    ValueError("Dos movimientos indistinguibles"),
+    OutlookError("Seleccion ambigua"),
+])
+def test_scan_does_not_continue_after_other_failures(tmp_path, preferences, monkeypatch, error):
+    from contextlib import nullcontext
+    store = Store(tmp_path / "fatal.sqlite3")
+    store.configure(preferences.to_dict())
+    reads = []
+
+    class Reader:
+        def __init__(self, *args):
+            pass
+
+        def checkpoint_key(self, candidate):
+            return candidate.item_id
+
+        def read(self, candidate):
+            reads.append(candidate.item_id)
+            return Mail(candidate.item_id, preferences.approved_senders[0], "Aviso",
+                        "2026-02-15T12:00:00Z", "Tienda $ 1.234,56")
+
+        def walk_folders(self, limit, visit):
+            for identity in ["first", "second"]:
+                visit(Candidate(identity, preferences.approved_senders[0], "Aviso"))
+
+    def fail(*args):
+        raise error
+
+    monkeypatch.setattr(app, "browser", lambda *args: nullcontext(None))
+    monkeypatch.setattr(app, "OutlookSourceReader", Reader)
+    monkeypatch.setattr(app, "extract", fail)
+    monkeypatch.setattr(app, "OllamaJsonModel", lambda *args: Model())
+    monkeypatch.setattr(app, "require_model", lambda settings: None)
+    settings = {"folder_scan_verified": True, "outlook_url": "https://outlook.live.com/mail/0/",
+                "ollama_url": "http://127.0.0.1:11434", "ollama_model": "test", "max_messages": 10}
+    with pytest.raises(type(error), match=str(error)):
+        app.scan(store, tmp_path, settings, preferences, date(2026, 2, 1), date(2026, 3, 1))
+    assert reads == ["first"]
+    assert store.state()["extraction_failures"] == []
+    assert not store.seen("first")
+
+
 @pytest.fixture
 def mail() -> Mail:
     return Mail(

@@ -69,7 +69,7 @@ class Mail:
     body: str
 
 
-class _EvidenceError(ValueError):
+class EvidenceError(ValueError):
     def __init__(self, field: str) -> None:
         self.field = field
         super().__init__(
@@ -123,7 +123,7 @@ def extract(mail: Mail, preferences: Preferences, model: JsonModel) -> list[dict
                 raise ValueError("La correccion de evidencia cambio otros datos o elimino movimientos.")
         try:
             return _proposals(result, mail, preferences, received, source)
-        except _EvidenceError as exc:
+        except EvidenceError as exc:
             if attempt:
                 raise
             logging.getLogger(__name__).warning(
@@ -162,7 +162,7 @@ def _proposals(
                 merchant = clean_text(matches.pop(), 150)
         if merchant not in source or amount not in source:
             field = "merchant" if merchant not in source else "amount_text"
-            raise _EvidenceError(field)
+            raise EvidenceError(field)
         account = clean_text(event.get("account"), 150)
         if account not in preferences.accounts + preferences.excluded_accounts + ["Desconocida"]:
             raise ValueError("Ollama propuso una cuenta no configurada.")
