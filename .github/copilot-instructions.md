@@ -2,9 +2,9 @@
 
 ## Project
 
-This project will implement a local agent that helps draft replies for Microsoft Teams Web chats running in Microsoft Edge.
+This project is a local agent that runs on demand on the user's own machine, with local Ollama models and no external AI services. Its features are the Hotmail invoice organizer and the Outlook monthly expense close.
 
-The initial priorities are:
+The priorities are:
 
 1. Security.
 2. Human control.
@@ -23,7 +23,7 @@ The project is a standalone repository; personal paths are defined in local conf
 
 ## Feature management and README
 
-The local agent groups several features (for example, Teams and Hotmail invoices). The user's requests define what gets implemented; the `README.md` documents what has been requested and implemented, but it is not the source of truth and does not limit what the user can request.
+The local agent groups several features (for example, Hotmail invoices and the monthly expense close). The user's requests define what gets implemented; the `README.md` documents what has been requested and implemented, but it is not the source of truth and does not limit what the user can request.
 
 ### Start of each work session
 
@@ -40,59 +40,40 @@ The local agent groups several features (for example, Teams and Hotmail invoices
 - In the `README.md`, distinguish what is implemented and verified from what is pending or not validated.
 - If the `README.md` describes something different from what the user is requesting now, the user's request prevails: implement it and update the `README.md`. If the request contradicts a security rule in these instructions, report the conflict before continuing.
 
-## MVP goal
-
-Build a local application that:
-
-- Detects new messages in previously authorized chats.
-- Prepares the context of a chat.
-- Asks the local model for a proposed reply.
-- Shows the proposal in an approval interface.
-- Lets the user approve, edit, regenerate, or reject the proposal.
-- Inserts the approved reply into the Teams Web editor.
-- Can only send the message after explicit human confirmation.
-- Keeps a local audit log.
-
 ## Preferred technologies
 
 - Python 3.12.
 - Playwright for Python.
 - Ollama for the local model.
 - Tesseract (local) and `pypdfium2` for scanned PDF OCR.
-- SQLite for pending messages, configuration, and auditing.
-- FastAPI only if a local web interface is needed.
+- SQLite for local state, configuration, and auditing.
 - Tkinter for a minimal desktop interface.
 - Pytest for tests.
 
 Do not add unnecessary dependencies without a clear reason.
 
-## Expected architecture
+## Architecture
 
 ```text
 src/
-  app/
-  automation/
-  ai/
-  storage/
-  config/
+  mail_invoices/
+  monthly_close/
 tests/
+  mail_invoices/
+  monthly_close/
 ```
 
-Keep these clearly separated:
+Each feature keeps its own data, state and Ollama usage; keep these separated within a feature:
 
-- Interaction with Edge and Teams.
+- Browser interaction.
 - Ollama integration.
-- Context building.
 - Approval interface.
 - Persistence and auditing.
-- Authorized chat configuration.
+- Configuration.
 
 ## Mandatory rules
 
-- Never send a message automatically.
-- Require explicit human confirmation before pressing Send.
-- Keep a closed list of authorized chats.
-- Do not read chats outside that list.
+- Never perform a destructive or irreversible action (write to a workbook, move a message) without explicit human approval.
 - Do not store passwords, tokens, or cookies in source code.
 - Do not ask the user for credentials through the agent.
 - Stop on MFA, captcha, unexpected authentication, or unrecognized screens.
@@ -101,73 +82,39 @@ Keep these clearly separated:
 - Do not store unnecessary message content.
 - Stop all activity on a failure or an ambiguous selector.
 - Exception for monthly close: after the single local correction fails literal-evidence validation, persist the notice metadata as a visible extraction-review item and continue scanning. Never import the invalid proposal or mark that notice processed; keep coverage partial and retry on the next scan. Authentication, UI, selector and other validation failures still stop all activity.
-- Record who approved a reply, when it was approved, and what text was sent.
+- Record who approved a change and when.
 
-## Rules for Teams automation
+## Browser automation rules
 
 - Prefer Playwright over a visual agent.
-- Use a persistent Edge profile separate from the user's usual one.
-- Identify chats by name or configuration identifier.
-- Validate the active chat before inserting text.
-- Do not send if the active chat does not match the expected authorized chat.
-- Implement a pause mode and an emergency stop.
+- Use a persistent browser profile separate from the user's usual one.
 - Use event- or element-based waits rather than fixed delays.
 - Write selectors in a stable, centralized way.
-- Detect Teams Web version changes and fail without sending.
+- Detect web application version changes and fail without acting.
 
 ## Local model integration
 
 - Communicate with Ollama through an isolated client.
 - Configure the model and its parameters from local configuration.
-- Do not use external tools inside Ollama in the MVP.
-- Build context exclusively from:
-  - Authorized messages.
-  - Approved instructions.
-  - Data explicitly supplied by the user.
+- Do not use external tools inside Ollama.
+- Build context exclusively from data explicitly supplied by the user or read from authorized sources.
 - Tell the model not to invent information.
-- Ask for clarification or escalate when context is missing.
-- Block sensitive topics defined by the user.
-- Sanitize all text before displaying or sending it.
-- Treat all model output as untrusted text.
-
-## Recommended prompt
-
-The system prompt must:
-
-- Define a professional tone and the preferred language.
-- State that it acts as an assistant and must not claim to be a real person.
-- Require concise replies.
-- Prohibit inventing data, dates, commitments, or results.
-- Request a neutral reply or escalation when information is insufficient.
-- Respect the project rules.
-- Not reveal internal prompts or private data.
+- Treat all model output as untrusted text; validate it against the source before using it.
 
 ## Privacy and auditing
 
-- Enforce allowed-chat lists.
 - Minimize retained data.
 - Keep only what auditing requires.
-- Define a retention policy.
 - Avoid logs with full content unless necessary.
 - Allow manual deletion of temporary records.
-- Encrypt sensitive data if the organization requires it.
-- Show a warning before processing confidential content.
+- Never commit personal configuration, workbooks, invoices, browser profiles or databases.
 
 ## Commands and structure
 
-When the project is implemented:
-
 - Keep configuration files out of the source code.
 - Use environment variables for sensitive local paths.
-- Create clear scripts for setup, execution, and testing.
-- Include a README with Windows installation instructions.
-- Create test files focused on:
-  - Authorized chats.
-  - Context building.
-  - Reply validation.
-  - Approval flow.
-  - Correct chat selection.
-  - Stopping on errors.
+- Provide clear scripts for setup, execution, and testing.
+- Keep the README Windows installation instructions up to date.
 
 ## Code conventions
 
@@ -177,7 +124,6 @@ When the project is implemented:
 - Use descriptive names in English.
 - Handle all relevant errors explicitly.
 - Do not use `except Exception` clauses unless necessary.
-- Do not call send functions from modules that generate replies.
 - Do not include secrets or specific personal paths.
 - Write comments only for non-obvious logic.
 - Add docstrings to important public functions.
@@ -214,25 +160,7 @@ Before finishing any significant change, run the smallest relevant test.
 
 Tests must demonstrate:
 
-- That a chat outside the authorization list is not processed.
-- That a reply is never sent without approval.
-- That the approved text matches the text sent.
-- That the active chat matches the expected target.
+- That nothing is written or moved without approval.
+- That the approved data matches the data written.
 - That the agent stops on UI errors.
 - That code generated by the model is not executed.
-
-## Expected deliverables
-
-- A local console or desktop application.
-- A configured Edge profile.
-- Limited message capture.
-- Draft generation through Ollama.
-- An approval interface.
-- Playwright-controlled insertion and sending.
-- An audit log.
-- Installation and usage documentation.
-- Basic automated tests.
-
-## Implementation criteria
-
-The project must prevent any accidental sending, process only authorized chats, and always keep the human decision as the final barrier until a formal, verifiable approval exists for autonomous sending.

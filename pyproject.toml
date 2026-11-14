@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "teams-local-agent"
+name = "agente-local"
 version = "0.1.0"
-description = "Local Teams Web drafting assistant with human approval"
+description = "Agente local con aprobación humana: facturas de Hotmail y cierre mensual de gastos con Ollama"
 requires-python = ">=3.12"
 dependencies = [
   "playwright>=1.48",
@@ -23,7 +23,6 @@ dependencies = [
 dev = ["pytest>=8.3"]
 
 [project.scripts]
-teams-agent = "app.main:main"
 mail-invoices = "mail_invoices.main:main"
 monthly-close = "monthly_close.main:main"
 
