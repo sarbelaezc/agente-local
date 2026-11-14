@@ -15,7 +15,9 @@ KINDS = {
     "purchase", "pse", "transfer", "own_transfer", "loan", "income",
     "card_payment", "rejected", "promotion", "verification", "unknown", "investment",
 }
-NON_EXPENSES = {"loan", "income", "card_payment", "rejected", "promotion", "verification"}
+INCOME_CATEGORIES = ["Nómina", "Transferencia recibida", "Consignación", "Otros ingresos"]
+INCOME_KINDS = {"income", "transfer", "unknown"}  # kinds a person may confirm as income
+NON_EXPENSES = {"loan", "card_payment", "rejected", "promotion", "verification"}
 EMAIL = re.compile(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+")
 
 
@@ -144,6 +146,8 @@ def received_local(value: str, timezone: str) -> datetime:
 def decision_reason(kind: str, account: str, savings: bool, preferences: Preferences) -> str:
     if kind in NON_EXPENSES:
         return "No es gasto: " + kind
+    if kind == "income":
+        return "Dinero recibido: confirma si cuenta como ingreso o es un traslado propio."
     if account in preferences.excluded_accounts or kind == "own_transfer":
         return "Revisar como " + preferences.transfer_label
     if kind == "investment":

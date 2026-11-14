@@ -9,7 +9,9 @@ from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Iterator
 
-from monthly_close.domain import CATEGORIES, NON_EXPENSES, Preferences, clean_text
+from monthly_close.domain import (
+    CATEGORIES, INCOME_CATEGORIES, INCOME_KINDS, NON_EXPENSES, Preferences, clean_text,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
@@ -36,7 +38,24 @@ CREATE TABLE IF NOT EXISTS audit (
     id INTEGER PRIMARY KEY, at TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS merchant_rules (
+    id INTEGER PRIMARY KEY, pattern TEXT NOT NULL UNIQUE, category TEXT NOT NULL,
+    decision TEXT NOT NULL
+);
 """
+
+
+# Movements of a notice that a reprocessing run must leave alone: everything except
+# card payments the model guessed before they were read from the bank's fixed sentence.
+KEPT = (
+    "SELECT 1 FROM transactions WHERE message_id=? "
+    "AND NOT (kind='card_payment' AND category<>'Pago de tarjeta')"
+)
+
+
+def merchant_words(text: str) -> str:
+    """Uppercase words padded with spaces, so rules match whole words only."""
+    return " " + " ".join(re.findall(r"[^\W_]+", text.upper())) + " "
 
 
 class Store:
@@ -133,10 +152,30 @@ class Store:
             )
             self._audit(db, "extraction-pending", message_id, field)
 
-    def import_message(self, message_id: str, events: list[dict]) -> None:
+    def processed_without_events(self, message_id: str) -> bool:
+        """True for a notice read before that left nothing worth keeping.
+
+        That is no movement at all (e.g. income once discarded), or only card payments
+        guessed by the model, which the fixed-sentence reader now replaces.
+        """
         with self.connect() as db:
-            if db.execute("SELECT 1 FROM processed WHERE message_id=?", (message_id,)).fetchone():
+            return db.execute(
+                "SELECT 1 FROM processed WHERE message_id=? AND NOT EXISTS (" + KEPT + ")",
+                (message_id, message_id),
+            ).fetchone() is not None
+
+    def import_message(self, message_id: str, events: list[dict], reprocess: bool = False) -> None:
+        """Import once per notice; reprocess only adds to a notice that left no movement."""
+        with self.connect() as db:
+            if db.execute("SELECT 1 FROM processed WHERE message_id=?", (message_id,)).fetchone() and (
+                not reprocess or db.execute(KEPT, (message_id,)).fetchone()
+            ):
                 return
+            replaced = db.execute(
+                "DELETE FROM transactions WHERE message_id=?", (message_id,),
+            ).rowcount
+            if replaced:
+                self._audit(db, "reprocess-replace-card-payments", message_id, str(replaced))
             for event in events:
                 db.execute(
                     """INSERT INTO transactions (
@@ -150,17 +189,80 @@ class Store:
                     note='Hay movimientos nuevos despues de la ultima revision manual.'
                     WHERE month=? AND status='reviewed'""", (event["day"][:7],),
                 )
-            db.execute("INSERT INTO processed VALUES (?)", (message_id,))
+            db.execute("INSERT OR IGNORE INTO processed VALUES (?)", (message_id,))
             db.execute("DELETE FROM extraction_failures WHERE message_id=?", (message_id,))
             self._audit(db, "import", message_id, str(len(events)))
+        self.apply_rules()
+
+    def rules(self) -> list[dict]:
+        with self.connect() as db:
+            return [dict(row) for row in db.execute("SELECT * FROM merchant_rules ORDER BY pattern")]
+
+    def add_rule(self, pattern: str, category: str, decision: str) -> int:
+        """Save a user-written merchant rule and apply it to pending purchases."""
+        pattern = merchant_words(clean_text(pattern, 60)).strip()
+        if len(pattern) < 3:
+            raise ValueError("La regla necesita al menos tres letras o numeros del comercio.")
+        if decision not in {"personal", "family", "income"}:
+            raise ValueError("Una regla solo puede decidir Personal, Familiar o Ingreso.")
+        allowed = INCOME_CATEGORIES if decision == "income" else self.preferences().categories
+        if category not in allowed:
+            raise ValueError("Categoria no autorizada.")
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO merchant_rules(pattern,category,decision) VALUES (?,?,?)
+                ON CONFLICT(pattern) DO UPDATE SET category=excluded.category,
+                decision=excluded.decision""", (pattern, category, decision),
+            )
+            self._audit(db, "rule-local-user", pattern, f"{category}/{decision}")
+        return self.apply_rules()
+
+    def delete_rule(self, rule_id: int) -> None:
+        """Remove a rule; decisions it already made stay and can be changed by hand."""
+        with self.connect() as db:
+            row = db.execute("SELECT pattern FROM merchant_rules WHERE id=?", (rule_id,)).fetchone()
+            if row is None:
+                raise ValueError("Regla inexistente.")
+            db.execute("DELETE FROM merchant_rules WHERE id=?", (rule_id,))
+            self._audit(db, "rule-delete-local-user", row["pattern"], "deleted")
+
+    def apply_rules(self) -> int:
+        """Decide pending purchases that match a rule; anything doubtful stays pending."""
+        rules = self.rules()
+        if not rules:
+            return 0
+        with self.connect() as db:
+            pending = db.execute(
+                """SELECT id,merchant,kind FROM transactions
+                WHERE decision IS NULL AND kind IN ('purchase','income')""",
+            ).fetchall()
+        decided = 0
+        for row in pending:
+            words = merchant_words(row["merchant"])
+            # The longest matching pattern is the most specific one.
+            # Income rules only decide money received; expense rules only decide purchases.
+            matches = [
+                rule for rule in rules if f" {rule['pattern']} " in words
+                and (rule["decision"] == "income") == (row["kind"] == "income")
+            ]
+            if not matches:
+                continue
+            rule = max(matches, key=lambda item: len(item["pattern"]))
+            try:
+                self.decide(row["id"], rule["decision"], rule["category"], rule=rule["pattern"])
+            except ValueError:
+                continue  # e.g. USD without a rate or an excluded account: a person decides.
+            decided += 1
+        return decided
 
     def decide(
         self, event_id: str, decision: str, category: str | None = None, *,
-        currency: str | None = None, exchange_rate: str | None = None,
+        currency: str | None = None, exchange_rate: str | None = None, rule: str | None = None,
     ) -> None:
-        """Record a human decision and an optional estimated USD/COP conversion."""
+        """Record a decision (by the user, or by one of their rules) and an optional USD/COP rate."""
         if decision not in {
             "personal", "family", "exclude", "investment", "investment_withdrawal", "cash_withdrawal",
+            "income",
         }:
             raise ValueError("Decision no reconocida.")
         with self.connect() as db:
@@ -168,7 +270,17 @@ class Store:
             if row is None:
                 raise ValueError("Movimiento inexistente.")
             if row["kind"] in NON_EXPENSES and decision != "exclude":
-                raise ValueError("Ingresos, prestamos y pagos de tarjeta no cuentan como gasto.")
+                raise ValueError("Prestamos y pagos de tarjeta no cuentan como gasto ni ingreso.")
+            if row["kind"] == "income" and decision not in {"income", "exclude"}:
+                raise ValueError("El dinero recibido no es un gasto: Ingreso o No cuenta.")
+            if decision == "income":
+                if row["kind"] not in INCOME_KINDS:
+                    raise ValueError("Este movimiento no puede contarse como ingreso.")
+                if category not in INCOME_CATEGORIES:
+                    category = (
+                        row["category"] if row["category"] in INCOME_CATEGORIES
+                        else INCOME_CATEGORIES[-1]
+                    )
             settings = db.execute("SELECT value FROM settings WHERE id=1").fetchone()
             preferences = Preferences.parse(json.loads(settings["value"])) if settings else None
             if row["kind"] == "investment" and decision not in {
@@ -189,13 +301,14 @@ class Store:
                 or (preferences and row["account"] in preferences.excluded_accounts)
             ):
                 raise ValueError("Transferencias propias o a cuentas excluidas: Familiar o No cuenta.")
-            if category is not None and (
+            if category is not None and category != row["category"] and (
                 not preferences or (
                     category not in preferences.categories
                     and not (
                         decision in {"personal", "family", "exclude"}
                         and category == "Retiro en efectivo"
                     )
+                    and not (decision in {"income", "exclude"} and category in INCOME_CATEGORIES)
                     and not (
                         decision in {*special_categories, "exclude"}
                         and category in special_categories.values()
@@ -243,7 +356,14 @@ class Store:
                 exchange_rate=?,cop_amount_minor=? WHERE id=?""",
                 (decision, category or row["category"], currency, rate, converted, event_id),
             )
-            self._audit(db, "decision-local-user", event_id, decision)
+            if rule is None:
+                self._audit(db, "decision-local-user", event_id, decision)
+            else:
+                db.execute(
+                    "UPDATE transactions SET reason=? WHERE id=?",
+                    (f"Decidido por tu regla «{rule}». Puedes cambiarlo aqui.", event_id),
+                )
+                self._audit(db, "decision-rule", event_id, f"{decision}: {rule}")
             if currency != row["currency"] or rate != row["exchange_rate"]:
                 self._audit(db, "exchange-local-user", event_id, json.dumps({
                     "previous_currency": row["currency"], "currency": currency,
@@ -279,6 +399,7 @@ class Store:
             return {
                 "configured": config is not None, "config": config,
                 "categories": config["categories"] if config else CATEGORIES,
+                "income_categories": INCOME_CATEGORIES,
                 "transactions": [
                     dict(row) for row in db.execute(
                         """SELECT id,day,merchant,account,amount_minor,currency,
@@ -287,6 +408,9 @@ class Store:
                     )
                 ],
                 "coverage": [dict(row) for row in db.execute("SELECT * FROM coverage ORDER BY month")],
+                "rules": [
+                    dict(row) for row in db.execute("SELECT * FROM merchant_rules ORDER BY pattern")
+                ],
                 "extraction_failures": [
                     dict(row) for row in db.execute(
                         "SELECT * FROM extraction_failures ORDER BY day,received,message_id",
@@ -310,6 +434,7 @@ class Store:
                 if row["decision"] in {"personal", "cash_withdrawal"}
             )
             family = sum(row["amount_minor"] for row in selected if row["decision"] == "family")
+            income = sum(row["amount_minor"] for row in selected if row["decision"] == "income")
             investment = sum(row["amount_minor"] for row in selected if row["decision"] == "investment")
             withdrawals = sum(
                 row["amount_minor"] for row in selected
@@ -325,7 +450,9 @@ class Store:
                 f"familiar {Decimal(family) / 100:.2f}; "
                 f"inversiones {Decimal(investment - withdrawals) / 100:.2f} (fuera de gastos); "
                 f"retiros de inversion {Decimal(withdrawals) / 100:.2f}; "
-                f"retiro en efectivo {Decimal(cash) / 100:.2f} (incluido en gastos)"
+                f"retiro en efectivo {Decimal(cash) / 100:.2f} (incluido en gastos); "
+                f"ingresos {Decimal(income) / 100:.2f}; "
+                f"balance {Decimal(income - personal - family) / 100:.2f} (ingresos - gastos)"
             )
         pending = sum(row["decision"] is None for row in rows)
         unresolved = sum(

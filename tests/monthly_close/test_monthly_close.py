@@ -446,7 +446,130 @@ def test_repeat_import_and_config_changes_preserve_human_choice(tmp_path, prefer
         assert db.execute("SELECT value FROM audit WHERE action='import'").fetchone()[0] == "1"
 
 
-@pytest.mark.parametrize("kind", ["income", "loan", "card_payment", "rejected", "promotion", "verification"])
+def test_income_is_extracted_pending_and_counts_only_as_income(tmp_path, preferences, mail):
+    store = Store(tmp_path / "income.sqlite3")
+    store.configure(preferences.to_dict())
+    events = extract(mail, preferences, Model(kind="income", category="Compras"))
+    store.import_message(mail.id, events)
+    # The person decides; an expense category from the model is never kept for income.
+    assert (events[0]["decision"], events[0]["category"]) == (None, "Otros ingresos")
+    with pytest.raises(ValueError, match="no es un gasto"):
+        store.decide(events[0]["id"], "personal")
+    store.decide(events[0]["id"], "income", "Nómina")
+    row = store.state()["transactions"][0]
+    assert (row["decision"], row["category"]) == ("income", "Nómina")
+    summary = store.summary("2026-02")
+    assert "personal 0.00; familiar 0.00" in summary
+    assert "ingresos 1234.56; balance 1234.56" in summary
+    store.decide(events[0]["id"], "exclude", "Nómina")
+    assert "ingresos 0.00" in store.summary("2026-02")
+
+
+@pytest.mark.parametrize("body,expected", [
+    ("Recibiste un pago de Nomina de EMPRESA SA por $ 1.234,56", "Nómina"),
+    ("Recibiste un pago de NÓMINA por $ 1.234,56", "Nómina"),
+    ("recibiste una transferencia de PERSONA EJEMPLO por $ 1.234,56", "Transferencia recibida"),
+    ("Te consignaron $ 1.234,56 en tu cuenta", "Consignación"),
+    ("Recibiste un abono por $ 1.234,56", "Otros ingresos"),
+])
+def test_income_type_comes_from_the_notice_wording(preferences, mail, body, expected):
+    source = Mail(mail.id, mail.sender, "Aviso", mail.received, body + " de Tienda")
+    events = extract(source, preferences, Model(kind="income", category="Otros ingresos"))
+    assert events[0]["category"] == expected
+
+
+CARD_NOTICE = (
+    "Bancolombia: Pagaste $218,699 en la tarjeta de credito *8243 desde la cuenta *0111, "
+    "el 14/10/2026 11:47. Dudas? Llamanos."
+)
+
+
+def test_card_payment_is_read_from_the_notice_without_the_model(tmp_path, preferences, mail):
+    class NoModel:
+        def complete_json(self, system, user):
+            raise AssertionError("Un pago de tarjeta no se envia a Ollama.")
+
+    store = Store(tmp_path / "card.sqlite3")
+    store.configure(preferences.to_dict())
+    source = Mail(mail.id, mail.sender, "Alertas", mail.received, CARD_NOTICE)
+    events = extract(source, preferences, NoModel())
+    assert [
+        (e["kind"], e["merchant"], e["amount_minor"], e["day"], e["category"], e["decision"])
+        for e in events
+    ] == [("card_payment", "tarjeta de credito *8243", 21869900, "2026-10-14", "Pago de tarjeta", "exclude")]
+    store.import_message(mail.id, events)
+    # It never counts as spending, and re-confirming it from the panel keeps working.
+    with pytest.raises(ValueError, match="no cuentan"):
+        store.decide(events[0]["id"], "personal")
+    store.decide(events[0]["id"], "exclude", "Pago de tarjeta")
+    assert "personal 0.00; familiar 0.00" in store.summary("2026-10")
+
+
+def test_a_purchase_notice_still_goes_to_the_model(preferences, mail):
+    model = Model()
+    assert extract(mail, preferences, model)[0]["kind"] == "purchase"
+    assert model.calls == 1
+
+
+def test_reprocess_replaces_card_payments_guessed_by_the_model(tmp_path, preferences, mail):
+    store = Store(tmp_path / "legacy.sqlite3")
+    store.configure(preferences.to_dict())
+    guessed = [
+        {**extract(mail, preferences, Model(kind="card_payment"))[0], "id": name, "account": name}
+        for name in ("Tarjeta A", "Cuenta B")
+    ]
+    store.import_message(mail.id, guessed)
+    assert store.processed_without_events(mail.id)
+    source = Mail(mail.id, mail.sender, "Alertas", mail.received, CARD_NOTICE)
+    store.import_message(mail.id, extract(source, preferences, Model()), reprocess=True)
+    rows = store.state()["transactions"]
+    assert [(row["merchant"], row["category"]) for row in rows] == [
+        ("tarjeta de credito *8243", "Pago de tarjeta"),
+    ]
+    assert not store.processed_without_events(mail.id)
+
+
+@pytest.mark.parametrize("amount", ["{{valorAdicion}}", "Transferiste  a tu plan", "0"])
+def test_notice_without_a_real_amount_is_queued_instead_of_stopping_the_scan(
+    preferences, mail, amount,
+):
+    from monthly_close.extraction import EvidenceError
+
+    source = Mail(
+        mail.id, mail.sender, mail.subject, mail.received,
+        f"Adicionaste {amount} a tu plan en Tienda. Linea 01 8000.",
+    )
+    with pytest.raises(EvidenceError) as error:
+        extract(source, preferences, Model(amount_text=amount, kind="investment"))
+    assert error.value.field == "amount_text"
+
+
+def test_a_purchase_cannot_be_counted_as_income(tmp_path, preferences, mail):
+    store = Store(tmp_path / "purchase.sqlite3")
+    store.configure(preferences.to_dict())
+    events = extract(mail, preferences, Model())
+    store.import_message(mail.id, events)
+    with pytest.raises(ValueError, match="no puede contarse como ingreso"):
+        store.decide(events[0]["id"], "income")
+
+
+def test_reprocess_only_adds_to_notices_that_left_no_movement(tmp_path, preferences, mail):
+    store = Store(tmp_path / "reprocess.sqlite3")
+    store.configure(preferences.to_dict())
+    events = extract(mail, preferences, Model(kind="income"))
+    store.import_message(mail.id, [])
+    assert store.processed_without_events(mail.id)
+    store.import_message(mail.id, events)
+    assert store.state()["transactions"] == []
+    store.import_message(mail.id, events, reprocess=True)
+    assert len(store.state()["transactions"]) == 1
+    assert not store.processed_without_events(mail.id)
+    other = [{**events[0], "id": "other"}]
+    store.import_message(mail.id, other, reprocess=True)
+    assert len(store.state()["transactions"]) == 1
+
+
+@pytest.mark.parametrize("kind", ["loan","card_payment", "rejected", "promotion", "verification"])
 def test_non_expenses_cannot_be_counted(tmp_path, preferences, mail, kind):
     store = Store(tmp_path / "test.sqlite3")
     events = extract(mail, preferences, Model(kind=kind))
@@ -602,9 +725,34 @@ def test_merchant_whitespace_recovers_unique_original_evidence(preferences, mail
     assert events[0]["decision"] is None
 
 
+def test_merchant_letter_case_recovers_the_notice_spelling(preferences, mail):
+    source = Mail(
+        mail.id, mail.sender, mail.subject, mail.received,
+        "Compraste en CRUZ VERDE\nPUNTO CLA con Tarjeta A $ 1.234,56.",
+    )
+    events = extract(source, preferences, Model(merchant="Cruz Verde Punto Cla"))
+    assert events[0]["merchant"] == "CRUZ VERDE\nPUNTO CLA"
+    assert events[0]["merchant"] in source.body
+
+
+def test_notice_without_merchant_keeps_a_literal_fragment_after_the_correction(preferences, mail):
+    source = Mail(
+        mail.id, mail.sender, mail.subject, mail.received,
+        "Retiraste $ 1.234,56 de tu cuenta del fondo Fiducuenta.",
+    )
+    model = Model(merchant="Retirada de Fiducuenta", kind="unknown")
+    events = extract(source, preferences, model)
+    assert model.calls == 2
+    assert events[0]["merchant"] == "Fiducuenta"
+    assert events[0]["decision"] is None
+    # A purchase never keeps a partial name: its merchant must be backed in full.
+    with pytest.raises(ValueError, match="campo merchant"):
+        extract(source, preferences, Model(merchant="Retirada de Fiducuenta"))
+
+
 @pytest.mark.parametrize("body,merchant", [
     ("Tienda\nLocal y Tienda  Local", "Tienda Local"),
-    ("TIENDA\nLOCAL", "Tienda Local"),
+    ("Tienda Local y TIENDA LOCAL", "tienda local"),
     ("Tienda\nLocal", "Tienda Otra"),
 ])
 def test_ambiguous_or_changed_merchant_is_still_rejected(preferences, mail, body, merchant):

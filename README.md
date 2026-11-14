@@ -323,6 +323,106 @@ reclasifican automáticamente decisiones existentes. Las decisiones ya guardadas
 como Retiro en efectivo ahora se contabilizan como gasto personal, conservando
 su registro y auditoría; no hace falta reimportar.
 
+### Ingresos
+
+El dinero recibido (nómina, transferencias recibidas, consignaciones y otros
+abonos) se extrae con el tipo `income` y queda **pendiente**: en la pestaña
+Decisión se confirma con **Ingreso** o se descarta con **No cuenta** (por
+ejemplo, un traslado entre cuentas propias o un reembolso). Antes estos avisos
+se descartaban sin guardar nada.
+
+- El tipo de ingreso (`Nómina`, `Transferencia recibida`, `Consignación`,
+  `Otros ingresos`) se deduce de las palabras del aviso, no de Ollama, y se puede
+  cambiar antes de confirmar. Un ingreso nunca puede marcarse como gasto.
+- Un movimiento `transfer` o `unknown` también ofrece el botón Ingreso, por si
+  una transferencia recibida llegó mal clasificada. Una compra no.
+- Un retiro del propio fondo de inversión o la devolución de una compra no son
+  ingresos: llegan como `unknown` para decisión humana.
+- El panel muestra por mes **Ingresos** confirmados (y cuánto falta por
+  confirmar), **Ingresos por tipo** y **Balance** (ingresos confirmados menos
+  gastos personales y familiares). `summary` incluye `ingresos` y `balance`.
+- Las reglas por comercio admiten el tipo **Ingreso**: «si quien paga contiene
+  `EMPRESA`, es Nómina». Solo deciden dinero recibido.
+
+**Recuperar meses ya importados.** Un aviso ya procesado no se vuelve a leer.
+Para rescatar los ingresos descartados antes, relee solo los avisos que no
+dejaron ningún movimiento:
+
+```powershell
+.\scripts\agente-local.ps1 scan -Start 2026-01-01 -End 2026-12-01 -ReprocessEmpty
+```
+
+No toca los avisos que ya tienen movimientos ni sus decisiones, y usa puntos de
+reanudación propios. Como vuelve a pasar esos avisos por Ollama, también recupera
+compras o transferencias que una importación anterior hubiera dejado vacías.
+
+Verificado con pruebas del almacén, la extracción y el panel en Chromium, y en
+seco con 20 avisos reales (2026-11-14): 9 ingresos detectados (2 de nómina y 7
+transferencias recibidas) y, además, 8 gastos que la importación anterior había
+dejado sin movimientos.
+
+### Pagos a tarjetas de crédito
+
+Los avisos «Pagaste [monto] en la tarjeta de credito *NNNN desde la cuenta
+*NNNN, el DD/MM/AAAA» se leen con una expresión fija, **sin enviarlos a
+Ollama**: monto, tarjeta y fecha se copian del aviso. Se registran solos como
+`card_payment`, categoría `Pago de tarjeta`, decisión «No cuenta»: no son gasto
+(el gasto son las compras hechas con la tarjeta) y no se pueden marcar como tal.
+El comercio guardado es la tarjeta tal como aparece (`tarjeta de credito *8243`)
+y la cuenta queda como `Desconocida`: no se adivina a qué alias corresponde.
+El panel muestra por mes **Pagos a tarjetas** y **Pagos por tarjeta**. Cualquier
+aviso que no tenga exactamente esa frase sigue el camino normal con Ollama.
+
+Antes estos avisos se descartaban, y cuando el modelo los extraía podía repetir
+un mismo pago en varias tarjetas. `scan -ReprocessEmpty` también vuelve a leer
+los avisos cuyos únicos movimientos son esos pagos adivinados y los reemplaza
+por el pago leído del aviso; queda en auditoría como
+`reprocess-replace-card-payments`.
+
+Verificado con pruebas y en seco con los avisos reales desde septiembre de 2026
+(2026-11-14): 9 pagos leídos en 3 tarjetas, ninguno con esa frase sin leer.
+
+### Evidencia literal del comercio
+
+El comercio guardado es siempre texto copiado del aviso, nunca la redacción de
+Ollama. Si el modelo cambia mayúsculas o espacios (`Cruz Verde Punto Cla` por
+`CRUZ VERDE PUNTO CLA`), se recupera la forma del aviso cuando solo hay una.
+En avisos sin comercio, como un retiro del fondo de inversión, si tras la única
+corrección el modelo sigue describiendo la operación con sus palabras, se
+conserva el fragmento más largo de esa descripción que sí aparece en el aviso
+(por ejemplo, el nombre del fondo). Esto solo aplica a los tipos `unknown`,
+`investment` e `income`; una compra exige el nombre completo del comercio o
+queda en «Avisos sin extraer». Verificado en solo lectura con los cuatro avisos
+reales que fallaban por `merchant` (2026-11-14): los cuatro producen propuesta.
+
+**Avisos sin monto.** Algunos avisos llegan sin importe (por ejemplo, una
+plantilla del banco sin rellenar: «Adicionaste {{valorAdicion}} a tu plan»). Si
+el texto que el modelo propone como monto no es un importe válido, el aviso
+queda en «Avisos sin extraer» con el campo `amount_text` y el recorrido
+continúa; antes detenía todo el `scan`. Verificado en solo lectura con los siete
+avisos reales de Inversiones que lo detenían (2026-11-14).
+
+### Reglas por comercio
+
+Para que el panel pregunte menos, la pestaña Decisión incluye **Reglas por
+comercio**: «si el comercio contiene `PRIMAX`, es Transporte y Familiar». Las
+escribe el usuario; Ollama no las crea ni las aplica. Al importar, y al guardar
+una regla, las compras pendientes cuyo comercio contenga esas palabras completas
+(sin distinguir mayúsculas ni signos: `UBER` coincide con `UBER*RIDES`, pero
+`IPS` no coincide con `TIPS`) quedan decididas con la categoría y el tipo de la
+regla. Si coinciden varias, gana la más larga.
+
+- Solo deciden **Gasto personal** o **Familiar**, con una categoría configurada.
+- Solo aplican a compras (`purchase`) pendientes. Ingresos, transferencias,
+  inversiones, cuentas excluidas y compras en USD sin tasa se siguen preguntando.
+- Nunca cambian una decisión ya tomada. Cada decisión automática indica su regla
+  en el motivo, queda en auditoría como `decision-rule` y se puede corregir en
+  «Decisiones anteriores».
+- Borrar una regla no deshace las decisiones que ya tomó.
+
+Las reglas se guardan en la tabla local `merchant_rules` de SQLite. Verificado
+con pruebas del almacén, de los endpoints del panel y del formulario en Chromium.
+
 ### Configuración y primer uso en Windows
 
 1. Actualiza el entorno con `.\.venv\Scripts\python.exe -m pip install -e ".[dev]"`.

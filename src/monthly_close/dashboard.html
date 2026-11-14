@@ -290,6 +290,14 @@
               <div id="weekday-chart" class="rank-list"></div>
             </article>
             <article class="card">
+              <div class="card-header"><div><h3>Ingresos por tipo</h3><p>Solo dinero recibido que confirmaste como ingreso</p></div></div>
+              <div id="income-ranking" class="rank-list"></div>
+            </article>
+            <article class="card">
+              <div class="card-header"><div><h3>Pagos por tarjeta</h3><p>Abonos a la deuda leídos del aviso; no suman al gasto</p></div></div>
+              <div id="card-payment-ranking" class="rank-list"></div>
+            </article>
+            <article class="card">
               <div class="card-header"><div><h3>Cuentas de pago</h3><p>Según los datos disponibles en la importación</p></div></div>
               <div id="account-ranking" class="account-list"></div>
             </article>
@@ -345,6 +353,17 @@
             <div id="extraction-list" class="decision-list"></div>
           </section>
           <div id="pending-list" class="decision-list"></div>
+          <details class="history-detail" id="rules-detail">
+            <summary>Reglas por comercio · decidir sin preguntar</summary>
+            <p class="hint" style="margin-top:12px">Si el comercio de una compra, o quien te envía dinero, contiene estas palabras completas, se decide solo con la categoría y el tipo indicados. Las reglas de tipo Ingreso solo aplican a dinero recibido y las demás solo a compras; las compras en USD sin tasa, las transferencias enviadas y las cuentas excluidas se siguen preguntando. Puedes cambiar cualquier decisión en el historial.</p>
+            <form id="rule-form" class="decision-actions" style="align-items:end;margin-top:12px">
+              <div class="field"><label for="rule-pattern">El comercio contiene</label><input id="rule-pattern" name="pattern" maxlength="60" required placeholder="PRIMAX"></div>
+              <div class="field"><label for="rule-category">Categoría</label><select id="rule-category" name="category"></select></div>
+              <div class="field"><label for="rule-decision">Tipo</label><select id="rule-decision" name="decision"><option value="personal">Gasto personal</option><option value="family">Familiar</option><option value="income">Ingreso</option></select></div>
+              <button type="submit" class="button primary">Guardar regla</button>
+            </form>
+            <div id="rules-list" class="decision-list" style="margin-top:12px"></div>
+          </details>
           <details class="history-detail" id="decision-history">
             <summary>Decisiones anteriores · cambiar una decisión</summary>
             <div id="history-list" class="decision-list" style="margin-top:12px"></div>
@@ -379,7 +398,11 @@
       const palette = ["#4779e6", "#e7a443", "#42a17a", "#9a70d6", "#df7180", "#3c9aaa", "#b68732", "#64748b"];
       const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
       const weekdayNames = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
-      const nonExpenseKinds = new Set(["loan", "income", "card_payment", "rejected", "promotion", "verification"]);
+      const nonExpenseKinds = new Set(["loan", "card_payment", "rejected", "promotion", "verification"]);
+      const incomeKinds = new Set(["income", "transfer", "unknown"]);
+      function incomeCategories() {
+        return safeArray(state.data && state.data.income_categories).filter(category => typeof category === "string");
+      }
       let decisionCardSequence = 0;
 
       function showMessage(message, type = "success") {
@@ -436,11 +459,15 @@
       function decisionOptions(tx) {
         const kind = typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "";
         if (nonExpenseKinds.has(kind)) return [["exclude", "No cuenta"]];
+        if (kind === "income") return [["income", "Ingreso"], ["exclude", "No cuenta"]];
         if (isExcludedAccount(tx)) return kind === "investment" ? [["exclude", "No cuenta"]] : [["family", "Familiar"], ["exclude", "No cuenta"]];
         const separate = [["investment", "Inversión"], ["investment_withdrawal", "Retiro de inversión"], ["exclude", "No cuenta"]];
         if (kind === "investment") return separate;
         if (kind === "own_transfer") return [["family", "Familiar"], ...separate];
-        return [["personal", "Gasto personal"], ["family", "Familiar"], ...separate];
+        const options = [["personal", "Gasto personal"], ["family", "Familiar"], ...separate];
+        // A received transfer may arrive classified as a generic transfer or unknown.
+        if (incomeKinds.has(kind)) options.splice(options.length - 1, 0, ["income", "Ingreso"]);
+        return options;
       }
       function netInvestments(items) {
         return sum(items.filter(tx => tx.decision === "investment"))
@@ -779,7 +806,9 @@
         const investments = inMonth.filter(tx => tx.decision === "investment");
         const withdrawals = inMonth.filter(tx => tx.decision === "investment_withdrawal");
         const cash = decisions.filter(tx => tx.category === "Retiro en efectivo");
-        const pending = inMonth.filter(tx => tx.decision == null);
+        const pending = inMonth.filter(tx => tx.decision == null && tx.kind !== "income");
+        const incomes = inMonth.filter(tx => tx.decision === "income");
+        const pendingIncomes = inMonth.filter(tx => tx.decision == null && tx.kind === "income");
         const monthDate = new Date(Number(state.month.slice(0, 4)), Number(state.month.slice(5, 7)) - 1, 1);
         const total = sum(decisions);
         const metrics = $("#month-metrics");
@@ -790,8 +819,14 @@
           makeMetric("Retiros de inversión", formatMoney(sum(withdrawals)), "Fuera de gastos"),
           makeMetric("Retiro en efectivo", formatMoney(sum(cash)), "Incluido en gastos"),
           makeMetric("Total decidido", formatMoney(total), "Personal + familiar; moneda seleccionada"),
-          makeMetric("Pendiente", formatMoney(sum(pending)), `${pending.length} movimientos · no incluido en total`)
+          makeMetric("Pendiente", formatMoney(sum(pending)), `${pending.length} movimientos · no incluido en total`),
+          makeMetric("Ingresos", formatMoney(sum(incomes)), `${incomes.length} confirmados · ${pendingIncomes.length} por confirmar (${formatMoney(sum(pendingIncomes))})`),
+          makeMetric("Balance", formatMoney(sum(incomes) - total), "Ingresos confirmados − gastos personales y familiares")
         );
+        renderRanking("#income-ranking", incomes, tx => tx.category, "Sin tipo", items => items);
+        const cardPayments = inMonth.filter(tx => tx.kind === "card_payment" && tx.category === "Pago de tarjeta");
+        metrics.append(makeMetric("Pagos a tarjetas", formatMoney(sum(cardPayments)), `${cardPayments.length} pagos · no es gasto`));
+        renderRanking("#card-payment-ranking", cardPayments, tx => tx.merchant, "Sin tarjeta", items => items);
         renderCalendar(inMonth, monthDate);
         renderDonut(decisions);
         renderCumulative(inMonth, monthDate);
@@ -946,11 +981,11 @@
         });
       }
 
-      function renderRanking(selector, items, keyOf, missingLabel) {
+      function renderRanking(selector, items, keyOf, missingLabel, filter = counted) {
         const host = $(selector);
         host.replaceChildren();
         const groups = new Map();
-        counted(items).forEach(tx => {
+        filter(items).forEach(tx => {
           const key = itemText(keyOf(tx)) === "Sin especificar" ? missingLabel : itemText(keyOf(tx));
           const previous = groups.get(key) || { total: 0, count: 0 };
           previous.total += tx.amount_minor;
@@ -1173,13 +1208,55 @@
         host.replaceChildren();
         if (!pending.length) host.append(el("div", "empty-state", "No hay movimientos pendientes para esta moneda."));
         pending.forEach(tx => host.append(makeDecisionCard(tx, false)));
-        const previous = all.filter(tx => ["personal", "family", "investment", "investment_withdrawal", "cash_withdrawal", "exclude"].includes(tx.decision))
+        const previous = all.filter(tx => ["income", "personal", "family", "investment", "investment_withdrawal", "cash_withdrawal", "exclude"].includes(tx.decision))
           .sort((a, b) => String(b.day || "").localeCompare(String(a.day || "")));
         $("#decision-history").hidden = previous.length === 0;
         const history = $("#history-list");
         history.replaceChildren();
         previous.forEach(tx => history.append(makeDecisionCard(tx, true)));
+        renderRules();
       }
+
+      function renderRules() {
+        const categorySelect = $("#rule-category");
+        const chosen = categorySelect.value;
+        categorySelect.replaceChildren();
+        const forIncome = $("#rule-decision").value === "income";
+        (forIncome ? incomeCategories() : safeArray(state.data.categories).filter(category => typeof category === "string")).forEach(category => {
+          const option = el("option", "", category);
+          option.value = category;
+          option.selected = category === chosen;
+          categorySelect.append(option);
+        });
+        const host = $("#rules-list");
+        host.replaceChildren();
+        const rules = safeArray(state.data.rules).filter(rule => rule && typeof rule.pattern === "string");
+        if (!rules.length) host.append(el("div", "empty-state", "Aún no hay reglas."));
+        rules.forEach(rule => {
+          const card = el("article", "decision-card");
+          const kind = rule.decision === "family" ? "Familiar" : rule.decision === "income" ? "Ingreso" : "Gasto personal";
+          const remove = el("button", "button small danger", "Borrar regla");
+          remove.type = "button";
+          remove.setAttribute("aria-label", `Borrar la regla ${rule.pattern}`);
+          remove.addEventListener("click", () => postJson("/api/rules/delete", { id: rule.id }, "Regla borrada. Las decisiones que ya tomó se conservan."));
+          const actions = el("div", "decision-actions");
+          actions.append(remove);
+          card.append(el("h3", "", rule.pattern), el("p", "", `${itemText(rule.category)} · ${kind}`), actions);
+          host.append(card);
+        });
+      }
+
+      $("#rule-decision").addEventListener("change", () => { if (state.data) renderRules(); });
+      $("#rule-form").addEventListener("submit", async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const saved = await postJson("/api/rules", {
+          pattern: form.elements.pattern.value,
+          category: form.elements.category.value,
+          decision: form.elements.decision.value
+        }, "Regla guardada y aplicada a las compras pendientes.");
+        if (saved) form.elements.pattern.value = "";
+      });
 
       function makeDecisionCard(tx, isPrevious) {
         const card = el("article", "decision-card");
@@ -1198,8 +1275,9 @@
         categorySelect.id = categoryLabel.htmlFor;
         categorySelect.name = "category";
         categorySelect.setAttribute("aria-label", `Categoría para ${itemText(tx.merchant)}`);
-        const categories = safeArray(state.data.categories).filter(category => typeof category === "string");
-        if (!categories.includes("Retiro en efectivo")) categories.push("Retiro en efectivo");
+        const isIncome = tx.kind === "income" || tx.decision === "income";
+        const categories = isIncome ? incomeCategories() : safeArray(state.data.categories).filter(category => typeof category === "string");
+        if (!isIncome && !categories.includes("Retiro en efectivo")) categories.push("Retiro en efectivo");
         if (typeof tx.category === "string" && tx.category && !categories.includes(tx.category)) categories.unshift(tx.category);
         categories.forEach(category => {
           const option = el("option", "", category);
@@ -1241,6 +1319,8 @@
         const options = decisionOptions(tx);
         if (nonExpenseKinds.has(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "")) {
           card.append(el("p", "hint", "Este tipo no se cuenta como gasto; solo puedes marcarlo «No cuenta»."));
+        } else if (tx.kind === "income") {
+          card.append(el("p", "hint", "Dinero recibido: elige su tipo y pulsa Ingreso, o No cuenta si es un traslado entre tus cuentas o un reembolso."));
         } else if (tx.kind === "investment") {
           card.append(el("p", "hint", "Aporte de inversión: se suma aparte, no como gasto personal o familiar."));
         } else if (tx.kind === "own_transfer" || isExcludedAccount(tx)) {

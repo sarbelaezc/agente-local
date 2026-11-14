@@ -137,7 +137,7 @@ def scheduled_month(now: datetime, timezone: str) -> str | None:
 
 def scan(
     store: Store, data_dir: Path, settings: dict, preferences: Preferences,
-    start: date, end: date, read_only: bool = False,
+    start: date, end: date, read_only: bool = False, reprocess_empty: bool = False,
 ) -> None:
     if not read_only and settings.get("folder_scan_verified") is not True:
         raise ValueError(
@@ -159,7 +159,9 @@ def scan(
             )
     model = None if read_only else OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
     scope = hashlib.sha256(json.dumps(
-        [start.isoformat(), end.isoformat(), settings, preferences.to_dict()],
+        [start.isoformat(), end.isoformat(), settings, preferences.to_dict()]
+        # A reprocessing run keeps its own resume points and never reuses a normal run's.
+        + (["reprocess-empty"] if reprocess_empty else []),
         sort_keys=True, ensure_ascii=False,
     ).encode()).hexdigest()
     received_ids: set[str] = set()
@@ -187,7 +189,10 @@ def scan(
                 return
             if mail.id in failed_ids:
                 return
-            if mail.id in received_ids or store.seen(mail.id):
+            if mail.id in received_ids or (store.seen(mail.id) and not (
+                # Notices read before that left no movement, such as income once discarded.
+                reprocess_empty and store.processed_without_events(mail.id)
+            )):
                 store.scan_checkpoint(scope, checkpoint, "complete")
                 return
             assert model is not None
@@ -209,7 +214,7 @@ def scan(
                     flush=True,
                 )
                 return
-            store.import_message(mail.id, proposals)
+            store.import_message(mail.id, proposals, reprocess=reprocess_empty)
             received_ids.add(mail.id)
             store.scan_checkpoint(scope, checkpoint, "complete")
 
@@ -337,7 +342,10 @@ def run(args: argparse.Namespace) -> None:
     end = date.fromisoformat(args.end) if args.end else now.date().replace(day=1)
     if start >= end:
         raise ValueError("Usa --start y --end (fin exclusivo); el rango debe contener dias.")
-    scan(store, data_dir, settings, preferences, start, end, read_only=args.read_only)
+    scan(
+        store, data_dir, settings, preferences, start, end,
+        read_only=args.read_only, reprocess_empty=args.reprocess_empty,
+    )
     if not args.read_only:
         print("Importacion terminada. Revisa movimientos, meses parciales y decisiones en el panel.")
 
@@ -357,7 +365,13 @@ def main() -> None:
         "--read-only", action="store_true",
         help="Con pilot valida un aviso; con scan recorre las carpetas autorizadas solo con metadatos.",
     )
+    parser.add_argument(
+        "--reprocess-empty", action="store_true",
+        help="Con scan, vuelve a leer los avisos ya procesados que no dejaron movimientos.",
+    )
     args = parser.parse_args()
+    if args.reprocess_empty and (args.command != "scan" or args.read_only):
+        parser.error("--reprocess-empty solo se permite con scan, sin --read-only.")
     if args.read_only and args.command not in {"pilot", "scan"}:
         parser.error("--read-only solo se permite con pilot o scan.")
     try:

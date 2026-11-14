@@ -12,6 +12,7 @@ param(
     [string]$Month,
     [int]$Port = 8766,
     [switch]$ReadOnly,
+    [switch]$ReprocessEmpty,
     [ValidateRange(1, 5)]
     [int]$BatchSize = 3,
     [ValidateRange(1, 365)]
@@ -161,6 +162,7 @@ try {
     if ($End) { $arguments += @("--end", $End) }
     if ($Month) { $arguments += @("--month", $Month) }
     if ($ReadOnly) { $arguments += "--read-only" }
+    if ($ReprocessEmpty) { $arguments += "--reprocess-empty" }
     if ($Command -eq "import") {
         Write-Host "Iniciando recorrido. Si usas el lector de navegador, no interactues con el perfil de Edge."
     }
