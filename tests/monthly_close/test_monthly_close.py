@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from argparse import Namespace
 from datetime import date, datetime
@@ -15,7 +16,7 @@ from monthly_close.main import months, scheduled_month
 from monthly_close.outlook import validate_url
 from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.server import create_server
-from monthly_close.store import Store
+from monthly_close.store import SCHEMA, Store
 
 
 @pytest.fixture
@@ -95,6 +96,138 @@ def test_scan_resumes_failed_notice_without_rereading_completed_or_losing_decisi
     assert next(t for t in store.state()["transactions"] if t["id"] == row["id"])["decision"] == "family"
     with store.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM scan_progress").fetchone()[0] == 0
+
+
+def test_scan_queues_invalid_evidence_continues_and_retries_without_losing_decisions(
+    tmp_path, preferences, monkeypatch, capsys,
+):
+    from contextlib import nullcontext
+    store = Store(tmp_path / "evidence-queue.sqlite3")
+    store.configure(preferences.to_dict())
+    reads = []
+    invalid = [True]
+
+    class Reader:
+        active_folder = ("dinero", "banco")
+
+        def __init__(self, *args):
+            pass
+
+        def checkpoint_key(self, candidate):
+            return candidate.item_id
+
+        def read(self, candidate):
+            reads.append(candidate.item_id)
+            return Mail(candidate.item_id, preferences.approved_senders[0],
+                        "<img src=x> Aviso", "2026-02-15T12:00:00Z",
+                        "Tienda $ 1.234,56 CUERPO_PRIVADO")
+
+        def walk_folders(self, limit, visit):
+            for identity in ["bad", "good"]:
+                visit(Candidate(identity, preferences.approved_senders[0], "Aviso"))
+            return []
+
+    def extraction(mail, prefs, model):
+        chosen = Model(merchant="Inventado") if mail.id == "bad" and invalid[0] else Model()
+        return extract(mail, prefs, chosen)
+
+    monkeypatch.setattr(app, "browser", lambda *args: nullcontext(None))
+    monkeypatch.setattr(app, "OutlookSourceReader", Reader)
+    monkeypatch.setattr(app, "extract", extraction)
+    monkeypatch.setattr(app, "OllamaJsonModel", lambda *args: Model())
+    monkeypatch.setattr(app, "require_model", lambda settings: None)
+    settings = {"folder_scan_verified": True, "outlook_url": "https://outlook.live.com/mail/0/",
+                "ollama_url": "http://127.0.0.1:11434", "ollama_model": "test", "max_messages": 10}
+    args = (store, tmp_path, settings, preferences, date(2026, 2, 1), date(2026, 3, 1))
+    app.scan(*args)
+    state = store.state()
+    assert len(state["transactions"]) == 1
+    assert not store.seen("bad")
+    failure = state["extraction_failures"][0]
+    assert failure["folder"] == "dinero / banco"
+    assert failure["field"] == "merchant"
+    assert "CUERPO_PRIVADO" not in json.dumps(state)
+    assert "Inventado" not in json.dumps(state)
+    output = capsys.readouterr().out
+    assert "Aviso" in output
+    assert "1 aviso(s) sin extraer" in output
+    assert "CUERPO_PRIVADO" not in output
+    assert "Avisos sin extraer: 1" in store.summary("2026-02")
+    with pytest.raises(ValueError, match="pendientes de extraccion"):
+        store.coverage("2026-02", "reviewed", "Revisado")
+    row = state["transactions"][0]
+    store.decide(row["id"], "family")
+    app.scan(*args)
+    assert len(store.state()["extraction_failures"]) == 1
+    invalid[0] = False
+    app.scan(*args)
+    assert store.state()["extraction_failures"] == []
+    assert store.seen("bad")
+    assert len(store.state()["transactions"]) == 2
+    assert next(t for t in store.state()["transactions"] if t["id"] == row["id"])["decision"] == "family"
+    store.coverage("2026-02", "reviewed", "Revisado")
+    assert store.state()["coverage"][0]["status"] == "reviewed"
+
+
+def test_extraction_failure_invalidates_review_and_empty_import_resolves_queue(
+    tmp_path, preferences,
+):
+    store = Store(tmp_path / "failure.sqlite3")
+    store.configure(preferences.to_dict())
+    store.coverage("2026-02", "reviewed", "Revisado")
+    store.record_extraction_failure(
+        "message", preferences.approved_senders[0], "Aviso", "2026-02-15T12:00:00Z",
+        "2026-02-15", "dinero / banco", "amount_text",
+    )
+    assert Store(store.path).state()["coverage"][0]["status"] == "partial"
+    assert Store(store.path).state()["extraction_failures"][0]["message_id"] == "message"
+    store.import_message("message", [])
+    assert store.seen("message")
+    assert store.state()["extraction_failures"] == []
+
+
+@pytest.mark.parametrize("error", [
+    ValueError("Cuenta no autorizada"),
+    ValueError("Dos movimientos indistinguibles"),
+    OutlookError("Seleccion ambigua"),
+])
+def test_scan_does_not_continue_after_other_failures(tmp_path, preferences, monkeypatch, error):
+    from contextlib import nullcontext
+    store = Store(tmp_path / "fatal.sqlite3")
+    store.configure(preferences.to_dict())
+    reads = []
+
+    class Reader:
+        def __init__(self, *args):
+            pass
+
+        def checkpoint_key(self, candidate):
+            return candidate.item_id
+
+        def read(self, candidate):
+            reads.append(candidate.item_id)
+            return Mail(candidate.item_id, preferences.approved_senders[0], "Aviso",
+                        "2026-02-15T12:00:00Z", "Tienda $ 1.234,56")
+
+        def walk_folders(self, limit, visit):
+            for identity in ["first", "second"]:
+                visit(Candidate(identity, preferences.approved_senders[0], "Aviso"))
+
+    def fail(*args):
+        raise error
+
+    monkeypatch.setattr(app, "browser", lambda *args: nullcontext(None))
+    monkeypatch.setattr(app, "OutlookSourceReader", Reader)
+    monkeypatch.setattr(app, "extract", fail)
+    monkeypatch.setattr(app, "OllamaJsonModel", lambda *args: Model())
+    monkeypatch.setattr(app, "require_model", lambda settings: None)
+    settings = {"folder_scan_verified": True, "outlook_url": "https://outlook.live.com/mail/0/",
+                "ollama_url": "http://127.0.0.1:11434", "ollama_model": "test", "max_messages": 10}
+    with pytest.raises(type(error), match=str(error)):
+        app.scan(store, tmp_path, settings, preferences, date(2026, 2, 1), date(2026, 3, 1))
+    assert reads == ["first"]
+    assert store.state()["extraction_failures"] == []
+    assert not store.seen("first")
 
 
 @pytest.fixture
@@ -333,6 +466,111 @@ def test_non_expenses_cannot_be_counted(tmp_path, preferences, mail, kind):
 def test_model_hallucinations_stop(preferences, mail, updates):
     with pytest.raises(ValueError):
         extract(mail, preferences, Model(**updates))
+
+
+@pytest.mark.parametrize("marker,amount", [
+    ("USD", "$12.34"), ("", "US$12.34"), ("", "USD12.34"),
+])
+def test_usd_evidence_is_preserved_and_cannot_be_labeled_cop(preferences, mail, marker, amount):
+    source = Mail(mail.id, mail.sender, "Compra", mail.received,
+                  f"AMAZON MKTPLACE {marker} {amount}")
+    model = Model(merchant="AMAZON MKTPLACE", amount_text=amount, currency="USD")
+    event = extract(source, preferences, model)[0]
+    assert (event["currency"], event["amount_minor"], event["decision"]) == ("USD", 1234, None)
+    with pytest.raises(ValueError, match="Moneda sin evidencia"):
+        extract(source, preferences, Model(
+            merchant="AMAZON MKTPLACE", amount_text=amount, currency="COP",
+        ))
+
+
+def test_mixed_currency_notice_stops_instead_of_guessing(preferences, mail):
+    source = Mail(mail.id, mail.sender, mail.subject, mail.received,
+                  "Tienda USD $12.34 y COP $50")
+    with pytest.raises(ValueError, match="ambiguas"):
+        extract(source, preferences, Model(amount_text="$12.34", currency="USD"))
+
+
+def test_manual_usd_rate_preserves_source_and_corrects_legacy_currency(tmp_path, preferences, mail):
+    store = Store(tmp_path / "rates.sqlite3")
+    store.configure(preferences.to_dict())
+    event = extract(mail, preferences, Model())[0]
+    event["amount_minor"] = 1234
+    store.import_message(mail.id, [event])
+    store.decide(event["id"], "personal", currency="USD", exchange_rate="4200,50")
+    row = Store(store.path).state()["transactions"][0]
+    assert (row["currency"], row["amount_minor"]) == ("USD", 1234)
+    assert row["exchange_rate"] == "4200.50"
+    assert row["cop_amount_minor"] == 5183417
+    assert "COP: personal 51834.17" in store.summary("2026-02")
+    assert "USD:" not in store.summary("2026-02")
+    store.decide(event["id"], "family", exchange_rate="4201")
+    assert "familiar 51840.34" in store.summary("2026-02")
+    store.import_message(mail.id, [event])
+    assert len(store.state()["transactions"]) == 1
+    with store.connect() as db:
+        audit = db.execute(
+            "SELECT value FROM audit WHERE action='exchange-local-user' ORDER BY id",
+        ).fetchall()
+    assert json.loads(audit[0]["value"])["previous_currency"] == "COP"
+    assert json.loads(audit[1]["value"])["previous_exchange_rate"] == "4200.50"
+    store.decide(event["id"], "exclude")
+    assert store.state()["transactions"][0]["decision"] == "exclude"
+    store.decide(event["id"], "personal", currency="COP", exchange_rate="")
+    assert store.state()["transactions"][0]["cop_amount_minor"] is None
+
+
+@pytest.mark.parametrize("rate", ["", "0", "-1", "NaN", "Infinity", "1e3", "4.200,50", "1.1234567", "999999999"])
+def test_invalid_or_missing_usd_rate_does_not_save_decision(tmp_path, preferences, mail, rate):
+    store = Store(tmp_path / "invalid-rate.sqlite3")
+    store.configure(preferences.to_dict())
+    event = extract(mail, preferences, Model())[0]
+    store.import_message(mail.id, [event])
+    before = store.state()
+    with pytest.raises(ValueError):
+        store.decide(event["id"], "personal", currency="USD", exchange_rate=rate)
+    assert store.state() == before
+
+
+def test_usd_rate_rounding_and_exclusion_without_conversion(tmp_path, preferences, mail):
+    store = Store(tmp_path / "rounding.sqlite3")
+    store.configure(preferences.to_dict())
+    event = extract(mail, preferences, Model())[0]
+    event.update(currency="USD", amount_minor=1)
+    store.import_message(mail.id, [event])
+    store.decide(event["id"], "exclude", exchange_rate="")
+    assert store.state()["transactions"][0]["cop_amount_minor"] is None
+    store.decide(event["id"], "personal", exchange_rate="1.5")
+    assert store.state()["transactions"][0]["cop_amount_minor"] == 2
+
+
+def test_usd_conversion_rejects_amount_outside_safe_integer_range(tmp_path, preferences, mail):
+    store = Store(tmp_path / "large-rate.sqlite3")
+    store.configure(preferences.to_dict())
+    event = extract(mail, preferences, Model())[0]
+    event.update(currency="USD", amount_minor=9007199254740991)
+    store.import_message(mail.id, [event])
+    with pytest.raises(ValueError, match="fuera del rango"):
+        store.decide(event["id"], "personal", exchange_rate="2")
+    assert store.state()["transactions"][0]["decision"] is None
+
+
+def test_existing_database_migration_preserves_rows_and_decisions(tmp_path, preferences, mail):
+    path = tmp_path / "legacy.sqlite3"
+    event = extract(mail, preferences, Model())[0]
+    event["decision"] = "family"
+    with sqlite3.connect(path) as db:
+        db.executescript(SCHEMA)
+        db.execute(
+            """INSERT INTO transactions VALUES (
+            :id,:message_id,:day,:merchant,:account,:amount_minor,:currency,
+            :category,:kind,:decision,:reason)""", event,
+        )
+    store = Store(path)
+    with Store(path).connect() as db:
+        row = dict(db.execute("SELECT * FROM transactions").fetchone())
+    assert all(row[key] == value for key, value in event.items())
+    assert row["exchange_rate"] is None
+    assert row["cop_amount_minor"] is None
 
 
 def test_prompt_distinguishes_card_repayments_from_purchases(preferences, mail):
@@ -596,3 +834,26 @@ def test_panel_validation_errors_are_visible(panel, preferences):
     assert response.json()["error"]
     response = client.post("/api/config", headers=headers, json={})
     assert response.status_code == 400
+
+
+def test_decision_api_requires_decimal_text_rate_and_saves_estimate(panel, preferences, mail):
+    store, client, url = panel
+    store.configure(preferences.to_dict())
+    event = extract(mail, preferences, Model())[0]
+    store.import_message(mail.id, [event])
+    headers = {"Origin": url, "X-CSRF-Token": client.get("/api/state").json()["csrf"]}
+    payload = {"id": event["id"], "decision": "personal", "currency": "USD"}
+    for rate in (None, 4200.5):
+        response = client.post(
+            "/api/decision", headers=headers, json={**payload, "exchange_rate": rate},
+        )
+        assert response.status_code == 400
+        assert store.state()["transactions"][0]["decision"] is None
+    response = client.post(
+        "/api/decision", headers=headers, json={**payload, "exchange_rate": "4200.5"},
+    )
+    assert response.status_code == 200
+    row = client.get("/api/state").json()["transactions"][0]
+    assert row["currency"] == "USD"
+    assert row["exchange_rate"] == "4200.5"
+    assert row["cop_amount_minor"] == 518576928

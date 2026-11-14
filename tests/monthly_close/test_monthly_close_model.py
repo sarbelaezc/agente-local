@@ -44,6 +44,32 @@ def test_model_requires_boolean_and_all_event_fields_without_proxy(monkeypatch):
     assert "tools" not in seen[0]
 
 
+@pytest.mark.parametrize("source,amount", [
+    ("Compraste USD $12.34 en AMAZON MKTPLACE.", "USD $12.34"),
+    ("Compraste USD12.34 en AMAZON MKTPLACE.", "USD12.34"),
+    ("Compraste US$12.34 en AMAZON MKTPLACE.", "US$12.34"),
+])
+def test_model_preserves_explicit_usd_instead_of_forcing_cop(monkeypatch, source, amount):
+    seen = []
+    real_client = httpx.Client
+
+    def handle(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"message": {"content": '{"events":[]}'}})
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(handle), **kwargs,
+    ))
+    context = json.loads(USER)
+    context["untrusted_email"] = source
+    OllamaJsonModel("http://127.0.0.1:11434", "test").complete_json(
+        "system", json.dumps(context),
+    )
+    properties = seen[0]["format"]["properties"]["events"]["items"]["properties"]
+    assert properties["currency"]["enum"] == ["USD"]
+    assert properties["amount_text"]["enum"] == [amount]
+
+
 @pytest.mark.parametrize("payload", [
     {}, {"message": None}, {"message": {"content": "not-json"}},
     {"message": {"content": "[]"}}, {"message": {"content": "x" * 20001}},

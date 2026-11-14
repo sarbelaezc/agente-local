@@ -337,6 +337,7 @@ class OutlookSourceReader:
                     }))"""
                 )
                 page_ids = [item["id"] for item in snapshot]
+                visited = False
                 for item in snapshot:
                     position, item_id = item.get("position"), item["id"]
                     if not isinstance(position, str) or not position.isdigit() or not item_id:
@@ -378,12 +379,17 @@ class OutlookSourceReader:
                                 raise OutlookError("Hay posiciones sin verificar antes del corte por fecha.")
                             stopped_before_start = True
                             break
+                        # Reading moves Outlook's list; scrolling on from a stale snapshot skips rows.
+                        visited = True
+                        break
                 if stopped_before_start:
                     break
                 if len(positions) == total:
                     if set(positions) != set(range(total)):
                         raise OutlookError("Hay posiciones sin verificar en la carpeta.")
                     break
+                if visited:
+                    continue
                 scroller = self.page.locator(SCROLLER)
                 if scroller.count() != 1 or not scroller.is_visible():
                     raise OutlookError("Contenedor virtual ausente o ambiguo.")
@@ -551,6 +557,8 @@ class OutlookSourceReader:
         if self.page.get_by_role("button", name="Cerrar", exact=True).count():
             self._close_message_view(candidate)
             row = self._row(candidate)
+        # Outlook enlarges rows lazily; a lower row gets pushed out and unmounted mid-action.
+        row.evaluate("el => el.scrollIntoView({block: 'start'})")
         row.locator(SUBJECT).click()
         self.page.wait_for_function(
             """({selector,id}) => {
@@ -601,5 +609,11 @@ class OutlookSourceReader:
             raise OutlookError("Cierre del dialogo ambiguo.")
         close.click()
         dialog.wait_for(state="hidden")
+        # Outlook keeps the app aria-hidden briefly after the dialog; role lookups would miss it.
+        self.page.wait_for_function(
+            """list => { const pane = document.querySelector(list);
+              return !!pane && !pane.closest('[aria-hidden="true"]'); }""",
+            arg=MESSAGE_LIST,
+        )
         self._close_message_view(candidate)
         return mail

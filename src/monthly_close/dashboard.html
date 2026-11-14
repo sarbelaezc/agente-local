@@ -16,6 +16,7 @@
       --muted: #5e6b7b;
       --line: #dce2e9;
       --accent: #245cdb;
+      --on-accent: #fff;
       --accent-soft: #e8efff;
       --green: #157347;
       --green-soft: #e8f5ed;
@@ -38,6 +39,7 @@
       --muted: #aab6c4;
       --line: #354252;
       --accent: #91b4ff;
+      --on-accent: #10151d;
       --accent-soft: #25395e;
       --green: #83d2a4;
       --green-soft: #1d392b;
@@ -57,7 +59,7 @@
     .shell { max-width: 1440px; margin: 0 auto; padding: 24px clamp(16px, 3vw, 42px) 48px; }
     .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
     .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
-    .brand-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: var(--accent); color: #fff; font-weight: 800; }
+    .brand-mark { display: grid; place-items: center; flex: 0 0 auto; width: 42px; height: 42px; border-radius: 13px; background: var(--accent); color: var(--on-accent); font-weight: 800; }
     h1 { margin: 0; font-size: clamp(1.15rem, 2.5vw, 1.55rem); letter-spacing: -.03em; }
     .eyebrow { margin: 3px 0 0; color: var(--muted); font-size: .88rem; }
     .top-actions, .toolbar, .inline-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
@@ -67,7 +69,7 @@
       background: var(--surface); color: var(--ink); font-weight: 650;
     }
     .button:hover { border-color: var(--accent); }
-    .button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+    .button.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
     .button.primary:hover { filter: brightness(.96); }
     .button.small { min-height: 36px; padding: 7px 10px; font-size: .9rem; }
     .button.danger { color: var(--red); }
@@ -121,7 +123,7 @@
     .metric small { display: block; margin-top: 5px; color: var(--muted); }
     .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
     .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-    .card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+    .card-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
     .card-header p { margin: 5px 0 0; color: var(--muted); font-size: .86rem; }
     .calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
     .weekday, .day-cell { text-align: center; }
@@ -137,6 +139,7 @@
     .swatch { width: 11px; height: 11px; flex: 0 0 auto; border-radius: 3px; background: var(--accent); }
     .chart-wrap { width: 100%; overflow-x: auto; }
     svg.chart { display: block; width: 100%; min-width: 300px; height: auto; overflow: visible; }
+    #category-chart-svg { display: block; width: 100%; max-width: 320px; margin: 0 auto 14px; }
     .axis-label { fill: var(--ink); font-size: 11px; font-weight: 600; }
     .chart-grid { stroke: var(--line); stroke-dasharray: 4 5; }
     .bar-personal { fill: #4779e6; }
@@ -219,7 +222,7 @@
       </div>
       <div class="top-actions">
         <button class="button" id="theme-toggle" type="button" aria-pressed="false" aria-label="Cambiar tema claro u oscuro">◐ <span>Tema</span></button>
-        <button class="button" id="refresh-button" type="button" hidden>↻ <span class="refresh-label">Actualizar</span></button>
+        <button class="button" id="refresh-button" type="button" aria-label="Actualizar" hidden>↻ <span class="refresh-label">Actualizar</span></button>
         <button class="button" id="edit-config-button" type="button" hidden>Configuración</button>
       </div>
     </header>
@@ -259,6 +262,7 @@
           </div>
           <div id="coverage-summary" class="hint" aria-live="polite"></div>
         </div>
+        <p id="extraction-warning" class="hint" role="status" hidden></p>
         <div id="month-chips" class="month-chips" role="group" aria-label="Seleccionar mes"></div>
         <div class="tabs" role="tablist" aria-label="Vista del cierre">
           <button class="tab" id="tab-month" type="button" role="tab" aria-selected="true" aria-controls="panel-month" tabindex="0">Mes</button>
@@ -334,7 +338,12 @@
         </section>
 
         <section id="panel-decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden>
-          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Las categorías solo se cuentan en totales si eliges Personal o Familiar.</p></div></div>
+          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Se muestran todos los meses de la moneda seleccionada; en COP también aparecen los movimientos USD para ingresar su tasa estimada. Las categorías solo se cuentan en gastos si eliges Personal o Familiar.</p></div></div>
+          <section id="extraction-review" hidden>
+            <h3>Avisos sin extraer · revisión pendiente</h3>
+            <p>No se importaron sus propuestas. Busca el aviso en Outlook por estos datos y repite su rango para reintentar. No se incluyen en los totales ni permiten aprobar datos inválidos.</p>
+            <div id="extraction-list" class="decision-list"></div>
+          </section>
           <div id="pending-list" class="decision-list"></div>
           <details class="history-detail" id="decision-history">
             <summary>Decisiones anteriores · cambiar una decisión</summary>
@@ -410,10 +419,14 @@
 
       function safeArray(value) { return Array.isArray(value) ? value : []; }
       function txCurrency(tx) { return typeof tx.currency === "string" ? tx.currency : ""; }
+      function reportingCurrency(tx) {
+        return txCurrency(tx) === "USD" && Number.isSafeInteger(tx.cop_amount_minor) ? "COP" : txCurrency(tx);
+      }
       function transactions() {
         return safeArray(state.data && state.data.transactions).filter(tx =>
-          tx && typeof tx === "object" && Number.isSafeInteger(tx.amount_minor) && txCurrency(tx) === state.currency
-        );
+          tx && typeof tx === "object" && Number.isSafeInteger(tx.amount_minor) && reportingCurrency(tx) === state.currency
+        ).map(tx => reportingCurrency(tx) !== txCurrency(tx)
+          ? { ...tx, amount_minor: tx.cop_amount_minor, currency: "COP" } : tx);
       }
       function isExcludedAccount(tx) {
         const account = typeof tx.account === "string" ? tx.account.trim().toLocaleLowerCase() : "";
@@ -468,7 +481,11 @@
       }
 
       async function loadState(quiet = false) {
-        if (!quiet) showMessage("Actualizando datos…", "success");
+        if (!quiet) {
+          if (state.busy) return;
+          setBusy(true);
+          showMessage("Actualizando datos…", "success");
+        }
         setError("");
         try {
           const response = await fetch("/api/state", { headers: { Accept: "application/json" }, cache: "no-store" });
@@ -477,6 +494,12 @@
           if (!data || typeof data.configured !== "boolean" || !Array.isArray(data.transactions) || !Array.isArray(data.categories) || !Array.isArray(data.coverage)) {
             throw new Error("La respuesta de /api/state no coincide con el contrato esperado.");
           }
+          if (data.transactions.some(tx => !tx || !("exchange_rate" in tx) || !("cop_amount_minor" in tx))) {
+            throw new Error("Reinicia el servidor del panel para habilitar las tasas manuales USD/COP");
+          }
+          if (!Array.isArray(data.extraction_failures)) {
+            throw new Error("Reinicia el servidor del panel para mostrar los avisos pendientes de extraccion");
+          }
           state.data = data;
           if (!quiet) showMessage("");
           render();
@@ -484,10 +507,12 @@
           state.data = null;
           $("#setup-area").hidden = true;
           $("#dashboard-area").hidden = true;
-          $("#refresh-button").hidden = true;
+          $("#refresh-button").hidden = false;
           $("#edit-config-button").hidden = true;
           showMessage("");
           setError(`No se pudo cargar el panel local: ${error.message}. Comprueba que el servidor esté disponible y vuelve a intentar.`);
+        } finally {
+          if (!quiet) setBusy(false);
         }
       }
 
@@ -618,6 +643,7 @@
       }
 
       async function postJson(url, payload, successText) {
+        if (state.busy) return false;
         if (!state.data || typeof state.data.csrf !== "string" || !state.data.csrf) {
           showMessage("No hay token CSRF disponible. Actualiza el panel antes de guardar.", "error");
           return false;
@@ -655,7 +681,9 @@
 
       function setBusy(busy) {
         state.busy = busy;
-        document.querySelectorAll("button[type='submit']").forEach(button => { button.disabled = busy; });
+        $("main").setAttribute("aria-busy", String(busy));
+        document.querySelectorAll("button:not(#theme-toggle), input, select, textarea")
+          .forEach(control => { control.disabled = busy; });
       }
 
       function render() {
@@ -671,6 +699,9 @@
           return;
         }
         $("#sender-warning").hidden = safeArray(data.config.approved_senders).length > 0;
+        const failures = safeArray(data.extraction_failures);
+        $("#extraction-warning").hidden = failures.length === 0;
+        $("#extraction-warning").textContent = `${failures.length} aviso(s) sin extraer: faltan movimientos en los totales. Revisa Decisión; la cobertura sigue parcial.`;
         const currencies = Array.from(new Set(safeArray(data.transactions).map(tx => tx && tx.currency).filter(currency => typeof currency === "string" && currency)));
         if (typeof data.config.currency === "string" && data.config.currency && !currencies.includes(data.config.currency)) currencies.unshift(data.config.currency);
         if (!currencies.length) currencies.push(typeof data.config.currency === "string" && data.config.currency ? data.config.currency : "MXN");
@@ -829,7 +860,7 @@
         svg.append(center);
         host.append(svg);
         const legend = el("div", "legend");
-        entries.slice(0, 8).forEach(([category, amount], index) => {
+        entries.forEach(([category, amount], index) => {
           const row = el("div", "legend-row");
           const label = el("span", "legend-label");
           const swatch = el("span", "swatch");
@@ -848,7 +879,7 @@
         const rows = Array.from({ length: days }, () => ({ personal: 0, family: 0 }));
         counted(items).forEach(tx => {
           const day = Number(tx.day.slice(8, 10)) - 1;
-          if (day >= 0 && day < days) rows[day][tx.decision] += tx.amount_minor;
+          if (day >= 0 && day < days) rows[day][tx.decision === "family" ? "family" : "personal"] += tx.amount_minor;
         });
         let personalTotal = 0;
         let familyTotal = 0;
@@ -986,7 +1017,7 @@
             buckets[index].categories.set(category, (buckets[index].categories.get(category) || 0) + tx.amount_minor);
           }
         });
-        const available = buckets.filter(bucket => safeArray(state.data.transactions).some(tx => tx && monthOf(tx) === bucket.month && txCurrency(tx) === state.currency));
+        const available = buckets.filter(bucket => items.some(tx => monthOf(tx) === bucket.month));
         const completedTotals = available.map(bucket => sum(bucket.personal) + sum(bucket.family));
         const average = completedTotals.length ? Math.round(completedTotals.reduce((a, b) => a + b, 0) / completedTotals.length) : 0;
         const highest = available.length ? available.reduce((best, bucket) => sum(bucket.personal) + sum(bucket.family) > sum(best.personal) + sum(best.family) ? bucket : best) : null;
@@ -1079,9 +1110,7 @@
         const current = currentMonth();
         const elapsedUnverified = [];
         const coverageByMonth = new Map(safeArray(state.data.coverage).filter(entry => entry && typeof entry.month === "string").map(entry => [entry.month, entry]));
-        const importedMonths = new Set(safeArray(state.data.transactions)
-          .filter(tx => tx && txCurrency(tx) === state.currency)
-          .map(monthOf).filter(Boolean));
+        const importedMonths = new Set(transactions().map(monthOf).filter(Boolean));
         $("#year-coverage-note").textContent = `Los meses transcurridos que no aparecen como verificados manualmente no deben interpretarse como gasto cero. “Sin importación” indica que no hay movimientos de esta moneda registrados para ese mes.`;
         const table = document.createElement("table");
         const head = document.createElement("thead");
@@ -1121,7 +1150,24 @@
       }
 
       function renderDecisions() {
-        const all = transactions();
+        const failures = safeArray(state.data.extraction_failures);
+        $("#extraction-review").hidden = failures.length === 0;
+        const failureHost = $("#extraction-list");
+        failureHost.replaceChildren();
+        failures.forEach(failure => {
+          const card = el("article", "decision-card");
+          card.append(
+            el("h4", "", itemText(failure.subject)),
+            el("p", "", `${failure.received} · ${failure.sender}`),
+            el("p", "", `Carpeta: ${failure.folder}`),
+            el("p", "hint", `Evidencia no literal: ${failure.field}. Sin movimientos importados.`)
+          );
+          failureHost.append(card);
+        });
+        const all = safeArray(state.data.transactions).filter(tx => tx && (
+          txCurrency(tx) === state.currency ||
+          (state.currency === "COP" && txCurrency(tx) === "USD")
+        ));
         const pending = all.filter(tx => tx.decision == null).sort((a, b) => String(a.day || "").localeCompare(String(b.day || "")));
         const host = $("#pending-list");
         host.replaceChildren();
@@ -1139,7 +1185,10 @@
         const card = el("article", "decision-card");
         const meta = el("div", "decision-meta");
         meta.append(el("span", "", tx.day || "Fecha no disponible"), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
-        card.append(meta, el("h3", "", itemText(tx.merchant)), el("strong", "", formatMoney(tx.amount_minor)));
+        card.append(meta, el("h3", "", itemText(tx.merchant)), el("strong", "", formatMoney(tx.amount_minor, txCurrency(tx))));
+        if (txCurrency(tx) === "USD" && Number.isSafeInteger(tx.cop_amount_minor)) {
+          card.append(el("p", "hint", `Estimado: ${formatMoney(tx.cop_amount_minor, "COP")} · Tasa manual: ${tx.exchange_rate} COP por USD.`));
+        }
         const reason = typeof tx.reason === "string" && tx.reason.trim() ? tx.reason : "Sin motivo anotado.";
         card.append(el("p", "reason", reason));
         const categoryField = el("div", "field decision-category");
@@ -1160,6 +1209,35 @@
         });
         categoryField.append(categoryLabel, categorySelect);
         card.append(categoryField);
+        let currencySelect = null, rateInput = null;
+        if (state.data.config.currency === "COP" && ["COP", "USD"].includes(txCurrency(tx))) {
+          const currencyField = el("div", "field decision-category");
+          const currencyLabel = el("label", "", "Moneda original del aviso");
+          currencyLabel.htmlFor = `decision-currency-${decisionCardSequence++}`;
+          currencySelect = document.createElement("select");
+          currencySelect.id = currencyLabel.htmlFor;
+          ["COP", "USD"].forEach(code => {
+            const option = el("option", "", code);
+            option.value = code;
+            option.selected = code === txCurrency(tx);
+            currencySelect.append(option);
+          });
+          currencyField.append(currencyLabel, currencySelect);
+          card.append(currencyField, el("p", "hint", "Corrige la moneda solo después de comprobar el aviso original; el nombre del comercio no determina la moneda."));
+          const rateField = el("div", "field decision-category");
+          const rateLabel = el("label", "", `Tasa estimada COP por USD para ${tx.day}`);
+          rateLabel.htmlFor = `decision-rate-${decisionCardSequence++}`;
+          rateInput = document.createElement("input");
+          rateInput.id = rateLabel.htmlFor;
+          rateInput.type = "text";
+          rateInput.inputMode = "decimal";
+          rateInput.placeholder = "Ejemplo: 4200,50";
+          rateInput.value = tx.exchange_rate || "";
+          rateField.append(rateLabel, rateInput, el("p", "hint", "Estimación ingresada por ti para la fecha del movimiento; no se consulta ni se calcula una tasa automáticamente."));
+          rateField.hidden = currencySelect.value !== "USD";
+          currencySelect.addEventListener("change", () => { rateField.hidden = currencySelect.value !== "USD"; });
+          card.append(rateField);
+        }
         const options = decisionOptions(tx);
         if (nonExpenseKinds.has(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "")) {
           card.append(el("p", "hint", "Este tipo no se cuenta como gasto; solo puedes marcarlo «No cuenta»."));
@@ -1175,7 +1253,12 @@
           button.type = "button";
           button.setAttribute("aria-pressed", String(tx.decision === decision || (tx.decision === "cash_withdrawal" && decision === "personal")));
           button.addEventListener("click", async () => {
-            await postJson("/api/decision", { id: tx.id, decision, category: categorySelect.value }, isPrevious ? "Decisión actualizada." : "Decisión guardada.");
+            const payload = { id: tx.id, decision, category: categorySelect.value };
+            if (currencySelect) {
+              payload.currency = currencySelect.value;
+              payload.exchange_rate = currencySelect.value === "USD" ? rateInput.value.trim() : "";
+            }
+            await postJson("/api/decision", payload, isPrevious ? "Decisión actualizada." : "Decisión guardada.");
           });
           actions.append(button);
         });
@@ -1204,7 +1287,10 @@
         mountConfigForm($("#config-form-host"), "edit");
         $("#config-title").focus();
       });
-      $("#close-config-button").addEventListener("click", () => { $("#config-area").hidden = true; });
+      $("#close-config-button").addEventListener("click", () => {
+        $("#config-area").hidden = true;
+        $("#edit-config-button").focus();
+      });
       $("#currency-select").addEventListener("change", event => { state.currency = event.target.value; renderDashboard(); renderYear(); renderDecisions(); });
       $("#year-select").addEventListener("change", event => { state.year = event.target.value; renderYear(); });
       $("#coverage-month").addEventListener("change", event => {

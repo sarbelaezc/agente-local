@@ -21,7 +21,7 @@ from playwright.sync_api import Page, sync_playwright
 from mail_invoices.local_model import LocalModelError, validate_local_url
 from monthly_close.model import OllamaJsonModel
 from monthly_close.domain import Preferences, received_local
-from monthly_close.extraction import extract
+from monthly_close.extraction import EvidenceError, extract
 from monthly_close.outlook import Candidate, OutlookError, validate_url
 from monthly_close.server import create_server
 from monthly_close.source_reader import OutlookSourceReader
@@ -130,6 +130,7 @@ def scan(
         sort_keys=True, ensure_ascii=False,
     ).encode()).hexdigest()
     received_ids: set[str] = set()
+    failed_ids: set[str] = set()
     with browser(data_dir, settings) as page:
         reader = OutlookSourceReader(page, settings["outlook_url"], preferences.approved_senders)
 
@@ -152,11 +153,30 @@ def scan(
             if local_day >= end:
                 store.scan_checkpoint(scope, checkpoint, "complete")
                 return
+            if mail.id in failed_ids:
+                return
             if mail.id in received_ids or store.seen(mail.id):
                 store.scan_checkpoint(scope, checkpoint, "complete")
                 return
             assert model is not None
-            proposals = extract(mail, preferences, model)
+            try:
+                proposals = extract(mail, preferences, model)
+            except EvidenceError as exc:
+                folder = " / ".join(reader.active_folder or ())
+                store.record_extraction_failure(
+                    mail.id, mail.sender, mail.subject, mail.received,
+                    local_day.isoformat(), folder, exc.field,
+                )
+                failed_ids.add(mail.id)
+                print(
+                    "Aviso pendiente de revision por evidencia no literal; "
+                    "sin importar movimientos: " + json.dumps({
+                        "carpeta": folder, "remitente": mail.sender,
+                        "asunto": mail.subject, "fecha": mail.received, "campo": exc.field,
+                    }, ensure_ascii=True),
+                    flush=True,
+                )
+                return
             store.import_message(mail.id, proposals)
             received_ids.add(mail.id)
             store.scan_checkpoint(scope, checkpoint, "complete")
@@ -164,6 +184,12 @@ def scan(
         reports = reader.walk_folders(settings["max_messages"], visit)
     if not read_only:
         store.clear_scan_progress(scope)
+        if failed_ids:
+            print(
+                f"Recorrido finalizado con {len(failed_ids)} aviso(s) sin extraer. "
+                "Revisalos en Decision; cobertura parcial. Repite el rango para reintentarlos.",
+                flush=True,
+            )
     for report in reports:
         cutoff = (
             "; corte al encontrar un aviso anterior al inicio"

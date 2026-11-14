@@ -10,7 +10,7 @@ from datetime import date, datetime
 from mail_invoices.local_model import JsonModel
 from monthly_close.domain import (
     KINDS, NON_EXPENSES, Preferences, amount_minor, clean_text,
-    decision_reason, received_local,
+    decision_reason, notice_currency, received_local,
 )
 
 SYSTEM = """Eres un asistente de cierre mensual. Responde en espanol, solo JSON.
@@ -37,6 +37,8 @@ simbolos, separadores o decimales. Copia la categoria de la lista autorizada.
 amount_text debe ser una subcadena exacta del correo: no antepongas COP ni otra
 moneda si no aparece junto al monto. Por ejemplo, si dice $12.345,67, copia
 "$12.345,67", nunca "COP 12.345,67" ni "$ 12.345,67". currency va por separado.
+Si el correo indica USD o US$, conserva USD. No conviertas importes ni supongas
+que el comercio determina la moneda. La tasa de cambio la ingresa el usuario.
 merchant debe copiar el nombre o concepto tal como aparece en un fragmento del
 correo. No lo resumas ni agregues palabras para describir la operacion.
 Si recibes correction, corrige el campo indicado copiando evidencia del correo;
@@ -49,6 +51,12 @@ Formato: {"events":[{"merchant":"texto literal", "account":"alias autorizado o D
 No emitas eventos sin un monto explicito. Si no hay ninguno, devuelve events vacio.
 approved_notice_examples contiene ejemplos ficticios aprobados para interpretar
 la estructura del aviso. No son movimientos reales ni evidencia de este correo.
+
+Comprobacion final obligatoria: un pago o abono a la deuda de una tarjeta de
+credito NO es una compra. Si identificaste card_payment, no lo incluyas en events,
+ni una ni varias veces, aunque encaje en varias categorias. Si el correo solo
+avisa ese pago, la respuesta completa debe ser {"events":[]}.
+No repitas la misma operacion con categorias diferentes.
 """
 
 
@@ -61,7 +69,7 @@ class Mail:
     body: str
 
 
-class _EvidenceError(ValueError):
+class EvidenceError(ValueError):
     def __init__(self, field: str) -> None:
         self.field = field
         super().__init__(
@@ -115,7 +123,7 @@ def extract(mail: Mail, preferences: Preferences, model: JsonModel) -> list[dict
                 raise ValueError("La correccion de evidencia cambio otros datos o elimino movimientos.")
         try:
             return _proposals(result, mail, preferences, received, source)
-        except _EvidenceError as exc:
+        except EvidenceError as exc:
             if attempt:
                 raise
             logging.getLogger(__name__).warning(
@@ -154,14 +162,13 @@ def _proposals(
                 merchant = clean_text(matches.pop(), 150)
         if merchant not in source or amount not in source:
             field = "merchant" if merchant not in source else "amount_text"
-            raise _EvidenceError(field)
+            raise EvidenceError(field)
         account = clean_text(event.get("account"), 150)
         if account not in preferences.accounts + preferences.excluded_accounts + ["Desconocida"]:
             raise ValueError("Ollama propuso una cuenta no configurada.")
         currency = clean_text(event.get("currency"), 3).upper()
-        # No exchange conversion or inferred alternate currencies.
-        if currency != preferences.currency:
-            raise ValueError("Moneda distinta a la configurada: requiere revision manual.")
+        if currency != notice_currency(source, preferences.currency):
+            raise ValueError("Moneda sin evidencia en el aviso: requiere revision manual.")
         category = clean_text(event.get("category"), 150)
         if category not in preferences.categories:
             raise ValueError("Categoria no autorizada.")

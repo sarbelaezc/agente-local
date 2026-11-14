@@ -8,7 +8,7 @@ implementa.
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/run-invoice-batch.ps1` / `-Resume` |
 | Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
-| Cierre mensual de gastos de Outlook con Ollama local | Importación de octubre verificada con corte por fechas; panel e inversiones disponibles; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
+| Cierre mensual de gastos de Outlook con Ollama local | Importación de septiembre y octubre verificada; tasa manual USD/COP y cola de extracciones sin evidencia; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
 
 ## Stack tecnológico
 
@@ -126,10 +126,12 @@ El panel local ofrece:
   tabla personal/familiar/pendiente. Los meses no conciliados llevan advertencia.
 - **Decisión:** confirmar gasto personal, familiar o no contable y corregir categoría.
   Las decisiones se guardan en SQLite y pueden revisarse después. Reimportar no
-  las reemplaza.
+  las reemplaza. Esta vista muestra todos los meses de la moneda seleccionada,
+  no solo el mes del selector.
 
 Los importes se calculan con enteros en centésimas, no con aritmética del modelo.
-No se convierten ni mezclan monedas; cada configuración importa una sola moneda,
+No se mezclan importes de monedas distintas. Un cierre configurado en COP admite
+avisos USD y su conversión estimada mediante tasa manual, conservando el original
 con hasta dos decimales. Fechas ISO con zona explícita se convierten a la zona
 IANA elegida. No se supone que una fecha de la interfaz de Outlook esté en UTC.
 Si el aviso no contiene fecha de compra reconocible, se usa la fecha local del
@@ -142,6 +144,57 @@ propias o cuentas excluidas solo permiten Familiar o No cuenta.
 humana, incluso si se eligió considerar transferencias personales por defecto.
 Una clasificación de Ollama no equivale a aprobación. Revisa posibles avisos
 duplicados de la misma compra antes de aprobarlos.
+
+### Compras USD y tasa estimada manual
+
+- **Alcance:** en cierres configurados en COP, la extracción conserva USD cuando
+  el aviso contiene `USD` o `US$`, en lugar de obligar al modelo a etiquetarlo COP.
+  El nombre del comercio (incluido AMAZON MKTPLACE) nunca determina la moneda.
+  Un aviso con marcadores COP y USD se detiene por ambigüedad, sin conversión.
+- **Configuración y uso:** en **Decisión**, los movimientos USD también aparecen
+  al seleccionar COP. Ingresa la **tasa estimada COP por USD para la fecha del
+  movimiento**, por ejemplo `4200,50`, y confirma Personal, Familiar o la decisión
+  correspondiente. Acepta punto o coma decimal, sin separadores de miles y con
+  hasta seis decimales. No cuenta permite excluir el movimiento sin tasa.
+  Reinicia el servidor del panel tras actualizar el código; recargar solo la
+  página no actualiza el proceso Python. Si detecta un servidor anterior,
+  el panel bloquea las decisiones y pide reiniciarlo.
+- El importe USD permanece intacto. SQLite conserva la tasa manual y el
+  equivalente COP, redondeado a centésimas con aritmética decimal. Los totales,
+  gráficos mensuales/anuales y el resumen usan ese equivalente una sola vez en
+  COP. Sin tasa, el importe permanece en USD y no se suma a COP.
+- **Registros anteriores:** si un aviso USD quedó etiquetado como COP, comprueba
+  primero el correo original, cambia **Moneda original del aviso** a USD e ingresa
+  la tasa al guardar la decisión. No cambies todas las compras de Amazon por su
+  nombre. Abrir el panel o reimportar no corrige ni reclasifica registros.
+- **Seguridad:** solo el usuario proporciona la tasa y confirma la decisión;
+  no se consulta una tasa externa ni se permite al modelo inventarla. El cambio
+  de moneda/tasa se audita junto con la decisión local. Las bases anteriores
+  incorporan columnas opcionales sin cambiar sus importes ni sus decisiones.
+- **Validación:** pruebas sintéticas de USD explícito, rechazo de COP incorrecto,
+  persistencia, migración, tasa inválida, redondeo, API y flujo del navegador.
+  Pendiente: verificar avisos USD reales y las tasas elegidas por el usuario;
+  no se modificaron sus registros ni se ejecutó otra importación real.
+
+### Usabilidad y recuperación del panel
+
+El panel conserva la aprobación humana y no cambia datos anteriores al abrirse:
+
+- Durante una carga o guardado bloquea los controles de datos y las decisiones
+  para evitar solicitudes simultáneas; el selector de tema sigue disponible.
+  Si falla un guardado, muestra el error y vuelve a habilitar los controles.
+- Si falla la carga, **Actualizar** permite reintentar sin recargar la página,
+  incluso antes de completar la configuración inicial.
+- El tema oscuro utiliza texto contrastante en los botones principales. Al cerrar
+  Configuración, el foco del teclado vuelve al botón que la abrió.
+- La dona tiene tamaño acotado y una leyenda para todas las categorías graficadas,
+  también cuando hay más de ocho. No oculta importes por el límite de la leyenda.
+  Los encabezados y las leyendas se redistribuyen en pantallas estrechas.
+- El acumulado personal incluye los retiros en efectivo antiguos, igual que las
+  tarjetas de totales, el calendario y el resumen anual; no modifica sus registros.
+
+Estas mejoras no añaden dependencias ni acceso al correo, y no permiten guardar
+decisiones sin pulsar explícitamente un botón de aprobación.
 
 ### Aportes a inversiones
 
@@ -367,8 +420,25 @@ Si aún falla la evidencia literal de comercio o monto, se registra una adverten
 sin contenido financiero y se solicita **una sola corrección local** a Ollama con
 el campo inválido y la propuesta previa. Se vuelve a validar toda la respuesta;
 la corrección no puede eliminar movimientos ni cambiar otros campos. Nada se
-guarda hasta superar la validación. Si vuelve a fallar, se detiene y el correo
-queda sin marcar como procesado. No hay reintentos ilimitados ni omisión automática.
+guarda hasta superar la validación. Si vuelve a fallar, la propuesta se rechaza y
+el correo queda sin marcar como procesado. En cierre mensual, el rechazo final de evidencia
+ya no detiene los demás avisos: guarda únicamente identificador, carpeta,
+remitente, asunto, fecha y campo rechazado en una cola visible en **Decisión**.
+No se conserva cuerpo ni propuesta inválida. La consola identifica el aviso y
+advierte cuántos quedaron sin extraer; el panel avisa que faltan movimientos
+en los totales. No hay reintentos ilimitados ni omisión silenciosa.
+Repite el rango original para reintentar los pendientes: solo se retiran de la
+cola tras una extracción válida e importación atómica (incluido cero eventos).
+Mientras existan pendientes, no se permite marcar su mes como revisado.
+Reinicia el servidor del panel después de actualizar para habilitar la cola.
+Esta excepción, autorizada por el usuario, aplica solo a `EvidenceError` tras
+la corrección local: autenticación, interfaz, selectores ambiguos y las demás
+validaciones siguen deteniendo la ejecución. Los correos que fallaron antes
+de esta actualización aparecerán al volver a ejecutar su rango.
+Pruebas sintéticas verifican continuación, persistencia de metadatos sin cuerpo
+ni propuesta inválida, reintento sin duplicados ni pérdida de decisiones, bloqueo
+de conciliación, resolución con cero eventos y visualización segura en el panel.
+Identificar un aviso real no implica haber completado el rango ni conciliado el mes.
 El contexto de Ollama distingue los avisos «Pagaste [monto] en la tarjeta de
 crédito [tarjeta] desde la cuenta [cuenta]» como abonos a la deuda, no compras:
 deben producir `events: []` para evitar contar dos veces el gasto. La regla no
@@ -384,6 +454,22 @@ Con Ollama local se verificaron dos abonos ficticios (con y sin tilde en
 «crédito») y una compra de control: los abonos devolvieron cero eventos y la
 compra produjo una propuesta pendiente. No se reprodujeron ni modificaron
 automáticamente los movimientos bancarios ya importados del usuario.
+Al diagnosticar un bloqueo de la importación de enero a agosto, se reprodujo
+que Ollama devolvía dos `card_payment` para un mismo abono, solo con categorías
+distintas. El aviso coincidía con el patrón «Pagaste … en la tarjeta de crédito …
+desde la cuenta». Se reforzó la comprobación final del prompt: no emitir abonos
+a la deuda ni repetir una operación con categorías distintas. Con ese mismo
+aviso y Ollama local, la respuesta pasó de dos propuestas rechazadas a
+`events: []`, sin escrituras en SQLite. No se eliminan duplicados por código:
+si el modelo vuelve a producir movimientos indistinguibles, el escaneo se
+detiene sin importar ese aviso y conserva el punto de reanudación. Los rechazos
+de evidencia literal se gestionan aparte en la cola de revisión descrita arriba.
+Tras el ajuste pasaron 106 pruebas de extracción, persistencia y API. El control
+con Ollama local mantuvo dos abonos sin eventos y una compra como propuesta
+pendiente. Al reanudar la importación real se guardaron 54 propuestas nuevas:
+un primer intento terminó por un fallo de apertura del origen de Outlook y el
+segundo por un comercio sin evidencia literal, incluso tras su corrección local.
+No se declara terminado el rango enero-agosto ni se relaja esa salvaguarda.
 La recuperación de espacios y la corrección dirigida se verificaron con correos
 reales que bloqueaban octubre. En la última validación se solicitó una corrección,
 se superó la validación y el recorrido continuó: se procesaron 14 correos adicionales
@@ -449,6 +535,43 @@ El intento real avanzó y alcanzó una nueva corrección de evidencia, pero volv
 a detenerse esperando el menú Ver. El fallo intermitente no está resuelto ni
 la importación completa validada. Los errores de validación muestran solo
 archivo y línea de los dos últimos puntos internos, sin contenido financiero.
+
+**Causas confirmadas con Outlook real (septiembre y octubre de 2026).** Los dos
+intentos de esta importación se detuvieron de forma segura: primero con «No se
+confirma el orden de fecha descendente» y después con un clic fallido sobre la
+fila del aviso. Se verificaron dos causas:
+
+- Tras cerrar «Ver origen», Outlook mantiene `aria-hidden` en la aplicación
+  durante un momento, y en ese intervalo no se encuentran los botones por rol.
+  Ahora la lectura espera a que la lista de mensajes deje de estar oculta.
+- Outlook agranda las filas de forma diferida (de 25 a 61 o 73 px), unos 5–10 s
+  después de abrir la carpeta, cuando las vuelve a renderizar. Una fila cerca del
+  borde inferior queda empujada fuera y se desmonta a mitad de la acción.
+  Además, Outlook recoloca arriba la fila seleccionada, así que el recorrido
+  continuaba desde una instantánea obsoleta y saltaba posiciones; la salvaguarda
+  de contigüidad lo detenía con «Hay posiciones sin verificar antes del corte por
+  fecha». Ahora la fila se desplaza al inicio de la lista antes del clic, y tras
+  cada aviso visitado se toma una instantánea nueva antes de seguir desplazando.
+
+Es probable que el desmontaje de filas explique también los fallos intermitentes
+«esperando Ver», pero eso no se ha comprobado por separado. Se añadieron
+regresiones de la lista oculta, de la fila que crece por encima y de la visita que
+mueve la lista; las tres fallan sin su arreglo. Pasaron las 221 pruebas de
+cierre mensual. Una ejecución real en seco (sin Ollama ni escrituras en la base)
+recorrió las 15 carpetas sin errores: leyó 136 orígenes autorizados (1,5 s de
+media) y cortó por fecha en Entrada, Bancolombia, Dian e Inversiones.
+
+Después, la importación real de septiembre y octubre (`-Start 2026-09-01
+-End 2026-11-01`) recorrió las 15 carpetas sin errores de interfaz. El primer
+intento se detuvo en la salvaguarda de evidencia literal (campo comercio, tras
+fallar también la corrección local). Un diagnóstico sin escrituras repitió la
+extracción del primer aviso pendiente y Ollama devolvió un comercio literal al
+primer intento: aun con temperatura 0, su respuesta no siempre se repite entre
+ejecuciones. No se relajó la salvaguarda. Al relanzar la importación, esta se
+reanudó desde el punto de reanudación y terminó; en ese intento hizo falta una
+corrección local, que sí aportó evidencia literal. Ninguna propuesta se aprobó
+automáticamente: las compras y los avisos sin clasificar quedan para decisión
+humana en el panel.
 
 Las instrucciones del proyecto incluyen ahora una regla explícita de no asumir
 hechos ni requisitos, verificar con evidencia y preguntar al usuario antes de
@@ -562,7 +685,12 @@ Se validan reglas, importes, zona horaria, decisiones persistentes, exclusión d
 remitentes no autorizados, protección del panel y DOM sintético con Playwright.
 También se prueban el formulario inicial, los cambios de configuración, los
 totales con centavos, las decisiones desde el navegador y las etiquetas de los
-gráficos. Se revisaron capturas a 1440 y 390 píxeles, en modo claro y oscuro.
+gráficos. También se verifican el reintento tras fallos de carga, el bloqueo de
+guardados duplicados, la recuperación tras un error de guardado, los acumulados
+con retiros en efectivo antiguos, la leyenda completa y el retorno de foco.
+El contraste de texto de los botones principales se comprueba con un mínimo de
+4,5:1 en ambos temas. Se revisaron capturas a 1440, 390 y 320 píxeles en modo claro,
+y capturas móviles en modo oscuro, con datos sintéticos.
 Las pruebas gráficas usan Chromium instalado por `bootstrap.ps1`.
 **Pendiente de validar con el usuario:** selectores de su Outlook, cobertura real
 de Spam/Eliminados, resultados del modelo local y ejecución de la tarea instalada.
@@ -733,6 +861,8 @@ vacío de carpetas personalizadas, siempre cotejado con total cero y selección
 exacta. En listas grandes, la cantidad de filas virtuales puede cambiar durante
 la iteración: se captura una instantánea de identidades y posiciones y se exige
 verificar todos los índices, sin declarar éxito si desaparecen filas sin cubrir.
+Abrir un aviso mueve la lista, así que tras cada visita se toma una instantánea
+nueva antes de desplazar.
 La identidad de fila usa el `id` del elemento; el `Message-ID` MIME sigue siendo
 la única identidad persistida para deduplicar y conservar decisiones.
 

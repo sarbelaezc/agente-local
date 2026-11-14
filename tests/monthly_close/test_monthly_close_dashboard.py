@@ -85,6 +85,29 @@ def test_dashboard_renders_without_scripts_from_untrusted_text(dashboard):
     assert "500,02" in text
 
 
+def test_extraction_review_is_visible_across_currencies_and_renders_only_text(dashboard):
+    page, store, month, errors = dashboard
+    store.record_extraction_failure(
+        "blocked", "avisos@example.test", "<img src=x onerror=alert(1)> Aviso bloqueado",
+        month + "-06T12:00:00-05:00", month + "-06", "dinero / banco", "merchant",
+    )
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    assert "1 aviso(s) sin extraer" in page.locator("#extraction-warning").inner_text()
+    page.locator("#tab-decisions").click()
+    review = page.locator("#extraction-review")
+    assert review.is_visible()
+    assert "Aviso bloqueado" in review.inner_text()
+    assert "avisos@example.test" in review.inner_text()
+    assert "dinero / banco" in review.inner_text()
+    assert review.locator("img, button").count() == 0
+    store.import_message("blocked", [])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    assert not page.locator("#extraction-warning").is_visible()
+    assert not errors
+
+
 def test_decision_persists_and_updates_totals(dashboard):
     page, store, _, errors = dashboard
     page.get_by_role("tab", name=re.compile("Decisi")).click()
@@ -99,6 +122,78 @@ def test_decision_persists_and_updates_totals(dashboard):
     page.wait_for_load_state("networkidle")
     assert store.state()["transactions"][0]["decision"] == "personal"
     assert re.search(r"\b1[.\s]?700,58", page.locator("#month-metrics").inner_text())
+    assert not errors
+
+
+def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
+    page, store, month, errors = dashboard
+    store.import_message("usd", [{
+        "id": "usd", "message_id": "usd", "day": month + "-06",
+        "merchant": "AMAZON MKTPLACE", "account": "Tarjeta A",
+        "amount_minor": 1234, "currency": "USD", "category": "Compras",
+        "kind": "purchase", "decision": None, "reason": "Aviso USD.",
+    }])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.locator("#tab-decisions").click()
+    card = page.locator("#pending-list .decision-card").filter(has_text="AMAZON MKTPLACE")
+    assert "USD" in card.inner_text()
+    with page.expect_response(lambda response: response.url.endswith("/api/decision")) as saved:
+        card.get_by_role("button", name="Gasto personal", exact=True).click()
+    assert saved.value.status == 400
+    assert next(t for t in store.state()["transactions"] if t["id"] == "usd")["decision"] is None
+    card.get_by_label(re.compile("Tasa estimada COP por USD")).fill("4200,50")
+    with page.expect_response(lambda response: response.url.endswith("/api/decision")) as saved:
+        card.get_by_role("button", name="Gasto personal", exact=True).click()
+    assert saved.value.status == 200
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    # Existing COP expenses (1500.57) plus the USD estimate (51834.17).
+    assert re.search(r"\b53[.\s]?334,74", page.locator("#month-metrics").inner_text())
+    page.locator("#tab-year").click()
+    assert re.search(r"\b53[.\s]?334,74", page.locator("#year-metrics").inner_text())
+    page.locator("#tab-decisions").click()
+    page.locator("#decision-history summary").click()
+    history = page.locator("#history-list .decision-card").filter(has_text="AMAZON MKTPLACE")
+    assert "12,34" in history.inner_text()
+    assert re.search(r"51[.\s]?834,17", history.inner_text())
+    assert history.get_by_label(re.compile("Tasa estimada COP por USD")).input_value() == "4200.50"
+    assert not errors
+
+
+def test_legacy_cop_record_can_be_corrected_to_usd_only_on_decision(dashboard):
+    page, store, _, errors = dashboard
+    page.locator("#tab-decisions").click()
+    card = page.locator("#pending-list .decision-card").first
+    card.get_by_label("Moneda original del aviso", exact=True).select_option("USD")
+    assert store.state()["transactions"][0]["currency"] == "COP"
+    card.get_by_label(re.compile("Tasa estimada COP por USD")).fill("4000")
+    with page.expect_response(lambda response: response.url.endswith("/api/decision")) as saved:
+        card.get_by_role("button", name="Familiar", exact=True).click()
+    assert saved.value.status == 200
+    row = next(tx for tx in store.state()["transactions"] if tx["id"] == "0")
+    assert row["currency"] == "USD"
+    assert row["amount_minor"] == 50002
+    assert row["cop_amount_minor"] == 200008000
+    assert not errors
+
+
+def test_stale_backend_cannot_silently_ignore_exchange_fields(dashboard):
+    page, _, _, errors = dashboard
+
+    def stale_state(route):
+        response = route.fetch()
+        data = response.json()
+        for tx in data["transactions"]:
+            tx.pop("exchange_rate")
+            tx.pop("cop_amount_minor")
+        route.fulfill(response=response, json=data)
+
+    page.route("**/api/state", stale_state)
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    assert "Reinicia el servidor" in page.locator("body").inner_text()
+    assert not page.locator("#dashboard-area").is_visible()
     assert not errors
 
 
@@ -139,7 +234,7 @@ def test_dashboard_mobile_and_desktop_screenshots(dashboard, tmp_path):
     page, _, _, errors = dashboard
     output = Path(os.environ.get("MONTHLY_CLOSE_SCREENSHOTS", str(tmp_path)))
     output.mkdir(parents=True, exist_ok=True)
-    for width, label in [(1440, "desktop"), (390, "mobile")]:
+    for width, label in [(1440, "desktop"), (390, "mobile"), (320, "narrow")]:
         page.set_viewport_size({"width": width, "height": 1000})
         for index, tab in enumerate(["month", "year", "decisions"]):
             page.locator("#tab-" + tab).click()
@@ -151,6 +246,102 @@ def test_dashboard_mobile_and_desktop_screenshots(dashboard, tmp_path):
     page.locator("#tab-month").click()
     page.screenshot(path=str(output / "mobile-dark.png"), full_page=True)
     assert not errors
+
+
+def test_legacy_cash_withdrawal_updates_cumulative_personal_total(dashboard):
+    page, store, _, errors = dashboard
+    store.decide("0", "cash_withdrawal")
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    text = page.locator("#cumulative-chart .legend-row").inner_text()
+    assert re.search(r"Personal\s+1[.\s]?700,58", text), text
+    assert "Familiar 300,01" in text
+    assert not errors
+
+
+@pytest.mark.parametrize("configured", [True, False])
+def test_failed_state_load_can_be_retried(dashboard, configured):
+    page, store, _, errors = dashboard
+    if not configured:
+        with store.connect() as db:
+            db.execute("DELETE FROM settings")
+    page.route("**/api/state", lambda route: route.abort())
+    page.reload()
+    page.locator("#load-error").wait_for(state="visible")
+    retry = page.get_by_role("button", name="Actualizar", exact=True)
+    assert retry.is_visible()
+    page.unroute("**/api/state")
+    retry.click()
+    page.locator("#dashboard-area" if configured else "#setup-area").wait_for(state="visible")
+    assert page.locator("#load-error").is_hidden()
+    assert not errors
+
+
+def test_saving_blocks_duplicate_decisions_and_recovers_after_error(dashboard):
+    page, store, _, errors = dashboard
+    requests = []
+    page.route("**/api/decision", lambda route: requests.append(route))
+    page.locator("#tab-decisions").click()
+    button = page.locator("#pending-list").get_by_role("button", name="Gasto personal", exact=True)
+    button.evaluate("""button => {
+        button.click();
+        button.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+    }""")
+    page.wait_for_function("() => document.querySelector('#refresh-button').disabled")
+    assert len(requests) == 1
+    assert page.locator(
+        "button:not(#theme-toggle):enabled, input:enabled, select:enabled, textarea:enabled"
+    ).count() == 0
+    requests[0].fulfill(status=500, json={"error": "Fallo simulado."})
+    page.wait_for_function("() => !document.querySelector('#refresh-button').disabled")
+    assert "Fallo simulado" in page.locator("#global-message").inner_text()
+    assert next(tx for tx in store.state()["transactions"] if tx["id"] == "0")["decision"] is None
+    assert button.is_enabled()
+    assert not errors
+
+
+def test_category_chart_identifies_every_segment(dashboard):
+    page, store, month, errors = dashboard
+    original = next(tx for tx in store.state()["transactions"] if tx["id"] == "1")
+    categories = CATEGORIES + ["Categoria adicional A", "Categoria adicional B"]
+    store.configure({**store.preferences().to_dict(), "categories": categories})
+    for index, category in enumerate(categories):
+        event_id = f"legend-{index}"
+        store.import_message(event_id, [{
+            **original, "id": event_id, "message_id": event_id,
+            "day": month + "-06", "category": category, "amount_minor": 100,
+        }])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    labels = page.locator("#category-chart .legend-label").all_text_contents()
+    assert set(labels) == set(categories)
+    assert not errors
+
+
+def test_primary_buttons_have_readable_contrast_in_both_themes(dashboard):
+    page, _, _, _ = dashboard
+    for theme in ["light", "dark"]:
+        if theme == "dark":
+            page.locator("#theme-toggle").click()
+        contrast = page.locator("#coverage-form button").evaluate("""button => {
+            const luminance = color => {
+                const channels = color.match(/[\\d.]+/g).slice(0, 3).map(Number)
+                    .map(value => value / 255)
+                    .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+                return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
+            };
+            const style = getComputedStyle(button);
+            const values = [luminance(style.color), luminance(style.backgroundColor)];
+            return (Math.max(...values) + .05) / (Math.min(...values) + .05);
+        }""")
+        assert contrast >= 4.5, (theme, contrast)
+
+
+def test_closing_configuration_returns_keyboard_focus(dashboard):
+    page, _, _, _ = dashboard
+    page.locator("#edit-config-button").click()
+    page.locator("#close-config-button").click()
+    assert page.locator("#edit-config-button").evaluate("button => button === document.activeElement")
 
 
 @pytest.mark.parametrize("decision,label,category", [

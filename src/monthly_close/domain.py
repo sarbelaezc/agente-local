@@ -19,6 +19,16 @@ NON_EXPENSES = {"loan", "income", "card_payment", "rejected", "promotion", "veri
 EMAIL = re.compile(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+")
 
 
+def notice_currency(source: str, default: str) -> str:
+    """Keep explicitly identified USD separate from the configured currency."""
+    usd = re.search(r"\bUSD(?=\b|\d)|\bUS\s*\$", source, re.IGNORECASE)
+    if usd and default != "USD":
+        if default != "COP" or re.search(r"\bCOP(?=\b|\d)", source, re.IGNORECASE):
+            raise ValueError("Aviso con monedas distintas o ambiguas: requiere revision manual.")
+        return "USD"
+    return default
+
+
 def clean_text(value: object, limit: int = 300) -> str:
     if not isinstance(value, str):
         raise ValueError("Se esperaba texto.")
@@ -91,7 +101,7 @@ class Preferences:
 def amount_minor(text: str) -> int:
     """Parse a source amount, never binary floating point or model arithmetic."""
     text = clean_text(text, 80)
-    if not re.fullmatch(r"(?:[A-Z]{3}\s*)?[$€£]?\s*\d[\d., ]*", text):
+    if not re.fullmatch(r"(?:(?:[A-Z]{3}\s*)?[$€£]?|US\s*\$)\s*\d[\d., ]*", text):
         raise ValueError("Monto no reconocido; requiere revision del correo.")
     number = re.sub(r"[^\d.,]", "", text)
     separators = [index for index, char in enumerate(number) if char in ",."]
