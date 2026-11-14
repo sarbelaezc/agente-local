@@ -7,7 +7,6 @@ from pathlib import Path
 
 import yaml
 
-from config.settings import ensure_feature_ollama_isolation
 from mail_invoices.local_model import validate_local_url
 
 DEFAULT_TESSERACT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -48,8 +47,6 @@ def _ollama_settings(
     if not isinstance(ollama, dict):
         raise ValueError("ollama, ocr and folder_rules must be mappings")
     url = validate_local_url(str(ollama.get("url", "http://127.0.0.1:11434")))
-    if unified:
-        ensure_feature_ollama_isolation(root, "invoices", url)
     return ollama, url
 
 
@@ -57,7 +54,7 @@ def load_settings(path: Path) -> MailSettings:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError("Mail configuration must be a mapping")
-    unified = "teams" in raw or "invoices" in raw
+    unified = "invoices" in raw
     root = raw
     if unified:
         raw = root.get("invoices")

@@ -1,16 +1,3 @@
-teams:
-  ollama:
-    url: http://127.0.0.1:11435
-    model: qwen2.5:7b
-  teams_url: https://teams.microsoft.com/
-  edge:
-    executable: "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
-    profile_dir: "%LOCALAPPDATA%\\TeamsLocalAgent\\EdgeProfile"
-  storage:
-    database_path: "%LOCALAPPDATA%\\TeamsLocalAgent\\audit.db"
-  context_messages: 20
-  allowed_chats: []
-
 invoices:
   ollama:
     url: http://127.0.0.1:11434

@@ -7,21 +7,20 @@ implementa.
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/run-invoice-batch.ps1` / `-Resume` |
-| Respuestas en Teams | WIP pausado | `src/app/`, `src/automation/`, `src/ai/`, `src/storage/` | `python -m app.main` |
 | Cierre mensual de gastos de Outlook con Ollama local | Importación de septiembre y octubre verificada; tasa manual USD/COP y cola de extracciones sin evidencia; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
 
 ## Stack tecnológico
 
 - **Python 3.12 o posterior**; empaquetado con `setuptools` y dependencias declaradas en `pyproject.toml`.
-- **Playwright para Python** automatiza los navegadores. Facturas usa Opera; Teams usa un perfil separado de Microsoft Edge y permanece pausado.
-- **Una instancia local de Ollama compartida por facturas y cierre mensual** en `127.0.0.1:11434`; ambos usan el almacén de modelos de facturas. Teams permanece pausado y, si se reactiva, conserva su instancia aislada en `127.0.0.1:11435`.
+- **Playwright para Python** automatiza los navegadores. Facturas usa Opera; el cierre mensual usa un perfil exclusivo de Microsoft Edge.
+- **Una instancia local de Ollama compartida por facturas y cierre mensual** en `127.0.0.1:11434`; ambos usan el almacén de modelos de facturas.
 - **Facturas:** `openpyxl` para Excel, `defusedxml` para XML, `pypdf` para PDF con texto, y `pypdfium2` más `Pillow` para renderizar PDF escaneados.
 - **Tkinter y SQLite** de la biblioteca estándar para interfaces y persistencia local; **pytest** para pruebas.
 - **Tesseract OCR** es una instalación externa opcional, necesaria solo para PDF escaneados. Opera, Edge y Ollama también se instalan aparte cuando se usa la función correspondiente.
 
 ## Reproducir en otro equipo Windows
 
-1. Instala Git, Python 3.12 o posterior y Ollama. Instala Opera para facturas; Edge solo si vas a preparar Teams. Teams está pausado y no debe ejecutarse.
+1. Instala Git, Python 3.12 o posterior y Ollama. Instala Opera para facturas y Edge para el cierre mensual.
 2. Clona el repositorio y entra en su carpeta:
 
     ```powershell
@@ -35,7 +34,7 @@ implementa.
     .\scripts\bootstrap.ps1
     ```
 
-4. Crea la configuración local solo si aún no existe y completa las rutas de Opera y del libro Excel. La plantilla deja `teams.allowed_chats` vacío; no autoriza conversaciones. `config/settings.yaml` está excluido de Git y debe configurarse en cada equipo, no copiarse al repositorio.
+4. Crea la configuración local solo si aún no existe y completa las rutas de Opera y del libro Excel. `config/settings.yaml` está excluido de Git y debe configurarse en cada equipo, no copiarse al repositorio.
 
    ```powershell
    if (-not (Test-Path "config/settings.yaml")) {
@@ -53,14 +52,6 @@ implementa.
     ollama serve
     ```
 
-    Teams (solo cuando se reactive; permanece separado):
-
-    ```powershell
-    $env:OLLAMA_HOST = "127.0.0.1:11435"
-    $env:OLLAMA_MODELS = "$env:LOCALAPPDATA\TeamsLocalAgent\OllamaModels"
-    ollama serve
-    ```
-
     En otra terminal, define el mismo `OLLAMA_HOST` y descarga el modelo compartido configurado por ambos features, actualmente `ollama pull qwen2.5:7b`. Las nuevas descargas usan un solo directorio. Consulta la [guía oficial de configuración de Ollama](https://docs.ollama.com/faq#how-do-i-configure-ollama-server) para más opciones en Windows.
 6. Para OCR en PDF escaneados, instala Tesseract y los datos de idioma siguiendo [Requisitos de OCR](#requisitos-de-ocr). Es opcional para las pruebas.
 7. Ejecuta las pruebas sin credenciales, correos ni libros personales:
@@ -71,7 +62,7 @@ implementa.
 
     La configuración de pytest usa captura `sys`; no la cambies a `fd` para las pruebas gráficas de Windows.
 
-Teams no tiene script de ejecución: está pausado y no debe iniciarse (`python -m app.main`). Los comandos de facturas se muestran en sus secciones y usan `config/settings.yaml`.
+Los comandos de facturas se muestran en sus secciones y usan `config/settings.yaml`.
 
 ## Ejecución bajo demanda
 
@@ -106,7 +97,7 @@ directamente desde la raíz del repositorio:
 
 ### Alcance y reglas
 
-Función con datos y flujo separados de facturas y Teams; comparte únicamente la
+Función con datos y flujo separados de facturas; comparte únicamente la
 instancia local de Ollama con facturas. No requiere Microsoft Graph, credenciales
 de API ni conector de Gmail. Playwright lee Outlook Web en un perfil exclusivo.
 Usa un cliente local de Ollama con JSON Schema propio, sin mezclar el contexto ni
@@ -669,7 +660,7 @@ por correo ni garantía de ejecución si el equipo está apagado.
 - Para borrar todos los datos de esta función: detén panel, lecturas y tarea;
   elimina manualmente `close.sqlite3` del directorio de datos. Se pierden también
   decisiones e histórico. Borra `BrowserProfile` para retirar sesión y caché.
-  No afecta a facturas ni Teams. No se realiza borrado automático del histórico.
+  No afecta a facturas. No se realiza borrado automático del histórico.
 - No hay cifrado propio ni autenticación multiusuario. Usa una cuenta Windows
   protegida y cifrado de disco si procede. Otros procesos del mismo equipo pueden
   acceder al panel local. No guardes el directorio de datos dentro del repositorio
@@ -904,8 +895,8 @@ La generación del cierre mensual usa ahora un cliente propio con JSON Schema:
 exige campos tipados (incluido `savings` booleano), tipos de movimiento válidos,
 categorías y cuentas configuradas, moneda configurada y fechas ISO o DD/MM/YYYY
 que estén literalmente presentes en el texto (o fecha vacía para la regla de
-fecha de recepción ya existente). No modifica el cliente de facturas ni el de
-Teams. Esto restringe la forma de la propuesta; **no garantiza que sea cierta**.
+fecha de recepción ya existente). No modifica el cliente de facturas.
+Esto restringe la forma de la propuesta; **no garantiza que sea cierta**.
 Se siguen validando comercio, importe y fecha contra el aviso, y ninguna propuesta
 de gasto se aprueba automáticamente.
 
@@ -947,20 +938,14 @@ términos de servicio de esos productos y las políticas de su organización.
 Nunca subas al repositorio tus archivos de configuración personales, Excel,
 facturas, perfiles de navegador ni bases de datos de auditoría.
 
-**Teams: WIP pausado.** No ejecutar el agente de Teams mientras este alcance esté
-pausado. La autenticación al reabrir Playwright y los selectores reales siguen sin
-validarse. La nueva prioridad es la organización de facturas de Hotmail en un Excel
-existente; hay un núcleo probado, pero el flujo completo aún no está disponible.
-
 ## Hotmail: nuevo alcance en implementación
 
 ### Organización del código
 
 El código ejecutable vive en `src/` y las pruebas en `tests/`.
 Las pruebas se agrupan por feature: `tests/mail_invoices/` para facturas de
-Hotmail, `tests/monthly_close/` para cierre mensual y `tests/teams/` para Teams.
-`tests/shared/` contiene las pruebas de configuración compartida entre features.
-Esta organización no cambia el comportamiento de las funciones ni activa Teams.
+Hotmail y `tests/monthly_close/` para cierre mensual. Esta organización no cambia
+el comportamiento de las funciones.
 Ejecuta todas con `.\.venv\Scripts\python.exe -m pytest`, o solo una feature con
 `.\.venv\Scripts\python.exe -m pytest tests\monthly_close` (sustituye la carpeta
 para probar otra feature).
@@ -990,10 +975,7 @@ gráficas. Una regresión repite la lectura de XLSX y la apertura de Tkinter en 
 mismo proceso. Este ajuste corrige el modo de ejecución de las pruebas, no modifica
 la instalación de Python ni incorpora reintentos que oculten errores de la aplicación.
 
-Teams continúa separado en los paquetes `app`, `automation`, `ai`, `storage` y
-`config`; permanece pausado. Esta refactorización no cambia sus comandos ni lo activa.
-
-Se preparó un módulo de facturas independiente del de Teams, con extracción
+Se preparó un módulo de facturas, con extracción
 local de XML UBL, ZIP y PDF con texto. La lectura de XML sigue siendo la fuente
 preferida para los datos estructurados de la factura. Dentro de un ZIP, un PDF
 se trata como la representación gráfica de un XML (estructura DIAN) y no se
@@ -1270,7 +1252,7 @@ no se ha repetido con el lote de un correo. Para consultas de solo lectura sigue
 La instancia Ollama de facturas es compartida con cierre mensual: su endpoint en
 `invoices.ollama` debe coincidir con `ollama_url` de
 `%LOCALAPPDATA%\MonthlyCloseAgent\runtime.json`, y ambos usan el mismo tag de
-modelo. Teams usa de forma independiente `teams.ollama`.
+modelo.
 
 El registro preparado utiliza `Hoja1`, encabezados en B2:E2 y añade
 `Número de factura` en F2 solo al guardar un lote aprobado. Conserva las filas
@@ -1297,20 +1279,17 @@ los lotes pequeños exigen aprobación para el movimiento real,
 como se indica arriba.
 
 La configuración personal está en `config/settings.yaml`, excluida de Git.
-Ambos módulos usan este archivo: `teams` contiene los ajustes de Teams y su
-instancia `ollama`; `invoices` contiene Hotmail, Excel (incluidos `ocr` y
-`approver`) y el endpoint compartido de Ollama para facturas y cierre mensual.
-`teams.ollama` permanece en una URL distinta. La unificación no activa Teams,
-que sigue pausado.
-Los lectores conservan compatibilidad con archivos planos anteriores mediante
-`--config`; para migrarlos, agrupe sus ajustes en las secciones indicadas y
-conserve todos los valores personales. En configuraciones antiguas, el bloque global `ollama` se
-conserva como endpoint compartido de facturas y cierre mensual; Teams usa su
-endpoint nuevo por defecto.
+La sección `invoices` contiene Hotmail, Excel (incluidos `ocr` y `approver`) y
+el endpoint compartido de Ollama para facturas y cierre mensual. Una sección
+`teams` heredada de versiones anteriores se ignora y puede borrarse.
+El lector conserva compatibilidad con archivos planos anteriores mediante
+`--config`; para migrarlos, agrupe sus ajustes en `invoices` y conserve todos los
+valores personales. En configuraciones antiguas, el bloque global `ollama` se
+conserva como endpoint compartido de facturas y cierre mensual.
 No copie la plantilla encima de una configuración personal existente.
 La plantilla es `config/settings.example.yaml`. El perfil de Opera y las
 copias locales están bajo `%LOCALAPPDATA%\MailInvoiceAgent`, fuera de los
-perfiles habituales de Opera y Teams.
+perfiles habituales de Opera.
 
 Inicio de sesión manual (sin escanear ni mover mensajes):
 
@@ -1321,24 +1300,6 @@ Inicio de sesión manual (sin escanear ni mover mensajes):
 Opera se comprobó con Playwright en una página local. Esto no valida todavía
 su sesión ni sus selectores en Outlook. Completa el acceso manual y cierra la
 ventana; no compartas credenciales ni copies cookies.
-
-## Teams: alcance pausado
-
-Aplicacion local que prepara borradores de Teams Web y exige aprobacion humana antes de insertar o enviar texto.
-
-### Seguridad de Teams
-
-- Solo procesa los chats definidos en `config/settings.yaml`.
-- No solicita ni almacena credenciales.
-- No accede al terminal, disco o red desde Ollama.
-- Se detiene ante un selector ambiguo, pantalla no reconocida o chat distinto.
-- Siempre requiere aprobacion humana antes de insertar.
-- Insertar no implica enviar: el envio exige una segunda confirmacion.
-
-El perfil persistente de Edge y la base de datos se guardan bajo
-`%LOCALAPPDATA%\TeamsLocalAgent`, fuera de la carpeta sincronizada del proyecto.
-No copies ni sincronices esa carpeta. Teams puede cambiar su DOM sin aviso; sus
-selectores deben validarse en un chat de prueba antes de reanudar esta función.
 
 ## Licencia
 
