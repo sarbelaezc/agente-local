@@ -1,7 +1,9 @@
 {
   "ollama_url": "http://127.0.0.1:11434",
   "ollama_model": "qwen2.5:7b",
-  "browser_executable": "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe",
+  "source": "graph",
+  "graph_client_id": "00000000-0000-0000-0000-000000000000",
+  "graph_authority": "consumers",
   "outlook_url": "https://outlook.live.com/mail/0/",
   "max_messages": 200,
   "folder_scan_verified": false

@@ -22,6 +22,10 @@ from mail_invoices.local_model import LocalModelError, validate_local_url
 from monthly_close.model import OllamaJsonModel
 from monthly_close.domain import Preferences, received_local
 from monthly_close.extraction import EvidenceError, extract
+from monthly_close.graph_client import (
+    AUTHORITIES, CACHE_NAME, CLIENT_ID, GraphClient, interactive_login, silent_token,
+)
+from monthly_close.graph_reader import DEFAULT_ORIGIN, GraphSourceReader
 from monthly_close.outlook import Candidate, OutlookError, validate_url
 from monthly_close.server import create_server
 from monthly_close.source_reader import OutlookSourceReader
@@ -49,14 +53,25 @@ def runtime(data_dir: Path) -> dict:
         or endpoint.path or endpoint.query or endpoint.fragment
     ):
         raise ValueError("Cierre mensual debe compartir Ollama de facturas en el puerto 11434.")
-    validate_url(raw.get("outlook_url", ""))
-    executable = raw.get("browser_executable")
-    if not isinstance(executable, str):
-        raise ValueError("Configura browser_executable.")
-    executable = os.path.expandvars(executable)
-    if "%" in executable or not Path(executable).is_file():
-        raise ValueError("No se encuentra el ejecutable del navegador configurado.")
-    raw["browser_executable"] = executable
+    source = raw.get("source", "browser")
+    if source not in {"browser", "graph"}:
+        raise ValueError("source debe ser browser o graph.")
+    if source == "graph":
+        if not isinstance(raw.get("graph_client_id"), str) or not CLIENT_ID.fullmatch(raw["graph_client_id"]):
+            raise ValueError("Configura graph_client_id con el Application (client) ID de tu app.")
+        if raw.setdefault("graph_authority", "consumers") not in AUTHORITIES:
+            raise ValueError("graph_authority debe ser consumers o common.")
+        if raw.get("outlook_url") is not None:
+            validate_url(raw["outlook_url"])
+    else:
+        validate_url(raw.get("outlook_url", ""))
+        executable = raw.get("browser_executable")
+        if not isinstance(executable, str):
+            raise ValueError("Configura browser_executable.")
+        executable = os.path.expandvars(executable)
+        if "%" in executable or not Path(executable).is_file():
+            raise ValueError("No se encuentra el ejecutable del navegador configurado.")
+        raw["browser_executable"] = executable
     if type(raw.get("max_messages")) is not int or not 1 <= raw["max_messages"] <= 10000:
         raise ValueError("max_messages debe estar entre 1 y 10000.")
     if not isinstance(raw.get("ollama_model"), str) or not raw["ollama_model"].strip():
@@ -81,6 +96,24 @@ def browser(data_dir: Path, settings: dict) -> Iterator[Page]:
             yield page
         finally:
             context.close()
+
+
+@contextmanager
+def open_source(data_dir: Path, settings: dict, approved_senders: list[str]) -> Iterator:
+    """Message reader for the configured source: Microsoft Graph or the Outlook Web browser."""
+    if settings.get("source", "browser") != "graph":
+        with browser(data_dir, settings) as page:
+            yield OutlookSourceReader(page, settings["outlook_url"], approved_senders)
+        return
+    # Keep the Outlook Web origin in message identifiers so notices already imported are not repeated.
+    origin = urlparse(settings["outlook_url"]).netloc if settings.get("outlook_url") else DEFAULT_ORIGIN
+    client = GraphClient(silent_token(
+        settings["graph_client_id"], settings.get("graph_authority", "consumers"), data_dir / CACHE_NAME,
+    ))
+    try:
+        yield GraphSourceReader(client, approved_senders, origin)
+    finally:
+        client.close()
 
 
 def months(start: date, end: date) -> list[str]:
@@ -131,8 +164,7 @@ def scan(
     ).encode()).hexdigest()
     received_ids: set[str] = set()
     failed_ids: set[str] = set()
-    with browser(data_dir, settings) as page:
-        reader = OutlookSourceReader(page, settings["outlook_url"], preferences.approved_senders)
+    with open_source(data_dir, settings, preferences.approved_senders) as reader:
 
         def visit(candidate: Candidate) -> bool | None:
             if candidate.sender not in preferences.approved_senders:
@@ -225,8 +257,7 @@ def run_pilot(store: Store, data_dir: Path, settings: dict, read_only: bool) -> 
     preferences = store.preferences()
     if not read_only:
         require_model(settings)
-    with browser(data_dir, settings) as page:
-        reader = OutlookSourceReader(page, settings["outlook_url"], preferences.approved_senders)
+    with open_source(data_dir, settings, preferences.approved_senders) as reader:
         mail = reader.read(reader.candidate())
     received_local(mail.received, preferences.timezone)
     if read_only:
@@ -274,6 +305,12 @@ def run(args: argparse.Namespace) -> None:
     if args.command == "pilot":
         run_pilot(store, data_dir, settings, args.read_only)
         return
+    if args.command == "login" and settings.get("source") == "graph":
+        account = interactive_login(
+            settings["graph_client_id"], settings.get("graph_authority", "consumers"), data_dir / CACHE_NAME,
+        )
+        print(f"Sesion de Microsoft guardada para {account}. Permiso: solo lectura de correo.")
+        return
     if args.command == "login":
         with browser(data_dir, settings):
             input(
@@ -306,7 +343,7 @@ def run(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Cierre mensual local: Outlook Web + Ollama.")
+    parser = argparse.ArgumentParser(description="Cierre mensual local: Outlook (Microsoft Graph u Outlook Web) + Ollama.")
     parser.add_argument(
         "command",
         choices=["serve", "login", "pilot", "scan", "summary", "scheduled", "check-config"],

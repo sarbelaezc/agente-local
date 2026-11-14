@@ -7,12 +7,13 @@ implementa.
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/run-invoice-batch.ps1` / `-Resume` |
-| Cierre mensual de gastos de Outlook con Ollama local | Importación de septiembre y octubre verificada; tasa manual USD/COP y cola de extracciones sin evidencia; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
+| Cierre mensual de gastos de Outlook con Ollama local | Importación de septiembre y octubre verificada con el lector de navegador; lector por Microsoft Graph implementado y probado, pendiente de validar con `scan -ReadOnly`; tasa manual USD/COP y cola de extracciones sin evidencia; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/run-monthly-close.ps1` / `scripts/import-monthly-close.ps1` |
 
 ## Stack tecnológico
 
 - **Python 3.12 o posterior**; empaquetado con `setuptools` y dependencias declaradas en `pyproject.toml`.
-- **Playwright para Python** automatiza los navegadores. Facturas usa Opera; el cierre mensual usa un perfil exclusivo de Microsoft Edge.
+- **Playwright para Python** automatiza los navegadores. Facturas usa Opera; el lector alternativo del cierre mensual (`source: browser`) usa un perfil exclusivo de Microsoft Edge.
+- **Microsoft Graph con `msal`** (solo lectura, permiso `Mail.Read`) lee el buzón del cierre mensual cuando `source` es `graph`; no usa navegador.
 - **Una instancia local de Ollama compartida por facturas y cierre mensual** en `127.0.0.1:11434`; ambos usan el almacén de modelos de facturas.
 - **Facturas:** `openpyxl` para Excel, `defusedxml` para XML, `pypdf` para PDF con texto, y `pypdfium2` más `Pillow` para renderizar PDF escaneados.
 - **Tkinter y SQLite** de la biblioteca estándar para interfaces y persistencia local; **pytest** para pruebas.
@@ -93,17 +94,87 @@ directamente desde la raíz del repositorio:
 .\.venv\Scripts\python.exe -m mail_invoices.main --config config/settings.yaml --process-invoice-batch --batch-size 3 --days 30
 ```
 
-## Cierre mensual de gastos: Outlook Web y Ollama local
+## Cierre mensual de gastos: Outlook y Ollama local
 
 ### Alcance y reglas
 
 Función con datos y flujo separados de facturas; comparte únicamente la
-instancia local de Ollama con facturas. No requiere Microsoft Graph, credenciales
-de API ni conector de Gmail. Playwright lee Outlook Web en un perfil exclusivo.
-Usa un cliente local de Ollama con JSON Schema propio, sin mezclar el contexto ni
+instancia local de Ollama con facturas. No requiere conector de Gmail. Lee el
+buzón con Microsoft Graph (`source: graph`, recomendado; solo lectura) o, como
+alternativa, con Playwright sobre Outlook Web en un perfil exclusivo
+(`source: browser`). Usa un cliente local de Ollama con JSON Schema propio, sin mezclar el contexto ni
 la persistencia de los otros features.
 No descarga adjuntos, envía correos, mueve mensajes ni modifica libros de facturas.
-Abrir un mensaje puede marcarlo como leído en Outlook.
+Con `source: browser`, abrir un mensaje puede marcarlo como leído en Outlook.
+
+### Lectura por Microsoft Graph (recomendada)
+
+Con `"source": "graph"` el agente lee el buzón por la API de Microsoft Graph en
+lugar de controlar Outlook Web. Elimina los selectores y el bloqueo intermitente
+del menú «Ver origen del mensaje». Usa solo el permiso delegado `Mail.Read`: no
+puede enviar, mover, borrar ni marcar mensajes. Según la documentación de
+Microsoft, registrar la app y consultar correo no tiene costo (la única API
+facturada de Graph es `assignSensitivityLabel` de SharePoint/OneDrive). Ollama
+sigue siendo local; no se usan tokens de IA externos.
+
+**Registro de la app (una sola vez).** Una cuenta personal sin directorio de
+Microsoft Entra recibe el error `AADSTS16000` en el portal de Azure; crea antes
+una cuenta gratuita de Azure, que crea tu directorio. Luego, en
+portal.azure.com, Microsoft Entra ID, App registrations, New registration:
+
+- Tipos de cuenta: debe admitir cuentas personales de Microsoft.
+- Redirect URI: plataforma «Aplicaciones móviles y de escritorio» con `http://localhost`.
+- API permissions: Microsoft Graph, permiso delegado `Mail.Read`.
+- No crees secretos de cliente. El `Application (client) ID` no es un secreto.
+
+**Configuración en `%LOCALAPPDATA%\MonthlyCloseAgent\runtime.json`:**
+
+```json
+{
+  "source": "graph",
+  "graph_client_id": "<Application (client) ID>",
+  "graph_authority": "consumers",
+  "ollama_url": "http://127.0.0.1:11434",
+  "ollama_model": "qwen2.5:7b",
+  "max_messages": 200,
+  "folder_scan_verified": false
+}
+```
+
+`graph_authority` es `consumers` (por defecto; app que admite cuentas personales)
+o `common`. `browser_executable` no se necesita. `outlook_url` es opcional: si se
+indica, su host forma parte de la identidad de cada mensaje.
+
+**Sesión y seguridad.** `-Command login` abre el navegador del sistema para que
+inicies sesión y concedas `Mail.Read`; el agente nunca ve tu contraseña. Los
+tokens quedan en `%LOCALAPPDATA%\MonthlyCloseAgent\graph_token_cache.bin`: es un
+dato sensible local, fuera de Git; borrarlo cierra la sesión. `scan` y la tarea
+programada nunca abren un navegador: si la sesión falta o venció, se detienen y
+piden `login`. El token solo se envía a `graph.microsoft.com/v1.0`; cualquier
+otro destino, incluido un enlace de paginación, detiene la ejecución.
+
+**Cobertura.** Recorre Bandeja de entrada, Correo no deseado, Elementos
+eliminados y Dinero con todas sus subcarpetas, por identificador de carpeta.
+Lee cada carpeta completa, de más reciente a más antigua, en pocos segundos y la
+contrasta con el total que anuncia Graph antes y después; si no coincide tras
+tres intentos, se detiene e indica ambos números. Desde esa instantánea procesa
+los avisos; los que lleguen durante el procesamiento se recogen en la siguiente
+ejecución. El orden descendente, los identificadores repetidos, un cambio del
+árbol de carpetas o superar `max_messages` también detienen el recorrido. Cada
+mensaje pasa por la misma validación MIME de siempre (`parse_source`).
+
+**Compatibilidad.** Los identificadores de mensaje usan el mismo origen que el
+lector de navegador (`outlook.live.com`, o el host de `outlook_url`), por lo que
+los avisos ya importados se reconocen por su `Message-ID` y no se duplican. Los
+puntos de reanudación del lector de navegador no se reutilizan.
+
+**Estado.** Verificado con el buzón del usuario: inicio de sesión, árbol completo
+de carpetas, y 10 de 10 mensajes de `Dinero/Bancolombia` (los 5 más recientes y
+los 5 más antiguos, 2019 a 2026) pasan `parse_source`. Probado con un Graph
+simulado: recorrido, instantánea, cortes por fecha, errores, cliente HTTP,
+autenticación y un escaneo completo. **Pendiente de validar:** `scan -ReadOnly`
+real, para confirmar que el total de cada carpeta coincide con su listado y
+poder establecer `folder_scan_verified: true`, y la primera importación.
 
 El panel local ofrece:
 
@@ -256,19 +327,23 @@ su registro y auditoría; no hace falta reimportar.
    paso 0. No introduzcas números de cuenta, contraseñas ni tokens. Usa alias.
    Puedes dejar remitentes vacíos mientras los identificas; eso bloquea `scan`.
    El panel escucha exclusivamente en `127.0.0.1`, no se publica en Internet.
-3. Configura `browser_executable` en `runtime.json` e inicia sesión manualmente:
+3. Elige `source` en `runtime.json`: `graph` (recomendado; completa `graph_client_id`) o
+   `browser` (configura `browser_executable`). Luego inicia sesión manualmente:
 
    ```powershell
    .\scripts\run-monthly-close.ps1 -Command login
    ```
 
-   Solo este comando permite la preparación manual del perfil. El agente no
+   Con `graph`, abre el navegador del sistema para el inicio de sesión de Microsoft.
+   Con `browser`, solo este comando permite la preparación manual del perfil. El agente no
    resuelve MFA, captcha ni autenticación. En lecturas posteriores se detiene si
    encuentra esos estados. No reutilices el perfil de facturas o el perfil habitual.
-4. **Valida el recorrido antes de importar.** Desactiva la agrupación por
-   conversaciones y la vista Prioritarios/Otros. El lector de origen MIME usa
-   selectores centralizados en `source_reader.py`, observados en Outlook español;
-   no depende de la búsqueda global ni del panel de lectura antiguo.
+4. **Valida el recorrido antes de importar.** Con `graph`, `scan -ReadOnly` confirma
+   que el listado de cada carpeta coincide con su total. Con `browser`,
+   desactiva la agrupación por conversaciones y la vista Prioritarios/Otros; su
+   lector de origen MIME usa selectores centralizados en `source_reader.py`,
+   observados en Outlook español, y no depende de la búsqueda global ni del panel
+   de lectura antiguo.
 
    ```powershell
    .\scripts\run-monthly-close.ps1 -Command scan -ReadOnly -Start 2026-10-01 -End 2026-11-01
