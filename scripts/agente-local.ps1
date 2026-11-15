@@ -6,7 +6,7 @@ param(
         "serve", "login", "check-config", "pilot", "scan", "import", "summary", "scheduled", "invoices"
     )]
     [string]$Command = "serve",
-    [string]$DataDir = (Join-Path $env:LOCALAPPDATA "MonthlyCloseAgent"),
+    [string]$DataDir,
     [string]$Start,
     [string]$End,
     [string]$Month,
@@ -21,6 +21,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# $PSScriptRoot is not available yet when parameter defaults are evaluated with -File.
+if (-not $DataDir) { $DataDir = Join-Path (Split-Path $PSScriptRoot -Parent) ".local\MonthlyCloseAgent" }
 function Get-PanelContent {
     $request = [System.Net.HttpWebRequest]::Create("http://127.0.0.1:8766")
     $request.Proxy = $null
@@ -164,7 +166,7 @@ try {
     if ($ReadOnly) { $arguments += "--read-only" }
     if ($ReprocessEmpty) { $arguments += "--reprocess-empty" }
     if ($Command -eq "import") {
-        Write-Host "Iniciando recorrido. Si usas el lector de navegador, no interactues con el perfil de Edge."
+        Write-Host "Iniciando recorrido del buzon."
     }
     & $python @arguments
     $exitCode = $LASTEXITCODE

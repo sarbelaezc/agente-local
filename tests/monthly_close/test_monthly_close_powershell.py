@@ -63,8 +63,8 @@ exit 0
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
-    data = root / "MonthlyCloseAgent"
-    data.mkdir()
+    data = root / ".local" / "MonthlyCloseAgent"
+    data.mkdir(parents=True)
     (data / "runtime.json").write_text(json.dumps({
         "ollama_url": f"http://127.0.0.1:{server.server_port}", "ollama_model": model,
     }), encoding="utf-8")

@@ -1,10 +1,12 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$DataDir = (Join-Path $env:LOCALAPPDATA "MonthlyCloseAgent"),
+    [string]$DataDir,
     [switch]$Remove
 )
 
 $ErrorActionPreference = "Stop"
+# $PSScriptRoot is not available yet when parameter defaults are evaluated with -File.
+if (-not $DataDir) { $DataDir = Join-Path (Split-Path $PSScriptRoot -Parent) ".local\MonthlyCloseAgent" }
 $name = "AgenteLocal-MonthlyClose"
 if ($Remove) {
     if ($PSCmdlet.ShouldProcess($name, "Eliminar tarea")) {

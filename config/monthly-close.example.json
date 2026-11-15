@@ -4,7 +4,6 @@
   "source": "graph",
   "graph_client_id": "00000000-0000-0000-0000-000000000000",
   "graph_authority": "consumers",
-  "outlook_url": "https://outlook.live.com/mail/0/",
   "max_messages": 200,
   "folder_scan_verified": false
 }

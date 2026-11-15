@@ -110,12 +110,16 @@ def test_corrupt_store_is_reported_not_ignored(tmp_path):
         store.load()
 
 
-def test_default_path_is_outside_workspace(monkeypatch, tmp_path):
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+def test_default_path_is_the_project_local_folder_unless_overridden(monkeypatch, tmp_path):
+    from mail_invoices.storage import REPO_ROOT
+
+    monkeypatch.setenv("AGENTE_LOCAL_DATA", str(tmp_path))
     assert decisions_path() == tmp_path / "MailInvoiceAgent" / "classification-decisions.sqlite3"
-    monkeypatch.delenv("LOCALAPPDATA")
-    with pytest.raises(ValueError, match="LOCALAPPDATA"):
-        decisions_path()
+    monkeypatch.delenv("AGENTE_LOCAL_DATA")
+    assert decisions_path() == (
+        REPO_ROOT / ".local" / "MailInvoiceAgent" / "classification-decisions.sqlite3"
+    )
+    assert (REPO_ROOT / "pyproject.toml").is_file()
 
 
 def test_example_context_has_a_total_budget():
@@ -146,7 +150,7 @@ def test_simulation_automatically_loads_local_decisions(monkeypatch, tmp_path):
     from mail_invoices import classification
     from mail_invoices.settings import MailSettings
 
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("AGENTE_LOCAL_DATA", str(tmp_path))
     store = ClassificationDecisionStore(decisions_path())
     store.save([example()], "Santi", ["Salud"])
     executable = tmp_path / "synthetic.exe"

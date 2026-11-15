@@ -13,7 +13,6 @@ from monthly_close import main as app
 from monthly_close.domain import CATEGORIES, Preferences, amount_minor, received_local
 from monthly_close.extraction import Mail, extract
 from monthly_close.main import months, scheduled_month
-from monthly_close.outlook import validate_url
 from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.server import create_server
 from monthly_close.store import SCHEMA, Store
@@ -75,11 +74,10 @@ def test_scan_resumes_failed_notice_without_rereading_completed_or_losing_decisi
                 visit(Candidate(identity, preferences.approved_senders[0], "Tienda"))
             return []
 
-    monkeypatch.setattr(app, "browser", lambda *args: nullcontext(None))
-    monkeypatch.setattr(app, "OutlookSourceReader", Reader)
+    monkeypatch.setattr(app, "open_source", lambda *args: nullcontext(Reader()))
     monkeypatch.setattr(app, "OllamaJsonModel", lambda *args: Model())
     monkeypatch.setattr(app, "require_model", lambda settings: None)
-    settings = {"folder_scan_verified": True, "outlook_url": "https://outlook.live.com/mail/0/",
+    settings = {"folder_scan_verified": True,
                 "ollama_url": "http://127.0.0.1:11434", "ollama_model": "test", "max_messages": 10}
     args = (store, tmp_path, settings, preferences, date(2026, 2, 1), date(2026, 3, 1))
     with pytest.raises(OutlookError, match="Fallo de prueba"):
@@ -131,12 +129,11 @@ def test_scan_queues_invalid_evidence_continues_and_retries_without_losing_decis
         chosen = Model(merchant="Inventado") if mail.id == "bad" and invalid[0] else Model()
         return extract(mail, prefs, chosen)
 
-    monkeypatch.setattr(app, "browser", lambda *args: nullcontext(None))
-    monkeypatch.setattr(app, "OutlookSourceReader", Reader)
+    monkeypatch.setattr(app, "open_source", lambda *args: nullcontext(Reader()))
     monkeypatch.setattr(app, "extract", extraction)
     monkeypatch.setattr(app, "OllamaJsonModel", lambda *args: Model())
     monkeypatch.setattr(app, "require_model", lambda settings: None)
-    settings = {"folder_scan_verified": True, "outlook_url": "https://outlook.live.com/mail/0/",
+    settings = {"folder_scan_verified": True,
                 "ollama_url": "http://127.0.0.1:11434", "ollama_model": "test", "max_messages": 10}
     args = (store, tmp_path, settings, preferences, date(2026, 2, 1), date(2026, 3, 1))
     app.scan(*args)
@@ -216,12 +213,11 @@ def test_scan_does_not_continue_after_other_failures(tmp_path, preferences, monk
     def fail(*args):
         raise error
 
-    monkeypatch.setattr(app, "browser", lambda *args: nullcontext(None))
-    monkeypatch.setattr(app, "OutlookSourceReader", Reader)
+    monkeypatch.setattr(app, "open_source", lambda *args: nullcontext(Reader()))
     monkeypatch.setattr(app, "extract", fail)
     monkeypatch.setattr(app, "OllamaJsonModel", lambda *args: Model())
     monkeypatch.setattr(app, "require_model", lambda settings: None)
-    settings = {"folder_scan_verified": True, "outlook_url": "https://outlook.live.com/mail/0/",
+    settings = {"folder_scan_verified": True,
                 "ollama_url": "http://127.0.0.1:11434", "ollama_model": "test", "max_messages": 10}
     with pytest.raises(type(error), match=str(error)):
         app.scan(store, tmp_path, settings, preferences, date(2026, 2, 1), date(2026, 3, 1))
@@ -999,7 +995,7 @@ def test_historical_months_include_missing_months():
     assert months(date(2026, 1, 1), date(2026, 4, 1)) == ["2026-01", "2026-02", "2026-03"]
 
 
-def test_scheduled_non_last_day_does_not_read_runtime_or_start_browser(tmp_path, preferences, monkeypatch):
+def test_scheduled_non_last_day_does_not_read_runtime_or_the_mailbox(tmp_path, preferences, monkeypatch):
     store = Store(tmp_path / "close.sqlite3")
     store.configure(preferences.to_dict())
 
@@ -1011,7 +1007,6 @@ def test_scheduled_non_last_day_does_not_read_runtime_or_start_browser(tmp_path,
     monkeypatch.setattr(app, "datetime", Clock)
     monkeypatch.setattr(app, "runtime", lambda path: pytest.fail("No debe leer configuracion tecnica."))
     app.run(Namespace(data_dir=tmp_path, command="scheduled"))
-    assert not (tmp_path / "BrowserProfile").exists()
     assert not (tmp_path / "last-close.txt").exists()
 
 
@@ -1031,15 +1026,6 @@ def test_scheduled_close_persists_self_contained_summary(tmp_path, preferences, 
     app.run(Namespace(data_dir=tmp_path, command="scheduled"))
     assert scanned[0][-2:] == (date(2028, 2, 1), date(2028, 3, 1))
     assert "Cierre 2028-02" in (tmp_path / "last-close.txt").read_text(encoding="utf-8")
-
-
-@pytest.mark.parametrize("url", [
-    "https://evil.test/mail/0/", "http://outlook.live.com/mail/0/",
-    "https://outlook.live.com.evil.test/mail/0/", "https://user@outlook.live.com/mail/0/",
-])
-def test_outlook_only_uses_expected_https_origin(url):
-    with pytest.raises(ValueError):
-        validate_url(url)
 
 
 @pytest.fixture

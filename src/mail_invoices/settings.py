@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from mail_invoices.local_model import validate_local_url
+from mail_invoices.storage import REPO_ROOT
 
 DEFAULT_TESSERACT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
@@ -16,7 +17,9 @@ def _path(value: str) -> Path:
     expanded = os.path.expandvars(value)
     if re.search(r"%[^%]+%", expanded):
         raise ValueError("A required environment variable for a local path is unset")
-    return Path(expanded).expanduser()
+    path = Path(expanded).expanduser()
+    # Relative paths are anchored at the project, not at whatever folder the command ran from.
+    return path if path.is_absolute() else REPO_ROOT / path
 
 
 @dataclass(frozen=True)

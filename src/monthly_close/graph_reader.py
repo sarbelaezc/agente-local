@@ -14,7 +14,7 @@ from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.source_reader import parse_source
 
 # Message identifiers hash this origin with the Message-ID. Keep the Outlook Web value so
-# notices already imported through the browser reader are recognised, not imported twice.
+# notices imported before Graph was used are recognised, not imported twice.
 DEFAULT_ORIGIN = "outlook.live.com"
 WELL_KNOWN = (
     (("bandeja de entrada",), "Bandeja de entrada", "inbox"),
@@ -48,7 +48,7 @@ def _timestamp(value: object) -> datetime:
 class GraphSourceReader:
     """Read authorized messages through Microsoft Graph (Mail.Read, read-only).
 
-    Same contract as OutlookSourceReader, without a browser: folders are identified by id,
+    Reads the mailbox through Microsoft Graph: folders are identified by id,
     messages arrive newest first, and the raw MIME goes through the same parse_source checks.
     """
 

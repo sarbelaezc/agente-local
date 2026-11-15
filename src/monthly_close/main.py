@@ -16,10 +16,9 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
-from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page, sync_playwright
 
 from mail_invoices.local_model import LocalModelError, validate_local_url
+from mail_invoices.storage import data_root
 from monthly_close.model import OllamaJsonModel
 from monthly_close.domain import Preferences, received_local
 from monthly_close.extraction import EvidenceError, extract
@@ -27,14 +26,13 @@ from monthly_close.graph_client import (
     AUTHORITIES, CACHE_NAME, CLIENT_ID, GraphClient, interactive_login, silent_token,
 )
 from monthly_close.graph_reader import DEFAULT_ORIGIN, GraphSourceReader
-from monthly_close.outlook import Candidate, OutlookError, validate_url
+from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.server import create_server
-from monthly_close.source_reader import OutlookSourceReader
 from monthly_close.store import Store
 
 
 def default_data_dir() -> Path:
-    return Path(os.environ.get("LOCALAPPDATA", ".local")) / "MonthlyCloseAgent"
+    return data_root() / "MonthlyCloseAgent"
 
 
 def runtime(data_dir: Path) -> dict:
@@ -42,7 +40,7 @@ def runtime(data_dir: Path) -> dict:
     if not path.is_file():
         raise ValueError(
             "Copia config\\monthly-close.example.json a " + str(path)
-            + " y configura el navegador y los selectores."
+            + " y configura graph_client_id."
         )
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
@@ -54,25 +52,12 @@ def runtime(data_dir: Path) -> dict:
         or endpoint.path or endpoint.query or endpoint.fragment
     ):
         raise ValueError("Cierre mensual debe compartir Ollama de facturas en el puerto 11434.")
-    source = raw.get("source", "browser")
-    if source not in {"browser", "graph"}:
-        raise ValueError("source debe ser browser o graph.")
-    if source == "graph":
-        if not isinstance(raw.get("graph_client_id"), str) or not CLIENT_ID.fullmatch(raw["graph_client_id"]):
-            raise ValueError("Configura graph_client_id con el Application (client) ID de tu app.")
-        if raw.setdefault("graph_authority", "consumers") not in AUTHORITIES:
-            raise ValueError("graph_authority debe ser consumers o common.")
-        if raw.get("outlook_url") is not None:
-            validate_url(raw["outlook_url"])
-    else:
-        validate_url(raw.get("outlook_url", ""))
-        executable = raw.get("browser_executable")
-        if not isinstance(executable, str):
-            raise ValueError("Configura browser_executable.")
-        executable = os.path.expandvars(executable)
-        if "%" in executable or not Path(executable).is_file():
-            raise ValueError("No se encuentra el ejecutable del navegador configurado.")
-        raw["browser_executable"] = executable
+    if raw.get("source", "graph") != "graph":
+        raise ValueError("source debe ser graph: el lector por navegador se retiro.")
+    if not isinstance(raw.get("graph_client_id"), str) or not CLIENT_ID.fullmatch(raw["graph_client_id"]):
+        raise ValueError("Configura graph_client_id con el Application (client) ID de tu app.")
+    if raw.setdefault("graph_authority", "consumers") not in AUTHORITIES:
+        raise ValueError("graph_authority debe ser consumers o common.")
     if type(raw.get("max_messages")) is not int or not 1 <= raw["max_messages"] <= 10000:
         raise ValueError("max_messages debe estar entre 1 y 10000.")
     if not isinstance(raw.get("ollama_model"), str) or not raw["ollama_model"].strip():
@@ -81,38 +66,14 @@ def runtime(data_dir: Path) -> dict:
 
 
 @contextmanager
-def browser(data_dir: Path, settings: dict) -> Iterator[Page]:
-    with sync_playwright() as playwright:
-        context = playwright.chromium.launch_persistent_context(
-            user_data_dir=str(data_dir / "BrowserProfile"),
-            executable_path=settings["browser_executable"],
-            headless=False,
-            viewport={"width": 1440, "height": 1000},
-            accept_downloads=False,
-        )
-        try:
-            page = context.pages[0] if context.pages else context.new_page()
-            page.set_default_timeout(15000)
-            page.goto(settings["outlook_url"], wait_until="domcontentloaded")
-            yield page
-        finally:
-            context.close()
-
-
-@contextmanager
 def open_source(data_dir: Path, settings: dict, approved_senders: list[str]) -> Iterator:
-    """Message reader for the configured source: Microsoft Graph or the Outlook Web browser."""
-    if settings.get("source", "browser") != "graph":
-        with browser(data_dir, settings) as page:
-            yield OutlookSourceReader(page, settings["outlook_url"], approved_senders)
-        return
-    # Keep the Outlook Web origin in message identifiers so notices already imported are not repeated.
-    origin = urlparse(settings["outlook_url"]).netloc if settings.get("outlook_url") else DEFAULT_ORIGIN
+    """Read-only mailbox reader over Microsoft Graph, using the saved session."""
     client = GraphClient(silent_token(
         settings["graph_client_id"], settings.get("graph_authority", "consumers"), data_dir / CACHE_NAME,
     ))
     try:
-        yield GraphSourceReader(client, approved_senders, origin)
+        # DEFAULT_ORIGIN keeps message identifiers stable, so imported notices are not repeated.
+        yield GraphSourceReader(client, approved_senders, DEFAULT_ORIGIN)
     finally:
         client.close()
 
@@ -402,18 +363,11 @@ def run(args: argparse.Namespace) -> None:
     if args.command == "pilot":
         run_pilot(store, data_dir, settings, args.read_only)
         return
-    if args.command == "login" and settings.get("source") == "graph":
+    if args.command == "login":
         account = interactive_login(
             settings["graph_client_id"], settings.get("graph_authority", "consumers"), data_dir / CACHE_NAME,
         )
         print(f"Sesion de Microsoft guardada para {account}. Permiso: solo lectura de correo.")
-        return
-    if args.command == "login":
-        with browser(data_dir, settings):
-            input(
-                "Inicia sesion manualmente. El agente no actua sobre MFA ni captcha. "
-                "Cuando veas tu buzon, pulsa Enter aqui para cerrar el perfil: "
-            )
         return
     if args.command == "check-config":
         if not preferences.approved_senders or settings.get("folder_scan_verified") is not True:
@@ -443,7 +397,7 @@ def run(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Cierre mensual local: Outlook (Microsoft Graph u Outlook Web) + Ollama.")
+    parser = argparse.ArgumentParser(description="Cierre mensual local: buzon de Outlook por Microsoft Graph + Ollama.")
     parser.add_argument(
         "command",
         choices=["serve", "login", "pilot", "scan", "summary", "scheduled", "check-config"],
@@ -471,21 +425,6 @@ def main() -> None:
     except KeyboardInterrupt:
         print("Detenido por el usuario.", file=sys.stderr)
         raise SystemExit(130)
-    except PlaywrightError as exc:
-        # Playwright call logs can embed financial text from Outlook's aria-labels.
-        print(
-            "Detenido: Outlook no confirmo la interfaz esperada. "
-            "No se continua ni se imprime contenido de los mensajes.",
-            file=sys.stderr,
-        )
-        frames = [
-            frame for frame in traceback.extract_tb(exc.__traceback__)
-            if Path(frame.filename).parent.name == "monthly_close"
-        ]
-        if frames:
-            frame = frames[-1]
-            print(f"Punto de parada: {Path(frame.filename).name}:{frame.lineno}.", file=sys.stderr)
-        raise SystemExit(1) from None
     except (
         ValueError, OSError, KeyError, ZoneInfoNotFoundError,
         OutlookError, LocalModelError,

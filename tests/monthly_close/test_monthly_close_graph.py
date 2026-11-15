@@ -281,7 +281,7 @@ def test_requires_exact_approved_senders():
         GraphSourceReader(mailbox(), ["no-es-un-correo"])
 
 
-def test_read_validates_mime_and_keeps_the_browser_message_identity():
+def test_read_validates_mime_and_keeps_the_stable_message_identity():
     box = mailbox()
     graph = reader(box)
     candidate = Candidate("m1", SENDER, "Compra Tienda")
@@ -545,18 +545,22 @@ def write_runtime(tmp_path, settings: dict) -> None:
     (tmp_path / "runtime.json").write_text(json.dumps(settings), encoding="utf-8")
 
 
-def test_graph_runtime_needs_no_browser_and_defaults_to_personal_accounts(tmp_path):
+def test_runtime_defaults_to_personal_accounts_and_needs_no_source_key(tmp_path):
     write_runtime(tmp_path, graph_settings())
     runtime = app.runtime(tmp_path)
-    assert runtime["graph_authority"] == "consumers" and "browser_executable" not in runtime
+    assert runtime["graph_authority"] == "consumers"
+    settings = graph_settings()
+    settings.pop("source", None)
+    write_runtime(tmp_path, settings)
+    assert app.runtime(tmp_path)["graph_client_id"] == settings["graph_client_id"]
 
 
 @pytest.mark.parametrize("updates,message", [
     ({"graph_client_id": "x"}, "graph_client_id"),
     ({"graph_client_id": None}, "graph_client_id"),
     ({"graph_authority": "organizations"}, "graph_authority"),
-    ({"outlook_url": "https://example.test/mail/"}, "Outlook Web"),
     ({"source": "otra"}, "source"),
+    ({"source": "browser"}, "navegador se retiro"),
     ({"ollama_url": "http://127.0.0.1:11435"}, "11434"),
     ({"max_messages": 0}, "max_messages"),
 ])
@@ -566,39 +570,22 @@ def test_graph_runtime_rejects_invalid_settings(tmp_path, updates, message):
         app.runtime(tmp_path)
 
 
-def test_open_source_uses_graph_keeps_outlook_origin_and_closes_the_client(tmp_path, monkeypatch):
+def test_open_source_uses_graph_keeps_the_identifier_origin_and_closes_the_client(
+    tmp_path, monkeypatch,
+):
     box = Mailbox()
     monkeypatch.setattr(app, "silent_token", lambda *args: (lambda: "t"))
     monkeypatch.setattr(app, "GraphClient", lambda token: box)
-    monkeypatch.setattr(app, "browser", lambda *args: pytest.fail("Graph no abre navegador."))
     with app.open_source(tmp_path, graph_settings(graph_authority="consumers"), [SENDER]) as source:
+        # Changing this origin would change every message identifier and re-import notices.
         assert isinstance(source, GraphSourceReader) and source.origin == "outlook.live.com"
     assert box.closed
-    custom = graph_settings(graph_authority="common", outlook_url="https://outlook.office.com/mail/0/")
-    with app.open_source(tmp_path, custom, [SENDER]) as source:
-        assert source.origin == "outlook.office.com"
 
 
-def test_open_source_still_defaults_to_the_browser_reader(tmp_path, monkeypatch):
-    from contextlib import nullcontext
-    built = []
-
-    class Browser:
-        def __init__(self, page, url, senders):
-            built.append((page, url, senders))
-
-    monkeypatch.setattr(app, "browser", lambda *args: nullcontext("page"))
-    monkeypatch.setattr(app, "OutlookSourceReader", Browser)
-    with app.open_source(tmp_path, {"outlook_url": "https://outlook.live.com/mail/0/"}, [SENDER]) as source:
-        assert isinstance(source, Browser)
-    assert built == [("page", "https://outlook.live.com/mail/0/", [SENDER])]
-
-
-def test_login_with_graph_signs_in_without_opening_a_browser(tmp_path, preferences, monkeypatch, capsys):
+def test_login_signs_in_with_graph_and_saves_the_session(tmp_path, preferences, monkeypatch, capsys):
     write_runtime(tmp_path, graph_settings())
     Store(tmp_path / "close.sqlite3").configure(preferences.to_dict())
     calls = []
-    monkeypatch.setattr(app, "browser", lambda *args: pytest.fail("Graph no abre navegador."))
     monkeypatch.setattr(app, "interactive_login", lambda *args: calls.append(args) or "yo@example.test")
     app.run(Namespace(
         command="login", data_dir=tmp_path, port=0, month=None, start=None, end=None, read_only=False,
