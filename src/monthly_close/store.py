@@ -152,6 +152,20 @@ class Store:
             )
             self._audit(db, "extraction-pending", message_id, field)
 
+    def dismiss_failure(self, message_id: str) -> None:
+        """A person reviewed a queued notice and decided it has nothing to import.
+
+        It leaves the queue and is not retried by normal scans; scan --reprocess-empty
+        reads it again.
+        """
+        with self.connect() as db:
+            if db.execute(
+                "DELETE FROM extraction_failures WHERE message_id=?", (message_id,),
+            ).rowcount != 1:
+                raise ValueError("Aviso inexistente en la cola de revision.")
+            db.execute("INSERT OR IGNORE INTO processed VALUES (?)", (message_id,))
+            self._audit(db, "extraction-dismissed-local-user", message_id, "no-movement")
+
     def processed_without_events(self, message_id: str) -> bool:
         """True for a notice read before that left nothing worth keeping.
 

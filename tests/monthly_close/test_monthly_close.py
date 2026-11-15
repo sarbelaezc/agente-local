@@ -369,7 +369,10 @@ def test_withdrawals_cannot_override_non_expenses_or_excluded_accounts(
 ):
     store = Store(tmp_path / "withdrawal-guards.sqlite3")
     store.configure(preferences.to_dict())
-    events = extract(mail, preferences, Model(kind=kind, account=account))
+    events = extract(
+        received(mail) if kind == "income" else mail, preferences,
+        Model(kind=kind, account=account),
+    )
     store.import_message(mail.id, events)
     with pytest.raises(ValueError):
         store.decide(events[0]["id"], decision)
@@ -421,7 +424,10 @@ def test_income_and_excluded_accounts_cannot_become_own_investments(
 ):
     store = Store(tmp_path / "investment-restrictions.sqlite3")
     store.configure(preferences.to_dict())
-    events = extract(mail, preferences, Model(kind=kind, account=account))
+    events = extract(
+        received(mail) if kind == "income" else mail, preferences,
+        Model(kind=kind, account=account),
+    )
     store.import_message(mail.id, events)
     with pytest.raises(ValueError):
         store.decide(events[0]["id"], "investment")
@@ -446,10 +452,60 @@ def test_repeat_import_and_config_changes_preserve_human_choice(tmp_path, prefer
         assert db.execute("SELECT value FROM audit WHERE action='import'").fetchone()[0] == "1"
 
 
+def received(mail: Mail) -> Mail:
+    """The same notice, worded as money received."""
+    return Mail(
+        mail.id, mail.sender, mail.subject, mail.received,
+        "Recibiste un pago de Tienda en Tarjeta A por $ 1.234,56.",
+    )
+
+
+def test_transfer_to_an_account_number_is_read_without_the_model(preferences, mail):
+    class NoModel:
+        def complete_json(self, system, user):
+            raise AssertionError("Esta frase fija no se envia a Ollama.")
+
+    source = Mail(
+        mail.id, mail.sender, "Alertas", mail.received,
+        "Bancolombia: Transferiste $120,000\ndesde tu cuenta *0111 a la cuenta * 12345678901 "
+        "el 04/08/2026 a las 09:20.",
+    )
+    events = extract(source, preferences, NoModel())
+    assert [
+        (e["kind"], e["merchant"], e["amount_minor"], e["day"], e["decision"]) for e in events
+    ] == [("transfer", "cuenta *8901", 12000000, "2026-08-04", None)]
+    # The full account number is never stored.
+    assert "12345678901" not in json.dumps(events)
+
+
+def test_money_leaving_is_never_income_even_if_the_model_says_so(preferences, mail):
+    source = Mail(
+        mail.id, mail.sender, "Alertas", mail.received,
+        "Enviaste $ 1.234,56 desde tu cuenta *0111 a la cuenta *0222 el 04/08/2026.",
+    )
+    model = Model(kind="income", merchant="Transferencia recibida", category="Otros ingresos")
+    events = extract(source, preferences, model)
+    assert model.calls == 2
+    assert events[0]["kind"] == "unknown"
+    assert events[0]["category"] in preferences.categories
+    # Nobody is named, so the notice's own words after the amount identify it.
+    assert events[0]["merchant"] == "desde tu cuenta *0111 a la cuenta *0222 el 04/08/2026"
+    assert events[0]["merchant"] in source.body
+
+
+def test_merchant_spacing_and_punctuation_recover_the_notice_spelling(preferences, mail):
+    source = Mail(
+        mail.id, mail.sender, "Alertas", mail.received,
+        "Compraste $ 1.234,56 en 'T GALETJE con Tarjeta A.",
+    )
+    events = extract(source, preferences, Model(merchant="TGALETJE"))
+    assert events[0]["merchant"] == "T GALETJE"
+
+
 def test_income_is_extracted_pending_and_counts_only_as_income(tmp_path, preferences, mail):
     store = Store(tmp_path / "income.sqlite3")
     store.configure(preferences.to_dict())
-    events = extract(mail, preferences, Model(kind="income", category="Compras"))
+    events = extract(received(mail), preferences, Model(kind="income", category="Compras"))
     store.import_message(mail.id, events)
     # The person decides; an expense category from the model is never kept for income.
     assert (events[0]["decision"], events[0]["category"]) == (None, "Otros ingresos")
@@ -535,13 +591,20 @@ def test_notice_without_a_real_amount_is_queued_instead_of_stopping_the_scan(
 ):
     from monthly_close.extraction import EvidenceError
 
+    # The notice shows a real amount elsewhere, so a person must look at it.
     source = Mail(
         mail.id, mail.sender, mail.subject, mail.received,
-        f"Adicionaste {amount} a tu plan en Tienda. Linea 01 8000.",
+        f"Adicionaste {amount} a tu plan en Tienda. Saldo $ 5.000. Linea 01 8000.",
     )
     with pytest.raises(EvidenceError) as error:
         extract(source, preferences, Model(amount_text=amount, kind="investment"))
     assert error.value.field == "amount_text"
+    # With no amount anywhere it is only information: no movement and nothing to review.
+    informative = Mail(
+        mail.id, mail.sender, mail.subject, mail.received,
+        f"Adicionaste {amount} a tu plan en Tienda. Linea 01 8000.",
+    )
+    assert extract(informative, preferences, Model(amount_text=amount, kind="investment")) == []
 
 
 def test_a_purchase_cannot_be_counted_as_income(tmp_path, preferences, mail):
@@ -710,7 +773,40 @@ def test_prompt_distinguishes_card_repayments_from_purchases(preferences, mail):
             assert all(example["notice"] not in context["untrusted_email"] for example in examples)
             return {"events": []}
 
-    assert extract(mail, preferences, PromptModel()) == []
+    informative = Mail(mail.id, mail.sender, mail.subject, mail.received, "Tu clave fue cambiada.")
+    assert extract(informative, preferences, PromptModel()) == []
+
+
+def test_money_that_left_is_queued_when_the_model_returns_nothing(preferences, mail):
+    from monthly_close.extraction import EvidenceError
+
+    class Empty(Model):
+        def complete_json(self, system, user):
+            self.calls += 1
+            return {"events": []}
+
+    model = Empty()
+    with pytest.raises(EvidenceError) as error:
+        extract(mail, preferences, model)
+    assert (error.value.field, model.calls) == ("events", 1)
+    # A card debt payment is the one case the model is told to drop.
+    card = Mail(
+        mail.id, mail.sender, mail.subject, mail.received,
+        "Pagaste $42,000 en la tarjeta de credito *1234 desde la cuenta *5678",
+    )
+    assert extract(card, preferences, Empty()) == []
+
+
+def test_qr_transfer_to_an_account_is_read_without_the_model(preferences, mail):
+    source = Mail(
+        mail.id, mail.sender, "Alertas", mail.received,
+        "Bancolombia: Transferiste $38,700.00 por QR desde tu cuenta 0111 a la cuenta 7433, "
+        "el 2026/01/08 12:35.",
+    )
+    events = extract(source, preferences, None)
+    assert [(e["kind"], e["merchant"], e["amount_minor"], e["day"]) for e in events] == [
+        ("transfer", "cuenta *7433", 3870000, "2026-01-08"),
+    ]
 
 
 @pytest.mark.parametrize("literal", ["Tienda\nLocal", "Tienda  Local", "Tienda\u00a0Local", "Tienda\tLocal"])
@@ -764,9 +860,11 @@ def test_ambiguous_or_changed_merchant_is_still_rejected(preferences, mail, body
         extract(source, preferences, Model(merchant=merchant))
 
 
-def test_amount_whitespace_is_not_rewritten(preferences, mail):
+def test_amount_spacing_recovers_the_notice_text_but_never_another_number(preferences, mail):
+    events = extract(mail, preferences, Model(amount_text="$1.234,56"))
+    assert events[0]["amount_minor"] == 123456
     with pytest.raises(ValueError, match="campo amount_text"):
-        extract(mail, preferences, Model(amount_text="$1.234,56"))
+        extract(mail, preferences, Model(amount_text="$1.234,57"))
 
 
 def test_evidence_correction_is_targeted_revalidated_and_never_approved(preferences, mail, caplog):
@@ -1005,3 +1103,28 @@ def test_decision_api_requires_decimal_text_rate_and_saves_estimate(panel, prefe
     assert row["currency"] == "USD"
     assert row["exchange_rate"] == "4200.5"
     assert row["cop_amount_minor"] == 518576928
+
+
+def test_progress_bar_follows_notice_dates_and_stays_silent_off_a_terminal():
+    import io
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    screen = Terminal()
+    progress = app.Progress(date(2026, 1, 1), date(2026, 11, 1), stream=screen)
+    progress.update(("dinero", "bancolombia"), date(2026, 11, 20), counted=False)
+    assert "]   0% | dinero / bancolombia | 2026-11-01 | 0 avisos" in screen.getvalue()
+    progress.update(("dinero", "bancolombia"), date(2026, 6, 2))
+    assert "[############............]  50% | dinero / bancolombia | 2026-06-02 | 1 avisos" in screen.getvalue()
+    progress.update(("dinero", "bancolombia"), date(2025, 12, 30), counted=False)
+    assert "[########################] 100%" in screen.getvalue()
+    progress.clear()
+    assert screen.getvalue().endswith(" \r")
+
+    piped = io.StringIO()
+    quiet = app.Progress(date(2026, 1, 1), date(2026, 11, 1), stream=piped)
+    quiet.update(("dinero",), date(2026, 6, 2))
+    quiet.clear()
+    assert piped.getvalue() == ""

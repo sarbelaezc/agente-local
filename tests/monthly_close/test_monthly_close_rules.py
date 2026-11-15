@@ -161,3 +161,15 @@ def test_income_rules_decide_only_money_received(store):
         store.add_rule("OTRA", TRANSPORT, "income")
     with pytest.raises(ValueError):
         store.add_rule("OTRA", payroll, "family")
+
+
+def test_dismissing_a_queued_notice_removes_it_and_blocks_normal_retries(store):
+    store.record_extraction_failure(
+        "notice", "avisos@example.test", "Aviso", "2026-10-05T10:00:00+00:00",
+        "2026-10-05", "dinero", "amount_text",
+    )
+    store.dismiss_failure("notice")
+    assert store.state()["extraction_failures"] == []
+    assert store.seen("notice") and store.processed_without_events("notice")
+    with pytest.raises(ValueError):
+        store.dismiss_failure("notice")

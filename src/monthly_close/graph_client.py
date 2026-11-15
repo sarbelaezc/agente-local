@@ -17,7 +17,8 @@ SCOPES = ["Mail.Read"]
 AUTHORITIES = {"consumers", "common"}
 CLIENT_ID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 CACHE_NAME = "graph_token_cache.bin"
-RETRYABLE = {429, 503, 504}
+# Throttling and transient gateway failures; a GET is safe to repeat.
+RETRYABLE = {429, 500, 502, 503, 504}
 
 
 class GraphError(OutlookError):
@@ -76,6 +77,10 @@ class GraphClient:
                     url, params=params, headers={"Authorization": "Bearer " + self._token()},
                 )
             except httpx.HTTPError as exc:
+                # A dropped connection or timeout is usually momentary; retry a few times.
+                if attempt < self._retries:
+                    self._sleep(5.0 * (attempt + 1))
+                    continue
                 raise GraphError("No se pudo contactar con Microsoft Graph.") from exc
             if response.status_code in RETRYABLE and attempt < self._retries:
                 self._sleep(_retry_after(response))

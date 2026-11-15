@@ -103,6 +103,10 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                     if type(raw.get("id")) is not int:
                         raise ValueError("Regla invalida.")
                     store.delete_rule(raw["id"])
+                elif self.path == "/api/failure/dismiss":
+                    if not isinstance(raw.get("message_id"), str):
+                        raise ValueError("Aviso invalido.")
+                    store.dismiss_failure(raw["message_id"])
                 elif self.path == "/api/coverage":
                     if raw.get("status") != "reviewed":
                         raise ValueError("Solo se permite confirmar una revision manual.")

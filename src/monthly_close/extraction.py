@@ -97,9 +97,9 @@ def extract(mail: Mail, preferences: Preferences, model: JsonModel) -> list[dict
     received = received_local(mail.received, preferences.timezone)
     body = clean_text(mail.body, 40000)
     source = mail.subject + "\n" + body
-    payments = _card_payments(mail, preferences, source)
-    if payments:
-        return payments
+    fixed = _card_payments(mail, preferences, source) or _account_transfers(mail, preferences, source)
+    if fixed:
+        return fixed
     context = {
         "accounts": preferences.accounts,
         "excluded_accounts": preferences.excluded_accounts,
@@ -139,9 +139,22 @@ def extract(mail: Mail, preferences: Preferences, model: JsonModel) -> list[dict
             ):
                 raise ValueError("La correccion de evidencia cambio otros datos o elimino movimientos.")
         try:
-            return _proposals(result, mail, preferences, received, source, last_attempt=bool(attempt))
+            proposals = _proposals(
+                result, mail, preferences, received, source, last_attempt=bool(attempt),
+            )
+            if not proposals and not attempt and MONEY_LEFT.search(source):
+                # The notice says money left the account but the model returned nothing:
+                # never drop it silently, a person reviews it.
+                raise EvidenceError("events")
+            return proposals
         except EvidenceError as exc:
+            if exc.field == "events":
+                raise
             if attempt:
+                if exc.field == "amount_text" and not MARKED_AMOUNT.search(source):
+                    # Informative notice with no amount at all (e.g. "ya ingresamos la
+                    # plata"): there is no movement to import, so nothing to review.
+                    return []
                 raise
             logging.getLogger(__name__).warning(
                 "Evidencia no literal (campo %s); una unica correccion local, sin importar la propuesta.",
@@ -155,6 +168,28 @@ def extract(mail: Mail, preferences: Preferences, model: JsonModel) -> list[dict
                 ),
             }
     raise AssertionError("El ciclo de validacion debe devolver propuestas o detenerse.")
+
+
+# An amount the notice itself marks as money, e.g. "$1.234", "COP95.900,00" or "USD 9,78".
+MARKED_AMOUNT = re.compile(r"(?:[$\u20ac\u00a3]|\b(?:COP|USD|EUR))\s*\d", re.IGNORECASE)
+# Money received is announced with these words; "Transferiste" or "Pagaste" is money leaving.
+INCOME_CUE = re.compile(r"\b(?:recib\w+|consign\w+|nomina|te (?:pagaron|transfirieron|enviaron))\b")
+# The bank states money left the account, with its amount. A card debt payment is excluded:
+# the model is told to drop those, and the fixed-sentence reader records the dated ones.
+MONEY_LEFT = re.compile(
+    r"\b(?:transferiste|compraste|retiraste|enviaste|pagaste(?![^.\n]{0,60}tarjeta\s+de\s+cr))\b"
+    r"[^.\n]{0,25}?(?:[$\u20ac\u00a3]|\b(?:COP|USD|EUR))\s*\d",
+    re.IGNORECASE,
+)
+# Kinds whose notice may not name a merchant at all.
+NO_MERCHANT_KINDS = {"unknown", "investment", "income", "transfer", "own_transfer"}
+
+
+def _plain(text: str) -> str:
+    return "".join(
+        char for char in unicodedata.normalize("NFD", text.lower())
+        if unicodedata.category(char) != "Mn"
+    )
 
 
 CARD_PAYMENT = re.compile(
@@ -189,12 +224,44 @@ def _card_payments(mail: Mail, preferences: Preferences, source: str) -> list[di
     return list(proposals.values())
 
 
+ACCOUNT_TRANSFER = re.compile(
+    r"Transferiste\s+(?P<amount>\$\s?\d[\d.,]*\d|\$\s?\d)(?:\s+por\s+QR)?"
+    r"\s+desde\s+tu\s+cuenta\s+\*?\d{4}\s+a\s+la\s+cuenta\s+\*?\s?\d*?(?P<last>\d{4}),?"
+    r"\s+el\s+(?P<day>\d{2}/\d{2}/\d{4}|\d{4}/\d{2}/\d{2})\b",
+    re.IGNORECASE,
+)
+
+
+def _account_transfers(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """Transfers to an account number, read from the bank's fixed sentence without the model.
+
+    The notice names nobody, so the model has no merchant to copy and may drop the
+    movement. Only the last four digits of the destination are kept, never the number.
+    They stay pending: a person decides whether it is an expense.
+    """
+    proposals: dict[str, dict] = {}
+    for match in ACCOUNT_TRANSFER.finditer(source):
+        merchant = "cuenta *" + match["last"]
+        minor = amount_minor(match["amount"])
+        day = datetime.strptime(
+            match["day"], "%Y/%m/%d" if match["day"][4] == "/" else "%d/%m/%Y",
+        ).date().isoformat()
+        currency = notice_currency(source, preferences.currency)
+        identity = json.dumps([day, merchant, "Desconocida", minor, currency], ensure_ascii=False)
+        identifier = hashlib.sha256((mail.id + "\n" + identity).encode()).hexdigest()
+        proposals[identifier] = {
+            "id": identifier, "message_id": mail.id, "day": day, "merchant": merchant,
+            "account": "Desconocida", "amount_minor": minor, "currency": currency,
+            "category": preferences.categories[-1], "kind": "transfer", "decision": None,
+            "reason": "Transferencia a otra cuenta leida del aviso, sin Ollama. "
+            "Confirma si es gasto, familiar o no cuenta.",
+        }
+    return list(proposals.values())
+
+
 def income_category(source: str) -> str:
     """Payroll, received transfer, deposit or other, from the notice's literal wording."""
-    text = "".join(
-        char for char in unicodedata.normalize("NFD", source.lower())
-        if unicodedata.category(char) != "Mn"
-    )
+    text = _plain(source)
     payroll, transfer, deposit, other = INCOME_CATEGORIES
     if re.search(r"\b(nomina|salario|sueldo)\b", text):
         return payroll
@@ -221,6 +288,15 @@ def _literal_merchant(merchant: str, source: str, allow_partial: bool) -> str:
     found = set(fragments(words)) if words else set()
     if len(found) == 1:
         return clean_text(found.pop(), 150)
+    letters = [char for char in merchant if char.isalnum()]
+    if not found and len(letters) >= 4:
+        # Same letters with different spacing or punctuation, e.g. "TGALETJE" for "'T GALETJE".
+        spaced = set(re.findall(
+            r"(?<![^\W_])" + r"[\W_]*".join(re.escape(char) for char in letters) + r"(?![^\W_])",
+            source, re.IGNORECASE,
+        ))
+        if len(spaced) == 1:
+            return clean_text(spaced.pop(), 150)
     if allow_partial and not found:
         # The model described the operation instead of copying it (e.g. a fund
         # withdrawal has no merchant). Keep the longest run of its words that the
@@ -251,12 +327,25 @@ def _proposals(
         merchant = clean_text(event.get("merchant"), 150)
         amount = clean_text(event.get("amount_text"), 80)
         # A purchase must name its merchant; only notices without one may keep a partial fragment.
-        merchant = _literal_merchant(
-            merchant, source,
-            last_attempt and event.get("kind") in {"unknown", "investment", "income"},
-        )
         if amount not in source:
-            raise EvidenceError("amount_text")
+            # Same amount with different spacing, e.g. "COP $100.000,00" for "COP $ 100.000,00":
+            # keep the notice's own text when it is unambiguous.
+            spaced = set(re.findall(
+                r"\s*".join(re.escape(char) for char in amount if not char.isspace()), source,
+            ))
+            if len(spaced) != 1:
+                raise EvidenceError("amount_text")
+            amount = clean_text(spaced.pop(), 80)
+        no_merchant = last_attempt and event.get("kind") in NO_MERCHANT_KINDS
+        try:
+            merchant = _literal_merchant(merchant, source, no_merchant)
+        except EvidenceError:
+            # e.g. a transfer to an account number: the notice names nobody. Keep what
+            # the notice says right after the amount rather than the model's wording.
+            after = re.match(r"\s*([^.\n]{3,60})", source[source.index(amount) + len(amount):])
+            if not no_merchant or not after:
+                raise
+            merchant = clean_text(after.group(1), 150)
         account = clean_text(event.get("account"), 150)
         if account not in preferences.accounts + preferences.excluded_accounts + ["Desconocida"]:
             raise ValueError("Ollama propuso una cuenta no configurada.")
@@ -267,6 +356,11 @@ def _proposals(
         if not isinstance(kind, str) or kind not in KINDS or type(event.get("savings")) is not bool:
             raise ValueError("Tipo de movimiento invalido.")
         category = clean_text(event.get("category"), 150)
+        if kind == "income" and not INCOME_CUE.search(_plain(source)):
+            # The notice never says money was received: a person decides what it is.
+            kind = "unknown"
+            if category not in preferences.categories:
+                category = preferences.categories[-1]
         if kind == "income":
             # The type comes from the notice's own words, not from the model; the
             # person still confirms it in the panel.

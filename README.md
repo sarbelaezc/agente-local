@@ -79,6 +79,14 @@ proceso que inició. En el cierre mensual comprueba además que el modelo
 configurado esté instalado; nunca lo descarga. No cambia `OLLAMA_MODELS` y
 restaura las variables de entorno que modifica.
 
+Durante `scan` e `import` (sin `-ReadOnly`) la terminal muestra una barra de
+progreso por carpeta según la fecha de los avisos, que se leen del más reciente
+al más antiguo: `[#########...............]  36% | dinero / bancolombia |
+2026-08-02 | 2 avisos`. Se llena desde el fin del rango hacia su inicio y vuelve
+a empezar en cada carpeta. Solo se dibuja en una terminal interactiva; no
+aparece en la tarea programada ni al redirigir la salida, y nunca muestra
+contenido de los correos.
+
 ## Ejecución bajo demanda
 
 La función de facturas no tiene servicio residente ni tarea programada. Para iniciar manualmente una
@@ -401,6 +409,34 @@ el texto que el modelo propone como monto no es un importe válido, el aviso
 queda en «Avisos sin extraer» con el campo `amount_text` y el recorrido
 continúa; antes detenía todo el `scan`. Verificado en solo lectura con los siete
 avisos reales de Inversiones que lo detenían (2026-11-14).
+
+**Avisos informativos y cola de revisión.** Si un aviso no contiene ningún
+importe marcado (`$`, `COP`, `USD`…) y el modelo no logra un monto válido, se
+trata como informativo: no deja movimiento ni queda en cola. Un monto que solo
+difiere en espacios (`COP $100.000,00` por `COP $ 100.000,00`) se recupera con el
+texto del aviso; otro número se rechaza. El comercio también se recupera cuando
+solo cambian espacios o signos (`TGALETJE` por `'T GALETJE`).
+
+Las transferencias a un número de cuenta («Transferiste $X [por QR] desde tu
+cuenta *NNNN a la cuenta *…, el fecha») se leen con una expresión fija, sin
+Ollama, porque el aviso no nombra a nadie: quedan pendientes como `transfer` con
+comercio `cuenta *NNNN` (solo los cuatro últimos dígitos; el número completo
+nunca se guarda). Un `income` que el aviso no respalda con palabras de dinero
+recibido se convierte en `unknown`.
+
+Red de seguridad: si el aviso dice «Transferiste/Compraste/Retiraste/Enviaste»
+con un importe y el modelo no devuelve ningún movimiento, el aviso queda en
+«Avisos sin extraer» (campo `events`) en vez de perderse. Cada aviso de esa
+lista tiene el botón **Descartar aviso**, para sacarlo cuando no trae nada que
+importar; queda en auditoría y `scan -ReprocessEmpty` lo vuelve a leer.
+
+El cliente de Graph reintenta hasta tres veces los fallos momentáneos (cortes de
+red y respuestas 500, 502, 503 y 504), además del 429.
+
+Verificado con los 15 avisos reales que estaban en cola (2026-11-15): 9
+informativos sin importe, 2 inversiones y 4 movimientos recuperados (una compra
+y 3 transferencias a cuenta); además se recuperaron 12 transferencias a cuenta
+que importaciones anteriores habían dejado sin movimiento. La cola quedó vacía.
 
 ### Reglas por comercio
 

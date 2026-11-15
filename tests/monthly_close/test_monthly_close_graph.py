@@ -412,8 +412,23 @@ def test_unexpected_payloads_and_network_failures_become_graph_errors():
         GraphClient(lambda: "t", Http(Response(content=b"<html>"))).get_json(ROOT + "/me")
     with pytest.raises(GraphError, match="inesperada"):
         GraphClient(lambda: "t", Http(Response(payload=[1]))).get_json(ROOT + "/me")
+    waits: list[float] = []
     with pytest.raises(GraphError, match="contactar"):
-        GraphClient(lambda: "t", Http(httpx.HTTPError("boom"))).get_json(ROOT + "/me")
+        GraphClient(
+            lambda: "t", Http(*[httpx.HTTPError("boom")] * 4), sleep=waits.append,
+        ).get_json(ROOT + "/me")
+    assert len(waits) == 3
+
+
+def test_momentary_network_and_gateway_failures_are_retried():
+    waits: list[float] = []
+    client = GraphClient(
+        lambda: "t",
+        Http(httpx.HTTPError("reset"), Response(502), Response(payload={"ok": True})),
+        sleep=waits.append,
+    )
+    assert client.get_json(ROOT + "/me") == {"ok": True}
+    assert len(waits) == 2
 
 
 def test_next_link_to_another_host_is_refused_by_the_reader():

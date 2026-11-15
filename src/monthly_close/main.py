@@ -4,6 +4,7 @@ import argparse
 import calendar
 import hashlib
 import json
+import logging
 import os
 import sys
 import traceback
@@ -135,6 +136,60 @@ def scheduled_month(now: datetime, timezone: str) -> str | None:
     return None
 
 
+class Progress:
+    """One-line terminal bar: how far back each folder has been read, by notice date.
+
+    Folders are read newest first, so the bar fills from the end of the range towards
+    its start. It only draws on an interactive terminal and never prints mail content.
+    """
+
+    WIDTH = 24
+
+    def __init__(self, start: date, end: date, stream=None) -> None:
+        self.start, self.end = start, end
+        self.stream = sys.stderr if stream is None else stream
+        self.enabled = bool(getattr(self.stream, "isatty", lambda: False)())
+        self.notices = 0
+        self.length = 0
+
+    def update(self, folder: tuple[str, ...] | None, day: date, counted: bool = True) -> None:
+        if counted:
+            self.notices += 1
+        if not self.enabled:
+            return
+        span = max((self.end - self.start).days, 1)
+        done = min(max((self.end - day).days / span, 0.0), 1.0)
+        filled = round(done * self.WIDTH)
+        label = " / ".join(folder or ("?",))[:34]
+        line = (
+            f"[{'#' * filled}{'.' * (self.WIDTH - filled)}] {done:4.0%} | {label} | "
+            f"{max(min(day, self.end), self.start).isoformat()} | {self.notices} avisos"
+        )
+        # Pad over the previous bar instead of relying on ANSI support in the console.
+        self.stream.write("\r" + line.ljust(self.length))
+        self.stream.flush()
+        self.length = len(line)
+
+    def clear(self) -> None:
+        """Erase the bar so another message can use the line; the next update redraws it."""
+        if self.length:
+            self.stream.write("\r" + " " * self.length + "\r")
+            self.stream.flush()
+            self.length = 0
+
+
+class _ClearProgress(logging.Filter):
+    """Let extraction warnings start on a clean line instead of after the bar."""
+
+    def __init__(self, progress: Progress) -> None:
+        super().__init__()
+        self.progress = progress
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        self.progress.clear()
+        return True
+
+
 def scan(
     store: Store, data_dir: Path, settings: dict, preferences: Preferences,
     start: date, end: date, read_only: bool = False, reprocess_empty: bool = False,
@@ -166,6 +221,26 @@ def scan(
     ).encode()).hexdigest()
     received_ids: set[str] = set()
     failed_ids: set[str] = set()
+    progress = Progress(start, end)
+    clear_progress = _ClearProgress(progress)
+    extraction_log = logging.getLogger("monthly_close.extraction")
+    extraction_log.addFilter(clear_progress)
+    try:
+        reports = _walk(
+            store, data_dir, settings, preferences, start, end, read_only, reprocess_empty,
+            model, scope, received_ids, failed_ids, progress,
+        )
+    finally:
+        progress.clear()
+        extraction_log.removeFilter(clear_progress)
+    _report(store, scope, reports, failed_ids, read_only)
+
+
+def _walk(
+    store: Store, data_dir: Path, settings: dict, preferences: Preferences,
+    start: date, end: date, read_only: bool, reprocess_empty: bool, model,
+    scope: str, received_ids: set[str], failed_ids: set[str], progress: Progress,
+) -> list[dict]:
     with open_source(data_dir, settings, preferences.approved_senders) as reader:
 
         def visit(candidate: Candidate) -> bool | None:
@@ -176,12 +251,23 @@ def scan(
             checkpoint = reader.checkpoint_key(candidate)
             status = store.scan_status(scope, checkpoint)
             if status == "complete":
+                # Resumed runs skip finished notices; show their date when the reader knows it.
+                stamp = getattr(reader, "_received", {}).get(candidate.item_id)
+                if isinstance(stamp, str):
+                    progress.update(
+                        getattr(reader, "active_folder", None),
+                        received_local(stamp, preferences.timezone).date(),
+                    )
                 return
             if status == "pending":
+                progress.clear()
                 print("Reintentando aviso pendiente desde el punto de reanudacion.", flush=True)
             store.scan_checkpoint(scope, checkpoint, "pending")
             mail = reader.read(candidate)
             local_day = received_local(mail.received, preferences.timezone).date()
+            progress.update(
+                getattr(reader, "active_folder", None), local_day, counted=start <= local_day < end,
+            )
             if local_day < start:
                 return False
             if local_day >= end:
@@ -205,6 +291,7 @@ def scan(
                     local_day.isoformat(), folder, exc.field,
                 )
                 failed_ids.add(mail.id)
+                progress.clear()
                 print(
                     "Aviso pendiente de revision por evidencia no literal; "
                     "sin importar movimientos: " + json.dumps({
@@ -218,7 +305,12 @@ def scan(
             received_ids.add(mail.id)
             store.scan_checkpoint(scope, checkpoint, "complete")
 
-        reports = reader.walk_folders(settings["max_messages"], visit)
+        return reader.walk_folders(settings["max_messages"], visit)
+
+
+def _report(
+    store: Store, scope: str, reports: list[dict], failed_ids: set[str], read_only: bool,
+) -> None:
     if not read_only:
         store.clear_scan_progress(scope)
         if failed_ids:
