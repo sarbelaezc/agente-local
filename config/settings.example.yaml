@@ -3,15 +3,15 @@ invoices:
     url: http://127.0.0.1:11434
     model: qwen2.5:7b
   opera_executable: "%LOCALAPPDATA%\\Programs\\Opera\\opera.exe"
-  profile_dir: "%LOCALAPPDATA%\\MailInvoiceAgent\\OperaProfile"
+  profile_dir: ".local\\MailInvoiceAgent\\OperaProfile"
   workbook: "C:\\Documents\\Resumen_Facturas.xlsx"
-  backup_dir: "%LOCALAPPDATA%\\MailInvoiceAgent\\Backups"
+  backup_dir: ".local\\MailInvoiceAgent\\Backups"
   sheet: Hoja1
   batch_limit: 20
   approver: ""
   attachments_dir: tmp
   ocr:
     tesseract_executable: "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
-    tessdata_dir: "%LOCALAPPDATA%\\MailInvoiceAgent\\tessdata"
+    tessdata_dir: ".local\\MailInvoiceAgent\\tessdata"
     languages: spa+eng
   folder_rules: {}

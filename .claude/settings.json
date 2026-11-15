@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.local/MonthlyCloseAgent/graph_token_cache.bin)",
+      "Read(./.local/MailInvoiceAgent/OperaProfile/**)"
+    ]
+  }
+}

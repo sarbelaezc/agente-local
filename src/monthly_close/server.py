@@ -92,6 +92,21 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                         event_id, decision, category,
                         currency=currency, exchange_rate=exchange_rate,
                     )
+                elif self.path == "/api/rules":
+                    pattern, category, decision = (
+                        raw.get("pattern"), raw.get("category"), raw.get("decision"),
+                    )
+                    if not all(isinstance(value, str) for value in (pattern, category, decision)):
+                        raise ValueError("Regla invalida.")
+                    store.add_rule(pattern, category, decision)
+                elif self.path == "/api/rules/delete":
+                    if type(raw.get("id")) is not int:
+                        raise ValueError("Regla invalida.")
+                    store.delete_rule(raw["id"])
+                elif self.path == "/api/failure/dismiss":
+                    if not isinstance(raw.get("message_id"), str):
+                        raise ValueError("Aviso invalido.")
+                    store.dismiss_failure(raw["message_id"])
                 elif self.path == "/api/coverage":
                     if raw.get("status") != "reviewed":
                         raise ValueError("Solo se permite confirmar una revision manual.")

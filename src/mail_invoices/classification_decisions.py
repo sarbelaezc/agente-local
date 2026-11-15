@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import asdict
@@ -9,14 +8,12 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
+from mail_invoices.storage import data_root
 from mail_invoices.folders import ConfirmedExample, IncomingMessage, bounded_context
 
 
 def decisions_path() -> Path:
-    local = os.environ.get("LOCALAPPDATA")
-    if not local:
-        raise ValueError("LOCALAPPDATA is required for local classification decisions")
-    return Path(local) / "MailInvoiceAgent" / "classification-decisions.sqlite3"
+    return data_root() / "MailInvoiceAgent" / "classification-decisions.sqlite3"
 
 
 class ClassificationDecisionStore:

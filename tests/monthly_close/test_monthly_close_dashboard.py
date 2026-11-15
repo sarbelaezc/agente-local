@@ -100,11 +100,33 @@ def test_extraction_review_is_visible_across_currencies_and_renders_only_text(da
     assert "Aviso bloqueado" in review.inner_text()
     assert "avisos@example.test" in review.inner_text()
     assert "dinero / banco" in review.inner_text()
-    assert review.locator("img, button").count() == 0
+    # The notice text never becomes markup, and the only action is to discard it.
+    assert review.locator("img").count() == 0
+    assert review.locator("button").all_inner_texts() == ["Descartar aviso"]
     store.import_message("blocked", [])
     page.reload()
     page.wait_for_load_state("networkidle")
     assert not page.locator("#extraction-warning").is_visible()
+    assert not errors
+
+
+def test_queued_notice_can_be_discarded_from_the_panel(dashboard):
+    page, store, month, errors = dashboard
+    store.record_extraction_failure(
+        "informative", "avisos@example.test", "Aviso informativo",
+        month + "-06T12:00:00-05:00", month + "-06", "dinero / banco", "amount_text",
+    )
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.locator("#tab-decisions").click()
+    review = page.locator("#extraction-review")
+    assert "Evidencia no literal: monto" in review.inner_text()
+    with page.expect_response(lambda response: response.url.endswith("/api/failure/dismiss")) as saved:
+        review.get_by_role("button", name=re.compile("Descartar")).click()
+    assert saved.value.status == 200
+    review.wait_for(state="hidden")
+    assert store.state()["extraction_failures"] == []
+    assert store.seen("informative")
     assert not errors
 
 

@@ -1,10 +1,12 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$DataDir = (Join-Path $env:LOCALAPPDATA "MonthlyCloseAgent"),
+    [string]$DataDir,
     [switch]$Remove
 )
 
 $ErrorActionPreference = "Stop"
+# $PSScriptRoot is not available yet when parameter defaults are evaluated with -File.
+if (-not $DataDir) { $DataDir = Join-Path (Split-Path $PSScriptRoot -Parent) ".local\MonthlyCloseAgent" }
 $name = "AgenteLocal-MonthlyClose"
 if ($Remove) {
     if ($PSCmdlet.ShouldProcess($name, "Eliminar tarea")) {
@@ -18,10 +20,10 @@ if (-not (Test-Path -LiteralPath $python)) { throw "Falta .venv." }
 $env:PYTHONPATH = Join-Path $root "src"
 & $python -m monthly_close.main check-config --data-dir $DataDir
 if ($LASTEXITCODE -ne 0) { throw "Completa y verifica primero la configuracion local." }
-$runner = Join-Path $PSScriptRoot "run-monthly-close.ps1"
+$runner = Join-Path $PSScriptRoot "agente-local.ps1"
 if ($runner.Contains('"') -or $DataDir.Contains('"')) { throw "Ruta no valida." }
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument (
-    '-NoProfile -File "{0}" -Command scheduled -DataDir "{1}"' -f $runner, $DataDir
+    '-NoProfile -File "{0}" scheduled -DataDir "{1}"' -f $runner, $DataDir
 ) -WorkingDirectory $root
 # The hourly wake-up delegates timezone/DST and last-day checks to Python's ZoneInfo.
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
