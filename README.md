@@ -740,27 +740,31 @@ Todas las reglas del proyecto están en un solo archivo, [`AGENTS.md`](AGENTS.md
 |---|---|---|
 | [`AGENTS.md`](AGENTS.md) | Copilot directamente; Claude Code a través de `CLAUDE.md` | Las reglas del proyecto: seguridad, datos locales, comandos, GitFlow y pruebas |
 | [`CLAUDE.md`](CLAUDE.md) | Claude Code | Una sola línea, `@AGENTS.md`, porque Claude Code no lee `AGENTS.md` por sí solo |
-| [`.claude/skills/`](.claude/skills/) | Ambos | Skills del proyecto |
+| [`.claude/skills/`](.claude/skills/) | Ambos | Única ubicación de las skills compartidas |
 | [`.claude/settings.json`](.claude/settings.json) | Claude Code | Permisos compartidos: impide leer el token de Microsoft y el perfil de Opera |
 
 Para cambiar una regla, edita solo `AGENTS.md`. Los ajustes
 personales de Claude Code van en `.claude/settings.local.json`, que Git ignora.
 
-## Skill de revisión: Ponytail
+## Skills de Copilot y Claude Code
 
-Instalada para este proyecto, en una carpeta que leen Copilot y Claude Code:
-[`.claude/skills/ponytail/SKILL.md`](.claude/skills/ponytail/SKILL.md).
-Fuente: [dietrichgebert/ponytail](https://github.com/dietrichgebert/ponytail),
-revisión `96608e078b2d5ea607c5c3b8b5a54d1c1fba6846`, con su
-[licencia MIT](.claude/skills/ponytail/LICENSE). Solo se instalaron las
-instrucciones de la skill y su licencia, sin scripts, hooks ni plugins externos.
+Las skills compartidas se mantienen una sola vez, como carpetas directas en
+[`.claude/skills/`](.claude/skills/), ubicación reconocida por ambos asistentes.
+No se usan junctions hacia `.agents/skills/` ni `skills-lock.json`: ese lock
+administraba una segunda ubicación de instalación.
 
-Puede solicitar «usa Ponytail para revisar el proyecto» o invocar `/ponytail`
-cuando el cliente la detecte. Su enfoque es el cambio más simple que resuelva
-completamente el problema, sin recortar validación, seguridad o pruebas.
-La instalación no envía código ni datos personales a Ponytail.
-La lista de skills de una sesión abierta puede requerir una nueva sesión para
-reconocerla; en la sesión de instalación se leyeron sus instrucciones directamente.
+| Skill | Uso |
+|---|---|
+| [agent-browser](.claude/skills/agent-browser/SKILL.md) | Automatización de navegador y aplicaciones Electron con el CLI `agent-browser`; requiere instalar el CLI por separado. |
+| [find-skills](.claude/skills/find-skills/SKILL.md) | Buscar skills disponibles cuando se solicita ampliar las capacidades del agente. |
+| [frontend-design](.claude/skills/frontend-design/SKILL.md) | Diseñar interfaces web distintivas y adaptables, con atención a accesibilidad y detalle visual. |
+| [ponytail](.claude/skills/ponytail/SKILL.md) | Priorizar el cambio más simple que resuelva completamente el trabajo, sin recortar validación, seguridad ni pruebas. Fuente: [dietrichgebert/ponytail](https://github.com/dietrichgebert/ponytail), revisión `96608e078b2d5ea607c5c3b8b5a54d1c1fba6846`; licencia [MIT](.claude/skills/ponytail/LICENSE). |
+| [ui-ux-pro-max](.claude/skills/ui-ux-pro-max/SKILL.md) | Consultar datos y herramientas locales para diseño visual, accesibilidad, interacción y experiencia de usuario. Fuente: [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill), licencia [MIT](.claude/skills/ui-ux-pro-max/LICENSE). |
+| [web-design-guidelines](.claude/skills/web-design-guidelines/SKILL.md) | Revisar interfaces según los lineamientos web vigentes de Vercel; consulta su fuente en línea al revisar. |
+
+Las licencias de terceros se conservan junto a las skills que las requieren.
+`find-skills` consulta el catálogo público y solo debe usarse cuando la solicitud
+lo requiera; no forma parte de las automatizaciones del agente local.
 
 ## Aviso
 
