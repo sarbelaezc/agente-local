@@ -732,13 +732,27 @@ $env:PYTHONPATH = "src"
 .\.venv\Scripts\python.exe -m monthly_close.main scan --read-only --start 2026-10-01 --end 2026-11-01
 ```
 
+## Asistentes de código: GitHub Copilot y Claude Code
+
+Todas las reglas del proyecto están en un solo archivo, [`AGENTS.md`](AGENTS.md):
+
+| Archivo | Quién lo lee | Contenido |
+|---|---|---|
+| [`AGENTS.md`](AGENTS.md) | Copilot directamente; Claude Code a través de `CLAUDE.md` | Las reglas del proyecto: seguridad, datos locales, comandos, GitFlow y pruebas |
+| [`CLAUDE.md`](CLAUDE.md) | Claude Code | Una sola línea, `@AGENTS.md`, porque Claude Code no lee `AGENTS.md` por sí solo |
+| [`.claude/skills/`](.claude/skills/) | Ambos | Skills del proyecto |
+| [`.claude/settings.json`](.claude/settings.json) | Claude Code | Permisos compartidos: impide leer el token de Microsoft y el perfil de Opera |
+
+Para cambiar una regla, edita solo `AGENTS.md`. Los ajustes
+personales de Claude Code van en `.claude/settings.local.json`, que Git ignora.
+
 ## Skill de revisión: Ponytail
 
-Instalada para este proyecto en
-[`.github/skills/ponytail/SKILL.md`](.github/skills/ponytail/SKILL.md).
+Instalada para este proyecto, en una carpeta que leen Copilot y Claude Code:
+[`.claude/skills/ponytail/SKILL.md`](.claude/skills/ponytail/SKILL.md).
 Fuente: [dietrichgebert/ponytail](https://github.com/dietrichgebert/ponytail),
 revisión `96608e078b2d5ea607c5c3b8b5a54d1c1fba6846`, con su
-[licencia MIT](.github/skills/ponytail/LICENSE). Solo se instalaron las
+[licencia MIT](.claude/skills/ponytail/LICENSE). Solo se instalaron las
 instrucciones de la skill y su licencia, sin scripts, hooks ni plugins externos.
 
 Puede solicitar «usa Ponytail para revisar el proyecto» o invocar `/ponytail`
