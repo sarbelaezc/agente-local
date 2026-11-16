@@ -310,3 +310,36 @@ def test_panel_shows_statement_checks_and_balances(store):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_payroll_deducted_instalment_adds_matching_payroll_income(store):
+    credit = st.parse("CREDITO", "202602", CREDIT)
+    report = st.reconcile([credit], [], date(2026, 1, 1))
+    store.record_statements(report.checks(), [st.missing_event(c, "Otros gastos", "Otros ingresos") for c in report.missing])
+    loan = store.state()["transactions"][0]
+    assert store.set_payroll_deduction("santiago", "4444") == 0  # pending instalment: nothing yet
+    store.decide(loan["id"], "family")
+    twins = [r for r in store.state()["transactions"] if r["id"].startswith("payroll:")]
+    assert [(t["decision"], t["category"], t["amount_minor"], t["day"]) for t in twins] == [
+        ("income", "Nómina", loan["amount_minor"], loan["day"]),
+    ]
+    totals = store.monthly_totals("santiago")["2026-02"]
+    assert totals["income"] - totals["net"] == 0  # the deduction no longer counts twice
+    store.decide(loan["id"], "family")  # deciding again does not duplicate it
+    assert sum(r["id"].startswith("payroll:") for r in store.state()["transactions"]) == 1
+    store.decide(loan["id"], "exclude")
+    assert not any(r["id"].startswith("payroll:") for r in store.state()["transactions"])
+    with store.connect() as db:
+        actions = [row[0] for row in db.execute("SELECT value FROM audit WHERE action='payroll-deduction-income'")]
+    assert actions == ["added", "removed"]
+    with pytest.raises(ValueError):
+        store.set_payroll_deduction("santiago", "44a4")
+
+
+def test_payroll_deduction_applies_to_already_decided_instalments(store):
+    credit = st.parse("CREDITO", "202602", CREDIT)
+    report = st.reconcile([credit], [], date(2026, 1, 1))
+    store.record_statements(report.checks(), [st.missing_event(c, "Otros gastos", "Otros ingresos") for c in report.missing])
+    store.decide(store.state()["transactions"][0]["id"], "personal")
+    assert store.set_payroll_deduction("santiago", "4444") == 1
+    assert store.set_payroll_deduction("santiago", "4444") == 0

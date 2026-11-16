@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS group_rules (
     between_owners INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (owner, group_key)
 );
 CREATE TABLE IF NOT EXISTS owner_accounts (suffix TEXT PRIMARY KEY, owner TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS payroll_deductions (
+    owner TEXT NOT NULL, suffix TEXT NOT NULL, PRIMARY KEY (owner, suffix)
+);
 CREATE TABLE IF NOT EXISTS statement_checks (
     identity TEXT PRIMARY KEY, product TEXT NOT NULL, suffix TEXT NOT NULL,
     period_start TEXT NOT NULL, period_end TEXT NOT NULL, movements INTEGER NOT NULL,
@@ -322,6 +325,8 @@ class Store:
     def apply_rules(self) -> int:
         """Decide pending purchases that match a rule; anything doubtful stays pending."""
         decided = self._apply_group_rules()
+        with self.connect() as db:
+            self._sync_payroll_income(db)
         rules = self.rules()
         if not rules:
             return decided
@@ -395,6 +400,7 @@ class Store:
             )
             if rule is None and audit is None:
                 db.execute("UPDATE transactions SET category_uncertain=0 WHERE id=?", (event_id,))
+            self._sync_payroll_income(db)
 
     def _decide(
         self, db: sqlite3.Connection, event_id: str, decision: str, category: str | None = None, *,
@@ -547,6 +553,7 @@ class Store:
                     (owner, group, decision),
                 )
                 self._audit(db, "group-rule-local-user", f"{owner}/{group}", decision)
+            self._sync_payroll_income(db)
         return len(rows)
 
     def mark_between_owners(
@@ -609,6 +616,55 @@ class Store:
                 (rate, converted, event_id),
             )
             self._audit(db, "exchange-suggested", event_id, f"{rate}: {clean_text(origin, 120)}")
+
+    def set_payroll_deduction(self, owner: str, suffix: str) -> int:
+        """Register a credit whose instalments are deducted from the member's payroll.
+
+        The payroll notice then shows the net salary, so each counted instalment also
+        gets a matching payroll income; otherwise the deduction would count twice.
+        """
+        owner = owner_id(owner)
+        if not isinstance(suffix, str) or not re.fullmatch(r"\d{4}", suffix):
+            raise ValueError("Indica solo los ultimos cuatro digitos del credito.")
+        with self.connect() as db:
+            db.execute("INSERT OR IGNORE INTO payroll_deductions VALUES (?,?)", (owner, suffix))
+            self._audit(db, "payroll-deduction-local-user", "*" + suffix, owner)
+            return self._sync_payroll_income(db)
+
+    def _sync_payroll_income(self, db: sqlite3.Connection) -> int:
+        """Keep one payroll income per counted instalment of a payroll-deducted credit.
+
+        The income mirrors the instalment (same day and amount) while it is decided
+        Personal or Familiar, and disappears when it stops counting. Returns changes.
+        """
+        changes = 0
+        for credit in db.execute("SELECT * FROM payroll_deductions").fetchall():
+            loans = db.execute(
+                "SELECT * FROM transactions WHERE owner=? AND kind='loan' AND message_id LIKE ?",
+                (credit["owner"], f"statement:CREDITO:{credit['suffix']}:%"),
+            ).fetchall()
+            for loan in loans:
+                twin = "payroll:" + loan["id"]
+                exists = db.execute("SELECT 1 FROM transactions WHERE id=?", (twin,)).fetchone()
+                counted = loan["decision"] in {"personal", "family"}
+                if counted and not exists:
+                    db.execute(
+                        """INSERT INTO transactions (id,message_id,day,merchant,account,amount_minor,
+                        currency,category,kind,decision,reason,owner) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (twin, "payroll:" + loan["message_id"], loan["day"],
+                         f"Descuento de nómina: cuota del crédito *{credit['suffix']}", "Nómina",
+                         loan["amount_minor"], loan["currency"], INCOME_CATEGORIES[0], "income", "income",
+                         f"Tu nómina llega neta: este valor se descontó para pagar la cuota del crédito "
+                         f"*{credit['suffix']}. Se suma al ingreso para que la cuota no se cuente dos veces.",
+                         loan["owner"]),
+                    )
+                    self._audit(db, "payroll-deduction-income", twin, "added")
+                    changes += 1
+                elif not counted and exists:
+                    db.execute("DELETE FROM transactions WHERE id=?", (twin,))
+                    self._audit(db, "payroll-deduction-income", twin, "removed")
+                    changes += 1
+        return changes
 
     def own_account_suffixes(self, owner: str) -> list[str]:
         """Last four digits of the accounts registered as a member's own."""

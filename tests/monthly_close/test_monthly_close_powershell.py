@@ -138,6 +138,8 @@ function Start-Process {
      ["summary", "--month", "2026-03", "--owner", "hogar"]),
     (["serve"], ["serve"]),
     (["backfill-destinations"], ["backfill-destinations"]),
+    (["payroll-deduction", "-Owner", "santiago", "-Suffix", "1234"],
+     ["payroll-deduction", "--owner", "santiago", "--suffix", "1234"]),
     (["reconcile-statements", "-ReadOnly", "-Start", "2026-01-01"],
      ["reconcile-statements", "--start", "2026-01-01"]),
 ])

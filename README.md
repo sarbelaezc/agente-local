@@ -98,6 +98,7 @@ Sustituye a `run-monthly-close.ps1`, `import-monthly-close.ps1` y
 | `import-manuela [-SourceDir <carpeta>]` | Importa los movimientos de Manuela desde `.local\ImportManuela` y compara sus totales | No |
 | `owner-account -Owner <titular> -Suffix NNNN` | Asigna una cuenta (últimos 4 dígitos) a un titular | No |
 | `reconcile-statements [-Start AAAA-MM-DD] [-ReadOnly]` | Lee por Graph los extractos PDF de Santiago, los concilia con los avisos e importa como pendientes los movimientos que solo muestra el extracto; guarda saldos de inversiones y créditos | No |
+| `payroll-deduction -Owner <titular> -Suffix NNNN` | Marca un crédito cuyas cuotas se descuentan de la nómina; cada cuota que cuenta como gasto suma también como ingreso de nómina | No |
 | `backfill-destinations` | Vuelve a leer por Graph (solo lectura) los avisos de Santiago para guardar el destino de sus pagos ya importados | No |
 | `scheduled` | Cierre de la tarea programada | Solo en la hora de cierre |
 | `invoices` | Lote de facturas (`-BatchSize`, `-Days`, `-Resume`) | Sí |
@@ -302,6 +303,21 @@ Al modelo se le indica que «transferiste» o «pagaste» nunca es ingreso, que 
 comercio es el destinatario nombrado y no «Bancolombia», y cuáles son las
 cuentas propias registradas (`owner-account -Owner santiago`). Una transferencia a
 una cuenta propia queda como `own_transfer`.
+
+**Créditos descontados por nómina.** Cuando la cuota de un crédito se descuenta
+de la nómina, el aviso de nómina llega neto y la cuota también se cuenta como
+gasto, así que el descuento restaría dos veces. Se registra el crédito una vez:
+
+```powershell
+.\scripts\agente-local.ps1 payroll-deduction -Owner santiago -Suffix NNNN
+```
+
+Desde entonces, cada cuota de ese crédito decidida Personal o Familiar crea un
+ingreso «Nómina» espejo («Descuento de nómina: cuota del crédito *NNNN») por el
+mismo valor y fecha, auditado como `payroll-deduction-income`. Si la cuota deja de
+contar, el ingreso espejo desaparece. El gasto no cambia; el ingreso refleja el
+salario completo y el balance deja de contar el descuento dos veces. Aplica a las
+cuotas ya decididas y a las que lleguen con extractos futuros.
 
 **Tasa USD sugerida.** Un movimiento USD pendiente puede llevar una tasa sugerida
 (por ejemplo, el promedio de las tasas que asignaste ese mes). Queda guardada y

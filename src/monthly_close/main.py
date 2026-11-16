@@ -503,6 +503,12 @@ def run(args: argparse.Namespace) -> None:
     if args.command == "import-manuela":
         run_member_import(store, args.source_dir.expanduser().resolve())
         return
+    if args.command == "payroll-deduction":
+        if not args.owner or not args.suffix:
+            raise ValueError("Usa --owner y --suffix con los ultimos cuatro digitos del credito.")
+        changes = store.set_payroll_deduction(args.owner, args.suffix)
+        print(f"Credito *{args.suffix} descontado por nomina de {args.owner}. Ingresos de nomina agregados o ajustados: {changes}.")
+        return
     if args.command == "owner-account":
         if not args.owner or not args.suffix:
             raise ValueError("Usa --owner y --suffix con los ultimos cuatro digitos.")
@@ -577,7 +583,7 @@ def main() -> None:
         "command",
         choices=[
             "serve", "login", "pilot", "scan", "summary", "scheduled", "check-config",
-            "import-manuela", "owner-account", "backfill-destinations", "reconcile-statements",
+            "import-manuela", "owner-account", "backfill-destinations", "reconcile-statements", "payroll-deduction",
         ],
     )
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
