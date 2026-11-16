@@ -13,6 +13,8 @@ param(
     [ValidatePattern("^\d{4}$")]
     [string]$Suffix,
     [string]$SourceDir,
+    [ValidatePattern("^[a-z][a-z0-9-]{1,30}$")]
+    [string]$Mailbox,
     [string]$FromCategory,
     [string]$ToCategory,
     [string]$Start,
@@ -174,6 +176,7 @@ try {
     if ($Owner) { $arguments += @("--owner", $Owner) }
     if ($Suffix) { $arguments += @("--suffix", $Suffix) }
     if ($SourceDir) { $arguments += @("--source-dir", $SourceDir) }
+    if ($Mailbox) { $arguments += @("--mailbox", $Mailbox) }
     if ($FromCategory) { $arguments += @("--from", $FromCategory) }
     if ($ToCategory) { $arguments += @("--to", $ToCategory) }
     if ($ReadOnly) { $arguments += "--read-only" }

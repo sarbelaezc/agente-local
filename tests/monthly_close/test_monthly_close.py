@@ -11,7 +11,7 @@ import pytest
 
 from monthly_close import main as app
 from monthly_close.domain import Preferences, amount_minor, received_local
-from monthly_close.extraction import Mail, extract
+from monthly_close.extraction import EvidenceError, Mail, extract
 from monthly_close.main import months, scheduled_month
 from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.server import create_server
@@ -919,8 +919,10 @@ def test_evidence_correction_cannot_hide_or_change_a_movement(preferences, mail,
             updated = {"kind": "income"} if changes == "kind" else {"amount_text": "999"}
             return {"events": [{**self.event, **updated}]}
 
-    with pytest.raises(ValueError, match="cambio otros datos o elimino"):
+    # The failed correction is queued for review like any other evidence failure.
+    with pytest.raises(EvidenceError) as failure:
         extract(mail, preferences, ChangingModel())
+    assert failure.value.field == "correction"
 
 
 def test_source_code_in_email_remains_text(tmp_path, preferences, mail):
@@ -1022,9 +1024,10 @@ def test_scheduled_close_persists_self_contained_summary(tmp_path, preferences, 
 
     monkeypatch.setattr(app, "datetime", Clock)
     monkeypatch.setattr(app, "runtime", lambda path: {})
-    monkeypatch.setattr(app, "scan", lambda *args: scanned.append(args))
+    monkeypatch.setattr(app, "scan", lambda *args, **kwargs: scanned.append(args + (kwargs,)))
     app.run(Namespace(data_dir=tmp_path, command="scheduled"))
-    assert scanned[0][-2:] == (date(2028, 2, 1), date(2028, 3, 1))
+    # The closing hour reads only what changed since the previous run.
+    assert scanned[0][-3:] == (date(2028, 2, 1), date(2028, 3, 1), {"incremental": True})
     assert "Cierre 2028-02" in (tmp_path / "last-close.txt").read_text(encoding="utf-8")
 
 

@@ -162,7 +162,9 @@ def extract(
                     for old, new in zip(previous, corrected)
                 )
             ):
-                raise ValueError("La correccion de evidencia cambio otros datos o elimino movimientos.")
+                # A correction that rewrites other fields or drops movements failed too:
+                # the notice is queued for a person, never imported.
+                raise EvidenceError("correction")
         try:
             proposals = _proposals(
                 result, mail, preferences, received, source, last_attempt=bool(attempt),

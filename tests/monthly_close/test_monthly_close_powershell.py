@@ -137,6 +137,7 @@ function Start-Process {
     (["summary", "-Month", "2026-03", "-Owner", "hogar"],
      ["summary", "--month", "2026-03", "--owner", "hogar"]),
     (["serve"], ["serve"]),
+    (["login", "-Mailbox", "manuela"], ["login", "--mailbox", "manuela"]),
     (["backfill-destinations"], ["backfill-destinations"]),
     (["merge-category", "-FromCategory", "Predial", "-ToCategory", "Vivienda"],
      ["merge-category", "--from", "Predial", "--to", "Vivienda"]),
@@ -184,6 +185,19 @@ def test_launcher_rejects_invalid_account_suffix(tmp_path):
     result = subprocess.run(
         [powershell, "-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File", str(script),
          "owner-account", "-Owner", "manuela", "-Suffix", "12a4"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode != 0
+
+
+def test_launcher_rejects_an_invalid_mailbox_name(tmp_path):
+    powershell = shutil.which("powershell.exe")
+    if not powershell:
+        pytest.skip("Requires Windows PowerShell.")
+    script = Path(__file__).parents[2] / "scripts" / "agente-local.ps1"
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File", str(script),
+         "login", "-Mailbox", "..\fuera"],
         capture_output=True, text=True, timeout=30,
     )
     assert result.returncode != 0
