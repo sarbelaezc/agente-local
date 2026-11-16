@@ -230,9 +230,25 @@ El panel local ofrece:
 - **Paso 0:** las seis preguntas juntas: ubicación/zona horaria, cuentas, cuentas
   excluidas, etiqueta para transferencias, tratamiento de ahorros y transferencias
   a personas. Añade moneda, categorías, remitentes exactos y autorización para
-  contenido confidencial. La lectura queda bloqueada sin completar este paso.
-- **Mes:** meses seleccionables, total personal y familiar separados, calendario,
-  dona por categoría, acumulado, días de la semana, medios de pago, comercios y detalle.
+  contenido confidencial. Las categorías se definen aquí, se guardan localmente
+  y alimentan las opciones de decisión; no hay una lista predeterminada en el código.
+  Como lista inicial recomendada, configura: `Domicilios y restaurantes`, `Compras`,
+  `Salud y farmacia`, `Transporte`, `Suscripciones`, `Mercado y tiendas` y `Otros gastos`.
+  El panel no las precarga automáticamente.
+  La lectura queda bloqueada sin completar este paso.
+- **Mes:** meses seleccionables y un resumen de cuatro cifras: **Gasto del mes**
+  (con su reparto personal/familiar), **Ingresos**, **Balance** y **Por decidir**,
+  que lleva a la pestaña Decisión. Lo que no es gasto (inversiones, pagos a
+  tarjetas, retiro en efectivo) aparece debajo en una fila compacta y solo si
+  hubo movimientos. Siguen el calendario, la dona por categoría (con porcentaje
+  de cada una, total en el centro y colores distintos y consistentes entre
+  vistas), acumulado, días de la semana, medios de pago y comercios. Las tarjetas
+  de ingresos y de pagos por tarjeta se ocultan si el mes no tiene datos.
+  **Detalle por categoría** separa gastos e inversiones, ingresos («confirmado»)
+  y pagos de tarjeta («pagado»), e indica cuántos movimientos faltan por decidir.
+- Borrar una regla o descartar un aviso de la cola pide confirmación.
+- El panel permite compartir la vista seleccionada mediante la URL, incluye un
+  enlace para saltar al contenido y muestra decisiones en tandas de hasta 50.
 - **Año:** comparativa mensual, promedios, mes de mayor gasto, categoría líder y
   tabla personal/familiar/pendiente. Los meses no conciliados llevan advertencia.
 - **Decisión:** confirmar gasto personal, familiar o no contable y corregir categoría.

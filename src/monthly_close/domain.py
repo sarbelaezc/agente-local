@@ -7,10 +7,6 @@ from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-CATEGORIES = [
-    "Domicilios y restaurantes", "Compras", "Salud y farmacia", "Transporte",
-    "Suscripciones", "Mercado y tiendas", "Otros gastos",
-]
 KINDS = {
     "purchase", "pse", "transfer", "own_transfer", "loan", "income",
     "card_payment", "rejected", "promotion", "verification", "unknown", "investment",

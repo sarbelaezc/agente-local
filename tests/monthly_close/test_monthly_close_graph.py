@@ -12,7 +12,7 @@ import pytest
 
 from monthly_close import main as app
 from monthly_close import graph_client
-from monthly_close.domain import CATEGORIES, Preferences
+from monthly_close.domain import Preferences
 from monthly_close.graph_client import GraphClient, GraphError, validate_graph_url
 from monthly_close.graph_reader import GraphSourceReader
 from monthly_close.outlook import Candidate, OutlookError
@@ -25,12 +25,12 @@ ROOT = "https://graph.microsoft.com/v1.0"
 
 
 @pytest.fixture
-def preferences() -> Preferences:
+def preferences(categories) -> Preferences:
     return Preferences.parse({
         "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
         "accounts": ["Tarjeta A"], "excluded_accounts": ["Cuenta B"],
         "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": [SENDER], "categories": CATEGORIES,
+        "approved_senders": [SENDER], "categories": categories,
         "confidential_confirmed": True,
     })
 

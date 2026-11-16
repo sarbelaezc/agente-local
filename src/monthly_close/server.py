@@ -4,6 +4,7 @@ import json
 import secrets
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from importlib.resources import files
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfoNotFoundError
 
 from monthly_close.store import Store
@@ -45,12 +46,13 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
             if not self.valid_host():
                 self.json_response(403, {"error": "Host no autorizado."})
                 return
-            if self.path == "/":
+            path = urlsplit(self.path).path
+            if path == "/":
                 self.respond(
                     200, files("monthly_close").joinpath("dashboard.html").read_bytes(),
                     "text/html; charset=utf-8",
                 )
-            elif self.path == "/api/state":
+            elif path == "/api/state":
                 self.json_response(200, {**store.state(), "csrf": csrf})
             else:
                 self.json_response(404, {"error": "Ruta inexistente."})

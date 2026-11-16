@@ -4,7 +4,6 @@ import sqlite3
 
 import pytest
 
-from monthly_close.domain import CATEGORIES
 from monthly_close.store import Store
 
 TRANSPORT = "Transporte"
@@ -21,13 +20,13 @@ def event(event_id: str, merchant: str, **updates) -> dict:
 
 
 @pytest.fixture
-def store(tmp_path) -> Store:
+def store(tmp_path, categories) -> Store:
     store = Store(tmp_path / "rules.sqlite3")
     store.configure({
         "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
         "accounts": ["Tarjeta A"], "excluded_accounts": ["Cuenta B"],
         "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": ["avisos@example.test"], "categories": CATEGORIES,
+        "approved_senders": ["avisos@example.test"], "categories": categories,
         "confidential_confirmed": True,
     })
     return store
@@ -37,8 +36,8 @@ def rows(store: Store) -> dict[str, dict]:
     return {row["id"]: row for row in store.state()["transactions"]}
 
 
-def test_rule_decides_matching_purchases_on_import_and_audits_as_rule(store):
-    assert TRANSPORT in CATEGORIES
+def test_rule_decides_matching_purchases_on_import_and_audits_as_rule(store, categories):
+    assert TRANSPORT in categories
     store.add_rule("primax", TRANSPORT, "family")
     store.add_rule("Uber", TRANSPORT, "personal")
     store.import_message("m1", [

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Iterator
 
 from monthly_close.domain import (
-    CATEGORIES, INCOME_CATEGORIES, INCOME_KINDS, NON_EXPENSES, Preferences, clean_text,
+    INCOME_CATEGORIES, INCOME_KINDS, NON_EXPENSES, Preferences, clean_text,
 )
 
 SCHEMA = """
@@ -412,7 +412,7 @@ class Store:
             config = json.loads(raw["value"]) if raw else None
             return {
                 "configured": config is not None, "config": config,
-                "categories": config["categories"] if config else CATEGORIES,
+                "categories": config["categories"] if config else [],
                 "income_categories": INCOME_CATEGORIES,
                 "transactions": [
                     dict(row) for row in db.execute(
