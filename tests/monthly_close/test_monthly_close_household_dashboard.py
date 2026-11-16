@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import threading
+from datetime import datetime
 
 import pytest
 from playwright.sync_api import expect, sync_playwright
@@ -139,6 +140,26 @@ def test_year_view_shows_income_for_each_member_and_household(household):
     assert not errors
 
 
+def test_year_summary_capitalizes_months_and_leaves_months_without_data_blank(household):
+    page, store, errors = household
+    page.clock.set_fixed_time(datetime(2026, 11, 16, 12))  # January elapsed, December still to come
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.locator("#tab-year").click()
+    rows = page.locator("#year-table tbody tr")
+    expect(rows).to_have_count(12)
+    assert rows.nth(2).locator("td").first.inner_text() == "Marzo de 2026"
+    # An elapsed month without movements shows dashes, never 0,00.
+    january = rows.nth(0).inner_text()
+    assert january.startswith("Enero de 2026")
+    assert "—" in january and "0,00" not in january
+    # A month still to come waits for the bank's notices.
+    december = rows.nth(11)
+    assert december.locator("td").nth(1).inner_text() == "Sin notificaciones del banco aún"
+    assert "0,00" not in december.inner_text()
+    assert not errors
+
+
 def test_month_view_is_interactive_like_manuelas_dashboard(household):
     page, store, errors = household
     for event_id, day, merchant, amount, kind, decision, category in [
@@ -188,6 +209,45 @@ def test_month_view_is_interactive_like_manuelas_dashboard(household):
     spending = page.locator("#month-metrics .metric").filter(has_text="Gasto del mes")
     spending.locator("summary", has_text="Ver el abono de terceros").click()
     assert "Pagos de otras personas" in spending.inner_text()
+    assert not errors
+
+
+def test_months_live_under_the_tabs_and_only_in_the_month_view(household):
+    page, store, errors = household
+    chips = page.locator("#month-chips")
+    expect(chips).to_be_visible()
+    assert chips.bounding_box()["y"] > page.locator(".tabs").bounding_box()["y"]
+    # Chronological, short, with the year where it changes.
+    months = chips.locator("button").evaluate_all("items => items.map(item => item.dataset.month)")
+    assert months[0] == MONTH
+    assert months == sorted(months)
+    expect(chips.locator("button").first).to_have_attribute("aria-label", "marzo de 2026")
+    assert chips.locator("button").first.inner_text().startswith("Mar")
+    assert "2026" in chips.locator("button").first.inner_text()
+    assert "2026" not in chips.locator("button").nth(1).inner_text()  # same year: no repeat
+    expect(chips.locator('button[aria-pressed="true"]')).to_have_attribute("data-month", MONTH)
+
+    # The Decision tab shows how many destinations are pending, from any tab.
+    expect(page.locator("#decision-badge")).to_have_text("1")
+    expect(page.locator("#tab-decisions")).to_have_attribute("aria-label", "Decisión, 1 destino por decidir")
+
+    page.locator("#tab-year").click()
+    expect(chips).to_be_hidden()
+    expect(page.locator("#coverage-summary")).to_be_hidden()
+    page.locator("#tab-decisions").click()
+    expect(chips).to_be_hidden()
+
+    # A month of the year view opens the month tab on it.
+    page.locator(f'#month-chips button:not([data-month="{MONTH}"])').first.evaluate("button => button.click()")
+    page.locator("#tab-year").click()
+    page.locator("#year-table").get_by_role("button", name="Ver marzo de 2026 en la pestaña Mes").click()
+    expect(page.locator("#tab-month")).to_have_attribute("aria-selected", "true")
+    expect(chips.locator('button[aria-pressed="true"]')).to_have_attribute("data-month", MONTH)
+    assert f"month={MONTH}" in page.url and "tab=month" in page.url
+
+    # A category of the donut opens its movements in the detail.
+    page.locator("#category-chart").get_by_role("button", name=re.compile("^Compras:")).click()
+    expect(page.locator('#category-details details[data-category="Compras"]')).to_have_attribute("open", "")
     assert not errors
 
 
