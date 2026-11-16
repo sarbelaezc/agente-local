@@ -7,7 +7,7 @@ implementa.
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
-| Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; conciliación y tarea pendientes | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` |
+| Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); conciliación y tarea pendientes | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` |
 
 ## Stack tecnológico
 
@@ -62,7 +62,8 @@ proyecto, que Git ignora:
 
 | Ruta | Contenido |
 |---|---|
-| `.local\MonthlyCloseAgent\` | `runtime.json`, `close.sqlite3` (movimientos, decisiones, reglas y auditoría), `graph_token_cache.bin` (sesión de Microsoft) y `last-close.txt` |
+| `.local\MonthlyCloseAgent\` | `runtime.json`, `close.sqlite3` (movimientos de ambos titulares, decisiones, reglas y auditoría), copias `close.sqlite3.backup-<fecha>` creadas antes de cada migración, `graph_token_cache.bin` (sesión de Microsoft) y `last-close.txt` |
+| `.local\ImportManuela\` | Archivos exportados del panel de Manuela que lee `import-manuela` (movimientos, decisiones por destino y totales de paridad) |
 | `.local\MailInvoiceAgent\` | Perfil de Opera, copias de seguridad del libro, `tessdata`, decisiones de clasificación y estados de lotes |
 | `config\settings.yaml` | Configuración personal de facturas (también ignorada por Git) |
 
@@ -92,7 +93,10 @@ Sustituye a `run-monthly-close.ps1`, `import-monthly-close.ps1` y
 | `check-config` | Comprueba el paso 0 y la configuración | No |
 | `scan` / `pilot` | Recorrido o piloto de un aviso | Sí, salvo con `-ReadOnly` |
 | `import` | `check-config`, `scan` y apertura del panel | Sí |
-| `summary -Month AAAA-MM` | Resumen de un mes | No |
+| `summary -Month AAAA-MM [-Owner santiago\|manuela\|hogar]` | Resumen de un mes (por defecto de Santiago) | No |
+| `import-manuela [-SourceDir <carpeta>]` | Importa los movimientos de Manuela desde `.local\ImportManuela` y compara sus totales | No |
+| `owner-account -Owner <titular> -Suffix NNNN` | Asigna una cuenta (últimos 4 dígitos) a un titular | No |
+| `backfill-destinations` | Vuelve a leer por Graph (solo lectura) los avisos de Santiago para guardar el destino de sus pagos ya importados | No |
 | `scheduled` | Cierre de la tarea programada | Solo en la hora de cierre |
 | `invoices` | Lote de facturas (`-BatchSize`, `-Days`, `-Resume`) | Sí |
 
@@ -155,6 +159,148 @@ El lector por navegador (Playwright sobre Outlook Web con un perfil de Edge) se
 retiró: Graph es más rápido y estable. `runtime.json` ya no admite
 `"source": "browser"`, y las claves `browser_executable`, `outlook_url`,
 `selectors` y `selectors_verified` que queden en un archivo antiguo se ignoran.
+
+### Hogar: Santiago y Manuela
+
+El panel reúne las finanzas de Santiago y de Manuela en una sola base
+(`close.sqlite3`) y distingue siempre de quién es cada movimiento.
+
+**Alcance.** Cada movimiento tiene un titular (`owner`: `santiago` o `manuela`).
+Los de Manuela entran solo por archivo con `import-manuela`; no hay conexión a su
+buzón, API ni navegador. El escáner de Graph y Ollama sigue leyendo únicamente el
+buzón de Santiago, y todo lo que importa queda como de Santiago.
+
+**Migración.** Al abrir una base anterior, el agente copia `close.sqlite3` a
+`close.sqlite3.backup-<fecha UTC>` y añade las columnas `owner` (por defecto
+`santiago`), `group_key`, `time`, `note`, `account_label`, `category_uncertain` y
+`between_owners`, más las tablas `group_rules` y `owner_accounts`. No cambia
+importes, decisiones ni auditoría, y registra `migrate-household` con el nombre de
+la copia.
+
+**Importación de Manuela.** Requiere el paso 0 configurado y lee
+`movimientos_manuela.normalizado.json`, `decisiones_manuela.json` y, si existe,
+`paridad_totales_manuela.json`:
+
+```powershell
+.\scripts\agente-local.ps1 import-manuela
+```
+
+- Valida todos los registros antes de escribir. Si uno falla (por ejemplo, un
+  importe inválido o un destino sin decisión), se detiene sin importar nada e
+  indica solo el número de registro, nunca su contenido.
+- Escribe todo en una sola transacción. Cada movimiento recibe el identificador
+  `manuela:<id>` y pasa por las mismas validaciones del panel.
+- Es idempotente: los identificadores que ya existen se omiten. No toca
+  `processed` ni la cobertura.
+- Las compras, los ingresos y los abonos que Manuela ya contaba entran decididos
+  y auditados uno a uno como `decision-manuela` («aprobado en su panel»).
+- Los pagos a destinos (QR, transferencias, Bre-B, fondo, cajero, pagos
+  mensuales) se deciden con su decisión por destino. Esa decisión se guarda como
+  regla de destino (`group-rule-manuela`) y cada movimiento se audita como
+  `decision-group-rule`. Si una persona ya cambió la regla de un destino, la
+  reimportación no la sobrescribe.
+- Las compras en moneda extranjera entran en COP tal como las convirtió Manuela, a
+  4.000 COP/USD, con la nota «aprox.» visible en el panel.
+- Las categorías dudosas se marcan como «Categoría por confirmar». Suman en
+  su categoría hasta que una persona decide ese movimiento en el panel.
+- Al terminar compara los totales de cada mes con `paridad_totales_manuela.json`
+  y se detiene con error si algún mes no coincide.
+
+**Reglas acordadas.**
+
+| Tema | Regla |
+|---|---|
+| Retiro en cajero | Suma como gasto personal para ambos titulares (regla de Santiago). Por eso el gasto personal de Manuela queda por encima de su panel en los meses con retiros, exactamente por el monto retirado. La comparación de paridad lo descuenta y lo informa como diferencia aprobada. |
+| Abonos de terceros a una tarjeta | Decisión «Abono de tercero» (`third_party_payment`): resta del gasto. Solo se permite en pagos a tarjeta. Los abonos de Manuela se importan así. En Santiago solo resta lo que se marque explícitamente; sus pagos de tarjeta existentes siguen en «No cuenta», así que sus totales no cambian. |
+| «Familiar» en Hogar | Un solo rubro del hogar; el detalle muestra el titular de cada movimiento. |
+| Transferencias entre Santiago y Manuela | Conservan su decisión en la vista de cada titular y no cuentan en Hogar, para no contar dos veces el mismo dinero. Se marcan solas cuando el movimiento nombra una cuenta registrada del otro titular (`*NNNN` en el comercio o una transferencia `tr:` cuyo número termina en esos dígitos), o a mano con el botón «Entre Santiago y Manuela» de la tarjeta del destino, que vale también para pagos futuros a ese destino. |
+| Visibilidad | El panel es local y muestra el detalle de ambos titulares. |
+
+Las cuentas se registran solo en la base local, nunca en Git:
+
+```powershell
+.\scripts\agente-local.ps1 owner-account -Owner santiago -Suffix NNNN
+.\scripts\agente-local.ps1 owner-account -Owner manuela -Suffix NNNN
+```
+
+Registrar una cuenta revisa todos los movimientos existentes. La marca automática
+nunca quita una marca puesta por una persona.
+
+**Destino de los pagos de Santiago.** Igual que en los movimientos de Manuela,
+cada pago saliente de Santiago guarda su destino (`group_key`). Lo lee un lector
+determinista, sin Ollama, de la frase fija del banco; si la frase no lo dice o es
+ambigua, no se asigna. Los formatos reconocidos son:
+
+| Aviso | Destino |
+|---|---|
+| «Transferiste $… (por QR) desde tu cuenta … a la cuenta *NNNN» | `tr:NNNN` |
+| «Transferiste $… a la llave @alias o número desde tu cuenta …» (Bre-B) | `bb:@alias` o `bb:NNNN` |
+| «Pagaste $… por código QR desde tu cuenta … a la llave …» | `qr:…` |
+| «Retiraste $… de tu cuenta de inversión *XXXX …» | `fd:XXXX` |
+
+- De las cuentas y llaves numéricas se guardan solo los últimos 4 dígitos.
+- Los avisos nuevos guardan el destino al importarse.
+- Para los ya importados, `backfill-destinations` vuelve a leer por Graph solo los
+  avisos de pagos salientes sin destino. Usa la sesión guardada, en solo lectura y
+  sin Ollama, y se detiene cuando los encuentra todos.
+- Solo completa destinos vacíos y audita cada uno como `destination-backfill`. No
+  cambia importes, categorías ni decisiones.
+- Un destino `tr:` que coincide con una cuenta registrada del otro titular se marca
+  entre titulares.
+- Los avisos sin estas frases (por ejemplo, aportes a inversión o cajero) siguen
+  agrupados por comercio, porque no se adivinan formatos.
+
+**Panel.** El selector **Santiago / Manuela / Hogar** (Hogar por defecto, guardado
+en la URL como `owner`) filtra Mes, Año y Decisión.
+
+- **Gasto del mes:** personal + familiar − abonos de terceros. El balance es
+  ingresos − ese gasto.
+- **Desglose en Hogar:** «Personal Santiago · Personal Manuela · Familiar». Cada
+  movimiento lleva la etiqueta de su titular, y los marcados entre titulares
+  aparecen en una cifra aparte que no cuenta en Hogar.
+- **Pestaña Decisión:** agrupa los pendientes y el historial por destino (titular
+  + destino; sin destino importado, el destino son las palabras del comercio).
+  Cada tarjeta muestra título, número de movimientos, rango de fechas, total y una
+  pista, con botones que deciden todos sus movimientos a la vez.
+  - Es todo o nada: si un movimiento no pasa la validación (por ejemplo, una
+    compra USD sin tasa), no cambia ninguno.
+  - Cada movimiento se audita como `decision-group-local-user`.
+  - «Aplicar también a pagos futuros a este destino» crea una regla de destino,
+    que se puede borrar en «Reglas por destino». Sin esa casilla no se crea
+    ninguna regla.
+  - Debajo de cada tarjeta sigue disponible la decisión movimiento a movimiento,
+    con categoría y tasa USD. Decidir un movimiento confirma su categoría.
+
+**Seguridad y privacidad.** Los datos de Manuela viven solo en `.local\`. Las
+pruebas usan datos sintéticos y nunca leen `.local`. La importación no usa red,
+Graph ni Ollama, y no ejecuta nada del archivo. Toda decisión, regla y marca entre
+titulares queda en `audit` con su origen.
+
+**Verificado.**
+
+- `pytest` con datos sintéticos cubre: migración con copia, importación validada,
+  atómica e idempotente, paridad, Hogar sin doble conteo, totales de Santiago sin
+  cambios, decisión y reglas por destino, abonos, el flujo del panel en Chromium y
+  los comandos del lanzador.
+- Una prueba en seco sobre una copia de la base real importó todos los
+  movimientos sin pendientes. Cada mes coincide con el panel de Manuela, salvo la
+  diferencia aprobada del cajero en los meses con retiros. Los totales y
+  resúmenes de Santiago quedaron idénticos y la segunda importación no cambió
+  nada.
+- En la base real, `backfill-destinations` (con copia manual previa) leyó todos
+  los avisos pendientes y guardó el destino de casi todos los pagos salientes de
+  Santiago. Los demás no tienen una frase de destino. Importes, decisiones y totales no cambiaron. Ninguna
+  transferencia fue a la cuenta registrada de Manuela.
+- En la base real (con copia previa) se importó con la misma paridad, se
+  registraron las cuentas de ambos titulares y los abonos de Santiago a las
+  tarjetas de Manuela se marcaron entre titulares, con auditoría.
+
+**Pendiente.**
+
+- Las transferencias entre titulares no se detectaron automáticamente en esa
+  prueba: los avisos de Santiago no guardan la cuenta destino y los datos de
+  Manuela no mencionan la cuenta de Santiago. Por ahora se marcan a mano por
+  destino.
 
 ### Lectura del buzón por Microsoft Graph
 
@@ -230,9 +376,25 @@ El panel local ofrece:
 - **Paso 0:** las seis preguntas juntas: ubicación/zona horaria, cuentas, cuentas
   excluidas, etiqueta para transferencias, tratamiento de ahorros y transferencias
   a personas. Añade moneda, categorías, remitentes exactos y autorización para
-  contenido confidencial. La lectura queda bloqueada sin completar este paso.
-- **Mes:** meses seleccionables, total personal y familiar separados, calendario,
-  dona por categoría, acumulado, días de la semana, medios de pago, comercios y detalle.
+  contenido confidencial. Las categorías se definen aquí, se guardan localmente
+  y alimentan las opciones de decisión; no hay una lista predeterminada en el código.
+  Como lista inicial recomendada, configura: `Domicilios y restaurantes`, `Compras`,
+  `Salud y farmacia`, `Transporte`, `Suscripciones`, `Mercado y tiendas` y `Otros gastos`.
+  El panel no las precarga automáticamente.
+  La lectura queda bloqueada sin completar este paso.
+- **Mes:** meses seleccionables y un resumen de cuatro cifras: **Gasto del mes**
+  (con su reparto personal/familiar), **Ingresos**, **Balance** y **Por decidir**,
+  que lleva a la pestaña Decisión. Lo que no es gasto (inversiones, pagos a
+  tarjetas, retiro en efectivo) aparece debajo en una fila compacta y solo si
+  hubo movimientos. Siguen el calendario, la dona por categoría (con porcentaje
+  de cada una, total en el centro y colores distintos y consistentes entre
+  vistas), acumulado, días de la semana, medios de pago y comercios. Las tarjetas
+  de ingresos y de pagos por tarjeta se ocultan si el mes no tiene datos.
+  **Detalle por categoría** separa gastos e inversiones, ingresos («confirmado»)
+  y pagos de tarjeta («pagado»), e indica cuántos movimientos faltan por decidir.
+- Borrar una regla o descartar un aviso de la cola pide confirmación.
+- El panel permite compartir la vista seleccionada mediante la URL, incluye un
+  enlace para saltar al contenido y muestra decisiones en tandas de hasta 50.
 - **Año:** comparativa mensual, promedios, mes de mayor gasto, categoría líder y
   tabla personal/familiar/pendiente. Los meses no conciliados llevan advertencia.
 - **Decisión:** confirmar gasto personal, familiar o no contable y corregir categoría.
@@ -738,29 +900,17 @@ Todas las reglas del proyecto están en un solo archivo, [`AGENTS.md`](AGENTS.md
 
 | Archivo | Quién lo lee | Contenido |
 |---|---|---|
-| [`AGENTS.md`](AGENTS.md) | Copilot directamente; Claude Code a través de `CLAUDE.md` | Las reglas del proyecto: seguridad, datos locales, comandos, GitFlow y pruebas |
+| [`AGENTS.md`](AGENTS.md) | Copilot directamente; Claude Code a través de `CLAUDE.md` | Reglas del proyecto, seguridad y catálogo/selección de skills |
 | [`CLAUDE.md`](CLAUDE.md) | Claude Code | Una sola línea, `@AGENTS.md`, porque Claude Code no lee `AGENTS.md` por sí solo |
-| [`.claude/skills/`](.claude/skills/) | Ambos | Skills del proyecto |
+| [`.claude/skills/`](.claude/skills/) | Ambos | Única ubicación de las skills compartidas |
 | [`.claude/settings.json`](.claude/settings.json) | Claude Code | Permisos compartidos: impide leer el token de Microsoft y el perfil de Opera |
 
 Para cambiar una regla, edita solo `AGENTS.md`. Los ajustes
 personales de Claude Code van en `.claude/settings.local.json`, que Git ignora.
 
-## Skill de revisión: Ponytail
-
-Instalada para este proyecto, en una carpeta que leen Copilot y Claude Code:
-[`.claude/skills/ponytail/SKILL.md`](.claude/skills/ponytail/SKILL.md).
-Fuente: [dietrichgebert/ponytail](https://github.com/dietrichgebert/ponytail),
-revisión `96608e078b2d5ea607c5c3b8b5a54d1c1fba6846`, con su
-[licencia MIT](.claude/skills/ponytail/LICENSE). Solo se instalaron las
-instrucciones de la skill y su licencia, sin scripts, hooks ni plugins externos.
-
-Puede solicitar «usa Ponytail para revisar el proyecto» o invocar `/ponytail`
-cuando el cliente la detecte. Su enfoque es el cambio más simple que resuelva
-completamente el problema, sin recortar validación, seguridad o pruebas.
-La instalación no envía código ni datos personales a Ponytail.
-La lista de skills de una sesión abierta puede requerir una nueva sesión para
-reconocerla; en la sesión de instalación se leyeron sus instrucciones directamente.
+El catálogo y los criterios para elegir la skill adecuada se mantienen solo en
+[`AGENTS.md`](AGENTS.md). Las instrucciones completas de cada skill están en su
+`SKILL.md` dentro de [`.claude/skills/`](.claude/skills/).
 
 ## Aviso
 

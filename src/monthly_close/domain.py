@@ -7,10 +7,6 @@ from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-CATEGORIES = [
-    "Domicilios y restaurantes", "Compras", "Salud y farmacia", "Transporte",
-    "Suscripciones", "Mercado y tiendas", "Otros gastos",
-]
 KINDS = {
     "purchase", "pse", "transfer", "own_transfer", "loan", "income",
     "card_payment", "rejected", "promotion", "verification", "unknown", "investment",
@@ -18,6 +14,22 @@ KINDS = {
 INCOME_CATEGORIES = ["Nómina", "Transferencia recibida", "Consignación", "Otros ingresos"]
 INCOME_KINDS = {"income", "transfer", "unknown"}  # kinds a person may confirm as income
 NON_EXPENSES = {"loan", "card_payment", "rejected", "promotion", "verification"}
+# Household members; existing records belong to the first one.
+OWNERS = {"santiago": "Santiago", "manuela": "Manuela"}
+HOUSEHOLD = "hogar"
+DECISIONS = {
+    "personal", "family", "exclude", "investment", "investment_withdrawal", "cash_withdrawal",
+    "income", "third_party_payment",
+}
+# Kinds whose counterpart may be the other household member's account.
+COUNTERPART_KINDS = {"transfer", "own_transfer", "income", "unknown", "card_payment", "pse"}
+
+
+def owner_id(value: object, allow_household: bool = False) -> str:
+    """Validate a household member (or the whole household when allowed)."""
+    if value in OWNERS or (allow_household and value == HOUSEHOLD):
+        return value  # type: ignore[return-value]
+    raise ValueError("Titular no reconocido.")
 EMAIL = re.compile(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+")
 
 

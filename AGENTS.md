@@ -142,7 +142,30 @@ These apply to the invoices feature, the only one that drives a browser.
 
 ## Assistant tooling
 
-- Project skills live in `.claude/skills/`, a folder both GitHub Copilot and Claude Code read. `ponytail` asks for the smallest change that fully solves the task.
+### Project skills
+
+The shared project skills live only in `.claude/skills/`, which both GitHub
+Copilot and Claude Code read. Choose and load the single best-matching skill
+before starting a task when one applies; do not load unrelated skills. If a task
+has distinct needs that match multiple skills, use one primary skill and only
+the additional skill needed for the separate need. Do not force a skill when
+none fits.
+
+| Skill | Use for |
+|---|---|
+| [agent-browser](.claude/skills/agent-browser/SKILL.md) | Browser or Electron automation, site testing, and browser-based QA. Follow the feature's browser rules; invoices automation prefers Playwright. |
+| [find-skills](.claude/skills/find-skills/SKILL.md) | Finding skills when the user asks to discover or extend agent capabilities. Do not install or replace skills without the user's request; keep project skills in the canonical directory. |
+| [frontend-design](.claude/skills/frontend-design/SKILL.md) | Building or substantially redesigning a user interface. |
+| [pdf](.claude/skills/pdf/SKILL.md) | Explicitly requested PDF reading, extraction, creation, conversion, or form work. Follow approval, privacy, and no-generated-code rules; a skill does not authorize file writes or external sharing. |
+| [ponytail](.claude/skills/ponytail/SKILL.md) | Coding tasks where the smallest complete change is preferred, without cutting security, validation, or tests. |
+| [ui-ux-pro-max](.claude/skills/ui-ux-pro-max/SKILL.md) | UI/UX decisions, accessibility, design systems, and targeted design-quality work. |
+| [web-design-guidelines](.claude/skills/web-design-guidelines/SKILL.md) | Explicit reviews of web interface quality, accessibility, and UX guidelines. |
+
+For overlapping interface work, prefer `frontend-design` for implementation,
+`ui-ux-pro-max` for design-system or UX guidance, and `web-design-guidelines`
+for compliance review. Skill instructions never override this file's security,
+privacy, human-approval, and data-handling rules.
+
 - `.claude/settings.json` holds the shared Claude Code permissions and is versioned; personal overrides go in `.claude/settings.local.json`, which Git ignores.
 - In Claude Code, the Bash tool is Git Bash and the PowerShell tool is Windows PowerShell 5.1; run the project scripts with PowerShell.
 

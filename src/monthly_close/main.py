@@ -25,7 +25,9 @@ from monthly_close.extraction import EvidenceError, extract
 from monthly_close.graph_client import (
     AUTHORITIES, CACHE_NAME, CLIENT_ID, GraphClient, interactive_login, silent_token,
 )
+from monthly_close.destinations import assign_destinations
 from monthly_close.graph_reader import DEFAULT_ORIGIN, GraphSourceReader
+from monthly_close.household_import import PARITY_FILE, import_member, parity_report
 from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.server import create_server
 from monthly_close.store import Store
@@ -338,6 +340,85 @@ def run_pilot(store: Store, data_dir: Path, settings: dict, read_only: bool) -> 
     )
 
 
+OUTGOING_KINDS = ("transfer", "own_transfer", "unknown", "pse")
+
+
+class _AllFound(Exception):
+    """Every notice the backfill needed was read; the walk can stop."""
+
+
+def backfill_destinations(
+    store: Store, data_dir: Path, settings: dict, preferences: Preferences,
+) -> dict[str, int]:
+    """Read Santiago's notices again (read-only, no Ollama) to store each payment's destination.
+
+    Only notices behind outgoing movements without a destination are read; folders are
+    walked newest first and stop at notices older than the oldest movement needed.
+    """
+    with store.connect() as db:
+        rows = db.execute(
+            "SELECT id,message_id,day,amount_minor FROM transactions WHERE owner='santiago' "
+            f"AND group_key IS NULL AND kind IN ({','.join('?' * len(OUTGOING_KINDS))})",
+            OUTGOING_KINDS,
+        ).fetchall()
+    if not rows:
+        return {"notices": 0, "read": 0, "updated": 0, "without_destination": 0}
+    by_notice: dict[str, list] = {}
+    for row in rows:
+        by_notice.setdefault(row["message_id"], []).append(row)
+    oldest = min(date.fromisoformat(row["day"]) for row in rows) - timedelta(days=10)
+    remaining = set(by_notice)
+    found: dict[str, str] = {}
+    with open_source(data_dir, settings, preferences.approved_senders) as reader:
+
+        def visit(candidate: Candidate) -> bool | None:
+            if candidate.sender not in preferences.approved_senders:
+                raise OutlookError("La carpeta devolvio un remitente no autorizado. Detenido.")
+            stamp = getattr(reader, "_received", {}).get(candidate.item_id)
+            if isinstance(stamp, str) and received_local(stamp, preferences.timezone).date() < oldest:
+                return False
+            mail = reader.read(candidate)
+            if mail.id not in remaining:
+                return None
+            remaining.discard(mail.id)
+            events = [{"amount_minor": row["amount_minor"]} for row in by_notice[mail.id]]
+            assign_destinations(events, mail.subject + "\n" + mail.body)
+            for row, event in zip(by_notice[mail.id], events):
+                if event.get("group_key"):
+                    found[row["id"]] = event["group_key"]
+            if not remaining:
+                raise _AllFound
+            return None
+
+        try:
+            reader.walk_folders(settings["max_messages"], visit)
+        except _AllFound:
+            pass
+    updated = store.set_destinations(found)
+    return {
+        "notices": len(by_notice), "read": len(by_notice) - len(remaining),
+        "updated": updated, "without_destination": len(rows) - len(found),
+    }
+
+
+def run_member_import(store: Store, folder: Path) -> None:
+    """Import Manuela's exported files and compare her monthly totals with her dashboard."""
+    result = import_member(store, folder)
+    print(
+        f"Importacion de Manuela: {result['imported']} nuevos, {result['skipped']} ya importados; "
+        f"{result['approved']} aprobados en su panel, {result['by_destination']} decididos por destino, "
+        f"{result['pending']} pendientes; {result['between_owners']} entre titulares."
+    )
+    parity = folder / PARITY_FILE
+    if not parity.is_file():
+        print("Sin archivo de paridad: no se compararon totales.")
+        return
+    matched, lines = parity_report(store, parity)
+    print("\n".join(lines))
+    if not matched:
+        raise ValueError("Los totales importados no coinciden con el panel de Manuela; revisa antes de usarlos.")
+
+
 def run(args: argparse.Namespace) -> None:
     data_dir = args.data_dir.expanduser().resolve()
     store = Store(data_dir / "close.sqlite3")
@@ -352,7 +433,16 @@ def run(args: argparse.Namespace) -> None:
     if args.command == "summary":
         month = args.month or datetime.now().strftime("%Y-%m")
         datetime.strptime(month, "%Y-%m")
-        print(store.summary(month))
+        print(store.summary(month, args.owner or "santiago"))
+        return
+    if args.command == "import-manuela":
+        run_member_import(store, args.source_dir.expanduser().resolve())
+        return
+    if args.command == "owner-account":
+        if not args.owner or not args.suffix:
+            raise ValueError("Usa --owner y --suffix con los ultimos cuatro digitos.")
+        flagged = store.set_owner_account(args.owner, args.suffix)
+        print(f"Cuenta *{args.suffix} asignada a {args.owner}. Movimientos marcados entre titulares: {flagged}.")
         return
     preferences = store.preferences()
     now = datetime.now(ZoneInfo(preferences.timezone))
@@ -368,6 +458,15 @@ def run(args: argparse.Namespace) -> None:
             settings["graph_client_id"], settings.get("graph_authority", "consumers"), data_dir / CACHE_NAME,
         )
         print(f"Sesion de Microsoft guardada para {account}. Permiso: solo lectura de correo.")
+        return
+    if args.command == "backfill-destinations":
+        result = backfill_destinations(store, data_dir, settings, preferences)
+        print(
+            f"Destinos: {result['notices']} avisos por revisar, {result['read']} leidos; "
+            f"{result['updated']} movimientos con destino guardado, "
+            f"{result['without_destination']} sin destino literal en el aviso. "
+            "Solo lectura del buzon; sin Ollama ni cambios de decisiones."
+        )
         return
     if args.command == "check-config":
         if not preferences.approved_senders or settings.get("folder_scan_verified") is not True:
@@ -400,9 +499,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Cierre mensual local: buzon de Outlook por Microsoft Graph + Ollama.")
     parser.add_argument(
         "command",
-        choices=["serve", "login", "pilot", "scan", "summary", "scheduled", "check-config"],
+        choices=[
+            "serve", "login", "pilot", "scan", "summary", "scheduled", "check-config",
+            "import-manuela", "owner-account", "backfill-destinations",
+        ],
     )
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
+    parser.add_argument(
+        "--source-dir", type=Path, default=data_root() / "ImportManuela",
+        help="Con import-manuela, carpeta local con los archivos exportados de Manuela.",
+    )
+    parser.add_argument(
+        "--owner", choices=["santiago", "manuela", "hogar"],
+        help="Con summary, titular u hogar (por defecto santiago); con owner-account, titular.",
+    )
+    parser.add_argument("--suffix", help="Con owner-account, ultimos cuatro digitos de la cuenta.")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--start", help="YYYY-MM-DD")
     parser.add_argument("--end", help="YYYY-MM-DD, exclusivo")

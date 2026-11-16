@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from monthly_close import main as app
-from monthly_close.domain import CATEGORIES, Preferences, amount_minor, received_local
+from monthly_close.domain import Preferences, amount_minor, received_local
 from monthly_close.extraction import Mail, extract
 from monthly_close.main import months, scheduled_month
 from monthly_close.outlook import Candidate, OutlookError
@@ -19,12 +19,12 @@ from monthly_close.store import SCHEMA, Store
 
 
 @pytest.fixture
-def preferences() -> Preferences:
+def preferences(categories) -> Preferences:
     return Preferences.parse({
         "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
         "accounts": ["Tarjeta A"], "excluded_accounts": ["Cuenta B"],
         "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": ["avisos@example.test"], "categories": CATEGORIES,
+        "approved_senders": ["avisos@example.test"], "categories": categories,
         "confidential_confirmed": True,
     })
 
@@ -1048,6 +1048,7 @@ def test_panel_requires_origin_csrf_and_loopback_host(panel, preferences):
     store, client, url = panel
     state = client.get("/api/state").json()
     assert state["configured"] is False
+    assert client.get("/?tab=year&month=2026-10&currency=COP").status_code == 200
     assert client.post("/api/config", json=preferences.to_dict()).status_code == 403
     headers = {"Origin": "https://evil.test", "X-CSRF-Token": state["csrf"]}
     assert client.post("/api/config", headers=headers, json=preferences.to_dict()).status_code == 403

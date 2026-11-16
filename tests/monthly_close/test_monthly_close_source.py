@@ -9,7 +9,6 @@ import pytest
 from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.source_reader import parse_source
 from monthly_close import main as app
-from monthly_close.domain import CATEGORIES
 from monthly_close.store import Store
 
 CANDIDATE = Candidate("row-1", "avisos@example.test", "Compra Tienda")
@@ -91,13 +90,13 @@ def test_duplicate_critical_headers_stop(header):
 
 
 @pytest.fixture
-def pilot(tmp_path, monkeypatch):
+def pilot(tmp_path, monkeypatch, categories):
     store = Store(tmp_path / "pilot.sqlite3")
     store.configure({
         "location": "Prueba", "timezone": "America/Bogota", "currency": "COP",
         "accounts": ["Tarjeta A"], "excluded_accounts": [],
         "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": [CANDIDATE.sender], "categories": CATEGORIES,
+        "approved_senders": [CANDIDATE.sender], "categories": categories,
         "confidential_confirmed": True,
     })
 

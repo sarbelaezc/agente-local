@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f3f5f8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'">
   <title>Cierre mensual · Panel local</title>
   <style>
@@ -25,6 +26,10 @@
       --red: #b42318;
       --red-soft: #fff0ef;
       --shadow: 0 10px 28px rgb(20 32 52 / 7%);
+      --owner-santiago: #1d4fbf;
+      --owner-santiago-soft: #e3ebff;
+      --owner-manuela: #8a2d6b;
+      --owner-manuela-soft: #fbe7f3;
       --radius: 16px;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
       background: var(--bg);
@@ -48,19 +53,26 @@
       --red: #ff9a91;
       --red-soft: #442322;
       --shadow: 0 10px 28px rgb(0 0 0 / 22%);
+      --owner-santiago: #a9c2ff;
+      --owner-santiago-soft: #22355c;
+      --owner-manuela: #f3a8d6;
+      --owner-manuela-soft: #4a2140;
     }
     * { box-sizing: border-box; }
     body { margin: 0; min-width: 320px; background: var(--bg); color: var(--ink); }
     button, input, select, textarea { font: inherit; }
     button, select, input, textarea { color: inherit; }
     button { cursor: pointer; }
+    :where(button, a, input, select, textarea, summary) { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
     button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
     textarea:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    .skip-link { position: absolute; z-index: 10; top: 8px; left: 8px; transform: translateY(-160%); padding: 10px 14px; border-radius: 8px; background: var(--surface); color: var(--ink); }
+    .skip-link:focus-visible { transform: translateY(0); }
     .shell { max-width: 1440px; margin: 0 auto; padding: 24px clamp(16px, 3vw, 42px) 48px; }
     .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
     .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
     .brand-mark { display: grid; place-items: center; flex: 0 0 auto; width: 42px; height: 42px; border-radius: 13px; background: var(--accent); color: var(--on-accent); font-weight: 800; }
-    h1 { margin: 0; font-size: clamp(1.15rem, 2.5vw, 1.55rem); letter-spacing: -.03em; }
+    h1 { margin: 0; font-size: clamp(1.15rem, 2.5vw, 1.55rem); letter-spacing: -.03em; text-wrap: balance; }
     .eyebrow { margin: 3px 0 0; color: var(--muted); font-size: .88rem; }
     .top-actions, .toolbar, .inline-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
     .button, .select-button {
@@ -69,12 +81,17 @@
       background: var(--surface); color: var(--ink); font-weight: 650;
     }
     .button:hover { border-color: var(--accent); }
+    .tab:hover, .chip:hover { color: var(--accent); }
     .button.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
     .button.primary:hover { filter: brightness(.96); }
     .button.small { min-height: 36px; padding: 7px 10px; font-size: .9rem; }
     .button.danger { color: var(--red); }
     .button[disabled] { cursor: not-allowed; opacity: .58; }
     .alert { padding: 13px 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    main[aria-busy="true"] #global-message { display: flex; align-items: center; gap: 10px; }
+    main[aria-busy="true"] #global-message::before { width: 14px; height: 14px; flex: 0 0 auto; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; content: ""; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { main[aria-busy="true"] #global-message::before { animation: none; } }
     .alert.warning { border-color: #e7bd72; background: var(--orange-soft); color: var(--ink); }
     .alert.error { border-color: var(--red); background: var(--red-soft); color: var(--red); }
     .alert.success { border-color: var(--green); background: var(--green-soft); color: var(--ink); }
@@ -83,7 +100,7 @@
     .panel, .card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
     .panel { padding: clamp(17px, 2.5vw, 26px); }
     .card { padding: 18px; min-width: 0; }
-    .card h3, .panel h2, .section-heading h2 { margin: 0; letter-spacing: -.02em; }
+    .card h3, .card h4, .panel h2, .section-heading h2 { margin: 0; letter-spacing: -.02em; text-wrap: balance; }
     .card h3 { font-size: 1rem; }
     .section-heading { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin: 25px 0 14px; }
     .section-heading p { margin: 5px 0 0; color: var(--muted); }
@@ -112,7 +129,7 @@
     .toolbar-group { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
     .control-label { color: var(--muted); font-size: .86rem; font-weight: 650; }
     .select-button { padding: 7px 11px; }
-    .select-button select { min-width: 112px; border: 0; background: transparent; color: inherit; font-weight: 700; }
+    .select-button select { min-width: 112px; border: 0; background: var(--surface); color: var(--ink); font-weight: 700; }
     .month-chips { display: flex; gap: 8px; overflow-x: auto; padding: 3px 1px 9px; scrollbar-width: thin; }
     .chip { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; background: var(--surface); color: var(--muted); font-weight: 650; }
     .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
@@ -121,6 +138,26 @@
     .metric .label { display: block; color: var(--muted); font-size: .86rem; font-weight: 650; }
     .metric strong { display: block; margin-top: 7px; font-size: clamp(1.1rem, 2vw, 1.55rem); overflow-wrap: anywhere; }
     .metric small { display: block; margin-top: 5px; color: var(--muted); }
+    .month-summary { margin: 13px 0; }
+    .month-summary .metrics { margin: 0; }
+    @media (max-width: 560px) { .month-summary .metrics { grid-template-columns: 1fr; } }
+    .metric.hero strong { font-size: clamp(1.3rem, 2.4vw, 1.9rem); letter-spacing: -.02em; }
+    .metric.action { display: flex; flex-direction: column; justify-content: flex-start; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+    .metric.action:hover, .metric.action:focus-visible { border-color: var(--accent); }
+    .split-bar { display: flex; gap: 2px; height: 8px; margin-top: 10px; border-radius: 4px; overflow: hidden; background: var(--line); }
+    .split-bar span { display: block; min-width: 2px; }
+    .split-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; color: var(--muted); font-size: .84rem; }
+    .split-legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .metric-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .metric.minor { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; padding: 8px 12px; border-radius: 999px; font-size: .86rem; }
+    .metric.minor .label { display: inline; font-size: inherit; }
+    .metric.minor strong { display: inline; margin: 0; font-size: inherit; }
+    .metric.minor small { display: inline; margin: 0; }
+    .legend-value { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+    .legend-value small { color: var(--muted); min-width: 2.6em; text-align: right; }
+    .metric strong, .legend-value, td.numeric, .rank-row strong, .account-row strong, .detail-row strong,
+    .day-amount, .split-legend { font-variant-numeric: tabular-nums; }
+    .detail-group { margin: 18px 0 2px; color: var(--muted); font-size: .8rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
     .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
     .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
     .card-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
@@ -161,17 +198,36 @@
     .decision-list { display: grid; gap: 12px; }
     .decision-card { padding: 17px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
     .decision-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 7px 16px; color: var(--muted); font-size: .88rem; }
+    .decision-meta > span, .detail-row > span { min-width: 0; overflow-wrap: anywhere; }
     .decision-card h3 { margin: 10px 0 4px; }
     .decision-card .reason { margin: 6px 0 14px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
     .decision-category { max-width: 380px; margin: 12px 0; }
     .decision-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .decision-actions .button { min-width: 112px; }
+    .owner-tag { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: .78rem; font-weight: 700; white-space: nowrap; }
+    .owner-tag.owner-santiago { background: var(--owner-santiago-soft); color: var(--owner-santiago); }
+    .owner-tag.owner-manuela { background: var(--owner-manuela-soft); color: var(--owner-manuela); }
+    .flag-tag { display: inline-flex; padding: 2px 8px; border-radius: 999px; background: var(--orange-soft); color: var(--orange); font-size: .78rem; font-weight: 650; }
+    .owner-switch { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .owner-switch button { min-height: 36px; border: 0; border-radius: 9px; padding: 6px 12px; background: transparent; color: var(--muted); font-weight: 700; }
+    .owner-switch button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+    .decision-actions .button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+    .group-card { padding: 17px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+    .group-card h3 { margin: 8px 0 2px; overflow-wrap: anywhere; }
+    .group-card .group-amount { display: block; font-size: 1.45rem; font-weight: 780; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+    .group-card details { margin-top: 10px; }
+    .group-card details > summary { color: var(--muted); font-size: .9rem; font-weight: 650; cursor: pointer; }
+    .group-card details .decision-list { margin-top: 10px; }
+    .check-line { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--muted); font-size: .88rem; }
+    .check-line input { width: 18px; height: 18px; }
+    .decision-summary { margin-bottom: 14px; }
     .empty-state { padding: 24px; border: 1px dashed var(--line); border-radius: 13px; color: var(--muted); text-align: center; }
     .coverage-form { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(0, 2fr) auto; align-items: end; gap: 10px; }
     .notice-line { display: flex; align-items: flex-start; gap: 9px; color: var(--muted); font-size: .88rem; line-height: 1.45; }
     .footer-note { margin-top: 24px; color: var(--muted); font-size: .84rem; line-height: 1.5; }
     @media (max-width: 850px) {
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .legend-value { white-space: normal; justify-content: flex-end; }
       .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 600px) {
@@ -211,6 +267,7 @@
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Saltar al contenido principal</a>
   <div class="shell">
     <header class="topbar">
       <div class="brand">
@@ -221,8 +278,8 @@
         </div>
       </div>
       <div class="top-actions">
-        <button class="button" id="theme-toggle" type="button" aria-pressed="false" aria-label="Cambiar tema claro u oscuro">◐ <span>Tema</span></button>
-        <button class="button" id="refresh-button" type="button" aria-label="Actualizar" hidden>↻ <span class="refresh-label">Actualizar</span></button>
+        <button class="button" id="theme-toggle" type="button" aria-pressed="false" aria-label="Cambiar tema claro u oscuro"><span aria-hidden="true">◐</span> <span>Tema</span></button>
+        <button class="button" id="refresh-button" type="button" aria-label="Actualizar" hidden><span aria-hidden="true">↻</span> <span class="refresh-label">Actualizar</span></button>
         <button class="button" id="edit-config-button" type="button" hidden>Configuración</button>
       </div>
     </header>
@@ -230,7 +287,7 @@
     <div id="global-message" class="alert" role="status" aria-live="polite" hidden></div>
     <div id="load-error" class="alert error" role="alert" hidden></div>
 
-    <main>
+    <main id="main-content" tabindex="-1">
       <section id="setup-area" class="panel" hidden aria-labelledby="setup-title">
         <p class="eyebrow">Configuración inicial</p>
         <h2 id="setup-title">Prepara tu cierre local</h2>
@@ -257,6 +314,14 @@
         </div>
         <div class="toolbar">
           <div class="toolbar-group">
+            <span class="control-label" id="owner-label">Titular</span>
+            <div id="owner-switch" class="owner-switch" role="group" aria-labelledby="owner-label">
+              <button type="button" data-owner="santiago" aria-pressed="false">Santiago</button>
+              <button type="button" data-owner="manuela" aria-pressed="false">Manuela</button>
+              <button type="button" data-owner="hogar" aria-pressed="false">Hogar</button>
+            </div>
+          </div>
+          <div class="toolbar-group">
             <label class="control-label" for="currency-select">Moneda</label>
             <span class="select-button"><select id="currency-select" aria-label="Moneda para mostrar"></select></span>
           </div>
@@ -271,14 +336,14 @@
         </div>
 
         <section id="panel-month" role="tabpanel" aria-labelledby="tab-month">
-          <div class="metrics" id="month-metrics"></div>
+          <div class="month-summary" id="month-metrics"></div>
           <div class="grid-2">
             <article class="card">
               <div class="card-header"><div><h3>Calendario diario</h3><p>Montos personales y familiares decididos</p></div></div>
-              <div id="calendar" class="calendar" aria-label="Calendario del mes"></div>
+              <div id="calendar" class="calendar" role="list" aria-label="Días del mes"></div>
             </article>
             <article class="card">
-              <div class="card-header"><div><h3>Gasto por categoría</h3><p>Solo decisiones personales y familiares</p></div></div>
+              <div class="card-header"><div><h3>Gasto por categoría</h3><p>Parte del gasto personal y familiar del mes</p></div></div>
               <div id="category-chart" class="chart-wrap"></div>
             </article>
             <article class="card">
@@ -289,11 +354,11 @@
               <div class="card-header"><div><h3>Distribución por día</h3><p>Importes decididos según el día de la semana</p></div></div>
               <div id="weekday-chart" class="rank-list"></div>
             </article>
-            <article class="card">
+            <article class="card" id="income-card">
               <div class="card-header"><div><h3>Ingresos por tipo</h3><p>Solo dinero recibido que confirmaste como ingreso</p></div></div>
               <div id="income-ranking" class="rank-list"></div>
             </article>
-            <article class="card">
+            <article class="card" id="card-payment-card">
               <div class="card-header"><div><h3>Pagos por tarjeta</h3><p>Abonos a la deuda leídos del aviso; no suman al gasto</p></div></div>
               <div id="card-payment-ranking" class="rank-list"></div>
             </article>
@@ -307,14 +372,14 @@
             </article>
           </div>
           <section aria-labelledby="category-details-title">
-            <div class="section-heading"><div><h2 id="category-details-title">Detalle por categoría</h2><p>Abre una categoría para revisar sus movimientos.</p></div></div>
+            <div class="section-heading"><div><h2 id="category-details-title">Detalle por categoría</h2><p>Abre una categoría para revisar sus movimientos. Los ingresos y los pagos de tarjeta van aparte: no son gasto.</p></div></div>
             <div id="category-details"></div>
           </section>
           <section class="card" aria-labelledby="coverage-title" style="margin-top:16px">
             <div class="card-header"><div><h3 id="coverage-title">Verificación manual de cobertura</h3><p>Marcar revisado registra únicamente tu verificación manual; no certifica que la importación esté completa.</p></div></div>
             <form id="coverage-form" class="coverage-form">
-              <div class="field"><label for="coverage-month">Mes</label><select id="coverage-month" required></select></div>
-              <div class="field"><label for="coverage-note">Nota de conciliación (obligatoria)</label><input id="coverage-note" type="text" maxlength="500" autocomplete="off" placeholder="Qué revisaste" required></div>
+              <div class="field"><label for="coverage-month">Mes</label><select id="coverage-month" name="month" required></select></div>
+              <div class="field"><label for="coverage-note">Nota de conciliación (obligatoria)</label><input id="coverage-note" name="note" type="text" maxlength="500" autocomplete="off" placeholder="Qué revisaste…" required></div>
               <button class="button primary" type="submit">Marcar revisado</button>
             </form>
           </section>
@@ -324,7 +389,7 @@
           <div class="toolbar">
             <div class="toolbar-group">
               <label class="control-label" for="year-select">Año</label>
-              <span class="select-button"><select id="year-select" aria-label="Año para mostrar"></select></span>
+              <span class="select-button"><select id="year-select" name="year" aria-label="Año para mostrar"></select></span>
             </div>
           </div>
           <div class="metrics" id="year-metrics"></div>
@@ -346,7 +411,8 @@
         </section>
 
         <section id="panel-decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden>
-          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Se muestran todos los meses de la moneda seleccionada; en COP también aparecen los movimientos USD para ingresar su tasa estimada. Las categorías solo se cuentan en gastos si eliges Personal o Familiar.</p></div></div>
+          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Agrupadas por destino: una decisión vale para todos los pagos pendientes a ese mismo destino, y cada movimiento sigue disponible por separado. Se muestran todos los meses de la moneda seleccionada; en COP también aparecen los movimientos USD para ingresar su tasa estimada. Las categorías solo se cuentan en gastos si eliges Personal o Familiar.</p></div></div>
+          <div id="decision-summary" class="metric hero decision-summary" aria-live="polite"></div>
           <section id="extraction-review" hidden>
             <h3>Avisos sin extraer · revisión pendiente</h3>
             <p>No se importaron sus propuestas. Busca el aviso en Outlook por estos datos y repite su rango para reintentar. Si el aviso no trae ningún movimiento (por ejemplo, es solo informativo), pulsa «Descartar aviso» para sacarlo de la lista. No se incluyen en los totales ni permiten aprobar datos inválidos.</p>
@@ -357,12 +423,15 @@
             <summary>Reglas por comercio · decidir sin preguntar</summary>
             <p class="hint" style="margin-top:12px">Si el comercio de una compra, o quien te envía dinero, contiene estas palabras completas, se decide solo con la categoría y el tipo indicados. Las reglas de tipo Ingreso solo aplican a dinero recibido y las demás solo a compras; las compras en USD sin tasa, las transferencias enviadas y las cuentas excluidas se siguen preguntando. Puedes cambiar cualquier decisión en el historial.</p>
             <form id="rule-form" class="decision-actions" style="align-items:end;margin-top:12px">
-              <div class="field"><label for="rule-pattern">El comercio contiene</label><input id="rule-pattern" name="pattern" maxlength="60" required placeholder="PRIMAX"></div>
+              <div class="field"><label for="rule-pattern">El comercio contiene</label><input id="rule-pattern" name="pattern" maxlength="60" autocomplete="off" spellcheck="false" required placeholder="PRIMAX…"></div>
               <div class="field"><label for="rule-category">Categoría</label><select id="rule-category" name="category"></select></div>
               <div class="field"><label for="rule-decision">Tipo</label><select id="rule-decision" name="decision"><option value="personal">Gasto personal</option><option value="family">Familiar</option><option value="income">Ingreso</option></select></div>
               <button type="submit" class="button primary">Guardar regla</button>
             </form>
             <div id="rules-list" class="decision-list" style="margin-top:12px"></div>
+            <h3 style="margin:18px 0 6px">Reglas por destino</h3>
+            <p class="hint">Se crean al marcar «Aplicar también a pagos futuros» en una tarjeta de destino. Borrar una regla conserva las decisiones que ya tomó.</p>
+            <div id="group-rules-list" class="decision-list" style="margin-top:8px"></div>
           </details>
           <details class="history-detail" id="decision-history">
             <summary>Decisiones anteriores · cambiar una decisión</summary>
@@ -394,10 +463,48 @@
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       };
       const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
-      const state = { data: null, month: currentMonth(), year: String(new Date().getFullYear()), currency: "", activeTab: "month", busy: false };
+      const initialParams = new URLSearchParams(location.search);
+      const initialMonth = initialParams.get("month");
+      const initialYear = initialParams.get("year");
+      const initialTab = initialParams.get("tab");
+      const state = {
+        data: null,
+        month: initialMonth && monthPattern.test(initialMonth) ? initialMonth : currentMonth(),
+        year: initialYear && /^\d{4}$/.test(initialYear) ? initialYear : String(new Date().getFullYear()),
+        currency: initialParams.get("currency") || "",
+        activeTab: ["month", "year", "decisions"].includes(initialTab) ? initialTab : "month",
+        owner: ["santiago", "manuela", "hogar"].includes(initialParams.get("owner")) ? initialParams.get("owner") : "hogar",
+        busy: false,
+        categoryColors: new Map(),
+        pendingLimit: 50,
+        historyLimit: 50,
+        failureLimit: 50
+      };
+      const decisionPageSize = 50;
       const palette = ["#4779e6", "#e7a443", "#42a17a", "#9a70d6", "#df7180", "#3c9aaa", "#b68732", "#64748b"];
-      const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-      const weekdayNames = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+      function categoryColorsFor(data) {
+        const categories = new Set(safeArray(data.categories).filter(category => typeof category === "string"));
+        safeArray(data.transactions).forEach(tx => {
+          if (tx) categories.add(itemText(tx.category));
+        });
+        const ordered = Array.from(categories).sort((a, b) => a.localeCompare(b, "es"));
+        return new Map(ordered.map((category, index) => [
+          category, `hsl(${Math.round(index * 360 / ordered.length)}, 68%, 42%)`
+        ]));
+      }
+      function categoryColor(category) {
+        return state.categoryColors.get(category);
+      }
+      const monthNames = Array.from({ length: 12 }, (_, month) =>
+        new Intl.DateTimeFormat("es", { month: "short", timeZone: "UTC" })
+          .format(new Date(Date.UTC(2020, month, 1)))
+      );
+      const weekdayNames = Array.from({ length: 7 }, (_, day) =>
+        new Intl.DateTimeFormat("es", { weekday: "short", timeZone: "UTC" })
+          .format(new Date(Date.UTC(2023, 0, 2 + day)))
+      );
+      const monthYearFormatter = new Intl.DateTimeFormat("es", { month: "long", year: "numeric", timeZone: "UTC" });
+      const dateFormatter = new Intl.DateTimeFormat("es", { day: "numeric", month: "short", year: "numeric" });
       const nonExpenseKinds = new Set(["loan", "card_payment", "rejected", "promotion", "verification"]);
       const incomeKinds = new Set(["income", "transfer", "unknown"]);
       function incomeCategories() {
@@ -445,9 +552,22 @@
       function reportingCurrency(tx) {
         return txCurrency(tx) === "USD" && Number.isSafeInteger(tx.cop_amount_minor) ? "COP" : txCurrency(tx);
       }
+      function inOwnerView(tx) { return state.owner === "hogar" || tx.owner === state.owner; }
+      // Money moving between household members keeps its decision in each member's view,
+      // but the household view leaves it out so it is not counted twice.
+      function hiddenInView(tx) { return state.owner === "hogar" && tx.between_owners === 1; }
+      function ownerLabel(owner) {
+        const found = safeArray(state.data && state.data.owners).find(item => item && item.id === owner);
+        return found && typeof found.label === "string" ? found.label : itemText(owner);
+      }
+      function ownerTag(owner) {
+        const tag = el("span", `owner-tag owner-${owner === "manuela" ? "manuela" : "santiago"}`, ownerLabel(owner));
+        return tag;
+      }
       function transactions() {
         return safeArray(state.data && state.data.transactions).filter(tx =>
           tx && typeof tx === "object" && Number.isSafeInteger(tx.amount_minor) && reportingCurrency(tx) === state.currency
+          && inOwnerView(tx)
         ).map(tx => reportingCurrency(tx) !== txCurrency(tx)
           ? { ...tx, amount_minor: tx.cop_amount_minor, currency: "COP" } : tx);
       }
@@ -458,6 +578,7 @@
       }
       function decisionOptions(tx) {
         const kind = typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "";
+        if (kind === "card_payment") return [["exclude", "No cuenta"], ["third_party_payment", "Abono de tercero"]];
         if (nonExpenseKinds.has(kind)) return [["exclude", "No cuenta"]];
         if (kind === "income") return [["income", "Ingreso"], ["exclude", "No cuenta"]];
         if (isExcludedAccount(tx)) return kind === "investment" ? [["exclude", "No cuenta"]] : [["family", "Familiar"], ["exclude", "No cuenta"]];
@@ -475,6 +596,7 @@
       }
       function counted(items) {
         return items.filter(tx =>
+          !hiddenInView(tx) &&
           (tx.decision === "personal" || tx.decision === "cash_withdrawal" || tx.decision === "family") &&
           !nonExpenseKinds.has(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "") &&
           !(["personal", "cash_withdrawal"].includes(tx.decision) && (
@@ -484,11 +606,38 @@
         );
       }
       function sum(items) { return items.reduce((total, tx) => total + tx.amount_minor, 0); }
+      // Third parties paying a member's card reduce that member's spending.
+      function thirdParty(items) { return items.filter(tx => tx.decision === "third_party_payment" && !hiddenInView(tx)); }
+      function netSpend(items) { return sum(counted(items)) - sum(thirdParty(items)); }
       function monthOf(tx) { return typeof tx.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(tx.day) ? tx.day.slice(0, 7) : ""; }
       function monthLabel(key) {
         if (!monthPattern.test(key)) return key;
-        const [year, month] = key.split("-");
-        return `${monthNames[Number(month) - 1]} ${year}`;
+        const [year, month] = key.split("-").map(Number);
+        return monthYearFormatter.format(new Date(Date.UTC(year, month - 1, 1)));
+      }
+      function formatDate(value) {
+        if (typeof value !== "string") return "Fecha no disponible";
+        const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+        const date = new Date(dateOnly ? `${value}T12:00:00Z` : value);
+        return Number.isNaN(date.getTime()) ? value : dateFormatter.format(date);
+      }
+      function syncUrl() {
+        const url = new URL(location.href);
+        url.searchParams.set("tab", state.activeTab);
+        url.searchParams.set("month", state.month);
+        url.searchParams.set("year", state.year);
+        url.searchParams.set("owner", state.owner);
+        if (state.currency) url.searchParams.set("currency", state.currency);
+        else url.searchParams.delete("currency");
+        history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      }
+      function appendMoreButton(host, remaining, label, onClick) {
+        if (remaining <= 0) return;
+        const count = Math.min(decisionPageSize, remaining);
+        const button = el("button", "button small", `Mostrar ${count} ${label} más`);
+        button.type = "button";
+        button.addEventListener("click", onClick);
+        host.append(button);
       }
       function updateCoverageSummary(month) {
         const coverage = safeArray(state.data && state.data.coverage).find(entry => entry && entry.month === month);
@@ -500,9 +649,18 @@
         const name = typeof item === "string" && item.trim() ? item.trim() : "Sin especificar";
         return name;
       }
+      // Owner label in the household view, plus marks a person still has to see.
+      function appendFlags(host, tx) {
+        const flags = [];
+        if (state.owner === "hogar") flags.push(ownerTag(tx.owner));
+        if (tx.category_uncertain === 1) flags.push(el("span", "flag-tag", "Categoría por confirmar"));
+        if (tx.between_owners === 1) flags.push(el("span", "flag-tag", "Entre Santiago y Manuela · no cuenta en Hogar"));
+        if (typeof tx.note === "string" && tx.note) flags.push(el("span", "flag-tag", tx.note));
+        flags.forEach(flag => host.append(document.createTextNode(" "), flag));
+      }
       function makeMetric(label, value, note = "") {
         const box = el("div", "metric");
-        box.append(el("span", "label", label), el("strong", "", value));
+        box.append(el("span", "label", label), document.createTextNode(" "), el("strong", "", value));
         if (note) box.append(el("small", "", note));
         return box;
       }
@@ -523,6 +681,9 @@
           }
           if (data.transactions.some(tx => !tx || !("exchange_rate" in tx) || !("cop_amount_minor" in tx))) {
             throw new Error("Reinicia el servidor del panel para habilitar las tasas manuales USD/COP");
+          }
+          if (!Array.isArray(data.owners) || data.transactions.some(tx => !("owner" in tx) || !("group" in tx))) {
+            throw new Error("Reinicia el servidor del panel para ver los titulares del hogar");
           }
           if (!Array.isArray(data.extraction_failures)) {
             throw new Error("Reinicia el servidor del panel para mostrar los avisos pendientes de extraccion");
@@ -572,7 +733,10 @@
           input.value = value == null ? "" : String(value);
           if (options.required) input.required = true;
           if (options.placeholder) input.placeholder = options.placeholder;
-          if (options.autocomplete) input.autocomplete = options.autocomplete;
+          if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+            input.autocomplete = options.autocomplete || "off";
+          }
+          if (name === "approved_senders") input.spellcheck = false;
           if (options.maxlength) input.maxLength = options.maxlength;
           if (options.help) {
             const helpId = `${input.id}-help`;
@@ -586,17 +750,17 @@
           return wrap;
         };
         form.append(
-          field("Ubicación", "location", config.location, { required: true, autocomplete: "off", placeholder: "Ciudad o región" }),
-          field("Zona horaria", "timezone", config.timezone, { required: true, placeholder: "Ej.: America/Mexico_City", autocomplete: "off" }),
+          field("Ubicación", "location", config.location, { required: true, autocomplete: "off", placeholder: "Ciudad o región…" }),
+          field("Zona horaria", "timezone", config.timezone, { required: true, placeholder: "Ej.: America/Mexico_City…", autocomplete: "off" }),
           field("Moneda", "currency", config.currency || "MXN", {
             type: "select", required: true, help: "Se muestran y suman solo importes de una misma moneda.",
             options: Array.from(new Set(["MXN", "USD", "EUR", "CAD", "GBP", "COP", "ARS", "CLP", "PEN", "BRL", "JPY", "CHF", "AUD", config.currency].filter(Boolean))).map(code => [code, code])
           }),
-          field("Etiqueta para transferencias", "transfer_label", config.transfer_label, { required: true, placeholder: "Transferencia", autocomplete: "off" }),
+          field("Etiqueta para transferencias", "transfer_label", config.transfer_label, { required: true, placeholder: "Transferencia…", autocomplete: "off" }),
           field("Cuentas autorizadas", "accounts", safeArray(config.accounts).join("\n"), { type: "textarea", full: true, required: true, help: "Una cuenta por línea. No agregues credenciales ni datos de acceso." }),
           field("Cuentas excluidas", "excluded_accounts", safeArray(config.excluded_accounts).join("\n"), { type: "textarea", full: true, help: "Opcional: una cuenta por línea." }),
           field("Remitentes aprobados exactos", "approved_senders", safeArray(config.approved_senders).join("\n"), { type: "textarea", full: true, help: "Una dirección de correo exacta por línea. Vacío bloquea importaciones; no se aceptan patrones ni dominios comodín." }),
-          field("Categorías", "categories", safeArray(config.categories || (state.data && state.data.categories)).join("\n"), { type: "textarea", full: true, help: "Una categoría por línea." })
+          field("Categorías", "categories", safeArray(config.categories || (state.data && state.data.categories)).join("\n"), { type: "textarea", full: true, help: "Una categoría por línea; esta lista alimenta las opciones de decisión." })
         );
         const askSavings = el("label", "checkbox-field");
         const savingsInput = document.createElement("input");
@@ -709,6 +873,7 @@
       function setBusy(busy) {
         state.busy = busy;
         $("main").setAttribute("aria-busy", String(busy));
+        $("#global-message").setAttribute("aria-busy", String(busy));
         document.querySelectorAll("button:not(#theme-toggle), input, select, textarea")
           .forEach(control => { control.disabled = busy; });
       }
@@ -716,6 +881,7 @@
       function render() {
         const data = state.data;
         if (!data) return;
+        state.categoryColors = categoryColorsFor(data);
         const configured = data.configured && data.config && typeof data.config === "object";
         $("#setup-area").hidden = configured;
         $("#dashboard-area").hidden = !configured;
@@ -759,6 +925,7 @@
             renderYear();
             renderDecisions();
             updateCoverageSummary(state.month);
+            syncUrl();
           });
           chips.append(button);
         });
@@ -781,10 +948,13 @@
           yearSelect.append(option);
         });
         updateCoverageSummary(state.month);
+        renderOwnerSwitch();
         if (!$("#config-area").hidden) mountConfigForm($("#config-form-host"), "edit");
         renderDashboard();
         renderYear();
         renderDecisions();
+        selectTab(state.activeTab);
+        syncUrl();
       }
 
       function renderMonthControls(months) {
@@ -798,6 +968,12 @@
         }
       }
 
+      function renderOwnerSwitch() {
+        document.querySelectorAll("#owner-switch button").forEach(button => {
+          button.setAttribute("aria-pressed", String(button.dataset.owner === state.owner));
+        });
+      }
+
       function renderDashboard() {
         const inMonth = transactions().filter(tx => monthOf(tx) === state.month);
         const decisions = counted(inMonth);
@@ -807,25 +983,103 @@
         const withdrawals = inMonth.filter(tx => tx.decision === "investment_withdrawal");
         const cash = decisions.filter(tx => tx.category === "Retiro en efectivo");
         const pending = inMonth.filter(tx => tx.decision == null && tx.kind !== "income");
-        const incomes = inMonth.filter(tx => tx.decision === "income");
+        const incomes = inMonth.filter(tx => tx.decision === "income" && !hiddenInView(tx));
         const pendingIncomes = inMonth.filter(tx => tx.decision == null && tx.kind === "income");
         const monthDate = new Date(Number(state.month.slice(0, 4)), Number(state.month.slice(5, 7)) - 1, 1);
-        const total = sum(decisions);
-        const metrics = $("#month-metrics");
-        metrics.replaceChildren(
-          makeMetric("Personal", formatMoney(sum(personal)), `${personal.length} movimientos`),
-          makeMetric("Familiar", formatMoney(sum(family)), `${family.length} movimientos`),
-          makeMetric("Inversiones", formatMoney(netInvestments(inMonth)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo`),
-          makeMetric("Retiros de inversión", formatMoney(sum(withdrawals)), "Fuera de gastos"),
-          makeMetric("Retiro en efectivo", formatMoney(sum(cash)), "Incluido en gastos"),
-          makeMetric("Total decidido", formatMoney(total), "Personal + familiar; moneda seleccionada"),
-          makeMetric("Pendiente", formatMoney(sum(pending)), `${pending.length} movimientos · no incluido en total`),
-          makeMetric("Ingresos", formatMoney(sum(incomes)), `${incomes.length} confirmados · ${pendingIncomes.length} por confirmar (${formatMoney(sum(pendingIncomes))})`),
-          makeMetric("Balance", formatMoney(sum(incomes) - total), "Ingresos confirmados − gastos personales y familiares")
+        const paidBack = thirdParty(inMonth);
+        const gross = sum(decisions);
+        const total = gross - sum(paidBack);
+        const cardPayments = inMonth.filter(tx => tx.kind === "card_payment" && tx.category === "Pago de tarjeta" && tx.decision !== "third_party_payment");
+        const between = inMonth.filter(tx => hiddenInView(tx) && tx.decision != null);
+        const incomeTotal = sum(incomes);
+        const balance = incomeTotal - total;
+
+        // Four headline figures; everything that is not spending goes in a slim row below.
+        const spend = makeMetric(
+          "Gasto del mes", formatMoney(total),
+          paidBack.length ? `Personal + familiar ${formatMoney(gross)} − abonos de terceros ${formatMoney(sum(paidBack))}`
+            : "Total decidido: personal + familiar"
         );
+        spend.classList.add("hero");
+        // In the household view personal spending is shown per member; family is one item.
+        const parts = state.owner === "hogar"
+          ? [
+            ...safeArray(state.data.owners).map((owner, index) => [
+              `Personal ${owner.label}`, personal.filter(tx => tx.owner === owner.id), index ? palette[3] : palette[0]
+            ]),
+            ["Familiar", family, palette[1]]
+          ]
+          : [["Personal", personal, palette[0]], ["Familiar", family, palette[1]]];
+        if (gross > 0) {
+          const bar = el("div", "split-bar");
+          bar.setAttribute("role", "img");
+          bar.setAttribute("aria-label", parts.map(([name, rows]) => `${name} ${formatMoney(sum(rows))}`).join(", "));
+          parts.forEach(([, rows, color]) => {
+            const amount = sum(rows);
+            if (amount <= 0) return;
+            const part = el("span");
+            part.style.flex = `${amount} 0 0`;
+            part.style.backgroundColor = color;
+            bar.append(part);
+          });
+          spend.append(bar);
+        }
+        const split = el("div", "split-legend");
+        parts.forEach(([name, rows, color]) => {
+          const item = el("span");
+          const swatch = el("span", "swatch");
+          swatch.style.backgroundColor = color;
+          item.append(swatch, el("span", "", `${name} ${formatMoney(sum(rows))} · ${rows.length}`));
+          split.append(item);
+        });
+        spend.append(split);
+
+        const income = makeMetric(
+          "Ingresos", formatMoney(incomeTotal),
+          pendingIncomes.length
+            ? `${incomes.length} confirmados · ${pendingIncomes.length} por confirmar (${formatMoney(sum(pendingIncomes))})`
+            : `${incomes.length} confirmados`
+        );
+        income.classList.add("hero");
+        const net = makeMetric(
+          "Balance", formatMoney(balance),
+          incomeTotal === 0 && total === 0 ? "Sin ingresos ni gastos decididos"
+            : `${balance >= 0 ? "A favor" : "En contra"} · ingresos confirmados − gasto`
+        );
+        net.classList.add("hero");
+        const toDecide = pending.length + pendingIncomes.length;
+        const destinations = new Set([...pending, ...pendingIncomes].map(tx => `${tx.owner}|${tx.group}`)).size;
+        const review = el("button", "metric hero action");
+        review.type = "button";
+        review.append(
+          el("span", "label", "Por decidir"),
+          el("strong", "", String(toDecide)),
+          el("small", "", toDecide
+            ? `Faltan por decidir ${destinations} ${destinations === 1 ? "destino" : "destinos"} · ${formatMoney(sum(pending))} en gastos que aún no suman. Revisar →`
+            : "Todo lo de este mes está decidido")
+        );
+        review.addEventListener("click", () => selectTab("decisions"));
+        const heroes = el("div", "metrics");
+        heroes.append(spend, income, net, review);
+
+        const strip = el("div", "metric-strip");
+        const minor = (label, value, note) => {
+          const chip = makeMetric(label, value, note);
+          chip.classList.add("minor");
+          strip.append(chip);
+        };
+        if (investments.length || withdrawals.length) {
+          minor("Inversiones", formatMoney(netInvestments(inMonth)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo · fuera del gasto`);
+        }
+        if (cardPayments.length) minor("Pagos a tarjetas", formatMoney(sum(cardPayments)), `${cardPayments.length} · no es gasto`);
+        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
+        if (between.length) minor("Entre Santiago y Manuela", formatMoney(sum(between)), `${between.length} · no cuentan en Hogar`);
+        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "ya incluido en el gasto");
+        $("#month-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
+
+        $("#income-card").hidden = incomes.length === 0;
+        $("#card-payment-card").hidden = cardPayments.length === 0;
         renderRanking("#income-ranking", incomes, tx => tx.category, "Sin tipo", items => items);
-        const cardPayments = inMonth.filter(tx => tx.kind === "card_payment" && tx.category === "Pago de tarjeta");
-        metrics.append(makeMetric("Pagos a tarjetas", formatMoney(sum(cardPayments)), `${cardPayments.length} pagos · no es gasto`));
         renderRanking("#card-payment-ranking", cardPayments, tx => tx.merchant, "Sin tarjeta", items => items);
         renderCalendar(inMonth, monthDate);
         renderDonut(decisions);
@@ -839,9 +1093,17 @@
       function renderCalendar(items, firstDay) {
         const host = $("#calendar");
         host.replaceChildren();
-        for (const day of weekdayNames) host.append(el("div", "weekday", day));
+        for (const day of weekdayNames) {
+          const heading = el("div", "weekday", day);
+          heading.setAttribute("aria-hidden", "true");
+          host.append(heading);
+        }
         const offset = (firstDay.getDay() + 6) % 7;
-        for (let i = 0; i < offset; i++) host.append(el("div", "day-cell empty"));
+        for (let i = 0; i < offset; i++) {
+          const empty = el("div", "day-cell empty");
+          empty.setAttribute("aria-hidden", "true");
+          host.append(empty);
+        }
         const year = firstDay.getFullYear();
         const month = firstDay.getMonth();
         const days = new Date(year, month + 1, 0).getDate();
@@ -853,9 +1115,15 @@
         for (let day = 1; day <= days; day++) {
           const date = new Date(year, month, day);
           const cell = el("div", `day-cell${date.toDateString() === new Date().toDateString() ? " today" : ""}`);
-          cell.setAttribute("aria-label", `${day} ${monthLabel(state.month)}${grouped.has(day) ? `, ${formatMoney(grouped.get(day))}` : ""}`);
+          cell.setAttribute("role", "listitem");
+          cell.setAttribute("aria-label", `${weekdayNames[(date.getDay() + 6) % 7]}, ${day} ${monthLabel(state.month)}${grouped.has(day) ? `, ${formatMoney(grouped.get(day))}` : ""}`);
           cell.append(el("span", "day-number", String(day)));
-          if (grouped.has(day)) cell.append(el("span", "day-amount", formatMoney(grouped.get(day))));
+          if (grouped.has(day)) {
+            // The cell is narrow: show the number alone; the currency is in the label and tooltip.
+            const amount = el("span", "day-amount", new Intl.NumberFormat("es", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(grouped.get(day) / 100));
+            amount.title = formatMoney(grouped.get(day));
+            cell.append(amount);
+          }
           host.append(cell);
         }
       }
@@ -871,37 +1139,46 @@
         const entries = Array.from(groups).filter(([, amount]) => amount > 0).sort((a, b) => b[1] - a[1]);
         const grandTotal = entries.reduce((sumAmount, entry) => sumAmount + entry[1], 0);
         if (!grandTotal) { host.append(el("div", "empty-state", "No hay importes decididos para graficar.")); return; }
-        const svg = svgEl("svg", { id: "category-chart-svg", viewBox: "0 0 240 190", role: "img", "aria-label": "Gráfico de dona de importes por categoría" });
-        const title = svgEl("title");
-        title.textContent = "Distribución por categoría por magnitud";
-        svg.append(title);
-        const radius = 62;
-        const circumference = 2 * Math.PI * radius;
-        let offset = 0;
-        entries.forEach(([category, amount], index) => {
-          const arc = circumference * amount / grandTotal;
-          const circle = svgEl("circle", {
-            cx: 120, cy: 88, r: radius, fill: "none", stroke: palette[index % palette.length],
-            "stroke-width": 28, "stroke-dasharray": `${arc} ${circumference - arc}`, "stroke-dashoffset": -offset,
-            transform: "rotate(-90 120 88)"
-          });
-          circle.append(svgEl("title"));
-          circle.lastChild.textContent = `${category}: ${formatMoney(amount)}`;
-          svg.append(circle);
-          offset += arc;
+        const svg = svgEl("svg", { id: "category-chart-svg", viewBox: "0 0 240 190", role: "img", "aria-label": `Gasto por categoría: ${entries.map(([category, amount]) => `${category} ${Math.round(amount * 100 / grandTotal)} %`).join(", ")}` });
+        const cx = 120, cy = 95, outer = 84, inner = 54;
+        const point = (radius, angle) => `${(cx + radius * Math.sin(angle)).toFixed(2)} ${(cy - radius * Math.cos(angle)).toFixed(2)}`;
+        let angle = 0;
+        entries.forEach(([category, amount]) => {
+          const sweep = 2 * Math.PI * amount / grandTotal;
+          // A full ring cannot be one arc: its start and end points would coincide.
+          const pieces = sweep >= 2 * Math.PI - 1e-9 ? [[0, Math.PI], [Math.PI, 2 * Math.PI]] : [[angle, angle + sweep]];
+          const d = pieces.map(([from, to]) => {
+            const large = to - from > Math.PI ? 1 : 0;
+            return `M ${point(outer, from)} A ${outer} ${outer} 0 ${large} 1 ${point(outer, to)} L ${point(inner, to)} A ${inner} ${inner} 0 ${large} 0 ${point(inner, from)} Z`;
+          }).join(" ");
+          const slice = svgEl("path", { d, fill: categoryColor(category), stroke: "var(--surface)", "stroke-width": entries.length > 1 ? 2 : 0, "stroke-linejoin": "round" });
+          slice.append(svgEl("title"));
+          slice.lastChild.textContent = `${category}: ${formatMoney(amount)} (${(amount * 100 / grandTotal).toFixed(1).replace(".", ",")} %)`;
+          svg.append(slice);
+          angle += sweep;
         });
-        const center = svgEl("text", { x: 120, y: 85, "text-anchor": "middle", class: "axis-label" });
-        center.textContent = "Magnitud";
-        svg.append(center);
+        let compact;
+        try {
+          compact = new Intl.NumberFormat("es", { notation: "compact", maximumFractionDigits: 2 }).format(grandTotal / 100);
+        } catch {
+          compact = (grandTotal / 100).toFixed(0);
+        }
+        const center = svgEl("text", { x: cx, y: cy + 1, "text-anchor": "middle", class: "axis-label", style: "font-size:17px;font-weight:750" });
+        center.textContent = compact;
+        const caption = svgEl("text", { x: cx, y: cy + 17, "text-anchor": "middle", class: "axis-label", style: "font-weight:500;fill:var(--muted)" });
+        caption.textContent = state.currency;
+        svg.append(center, caption);
         host.append(svg);
         const legend = el("div", "legend");
-        entries.forEach(([category, amount], index) => {
+        entries.forEach(([category, amount]) => {
           const row = el("div", "legend-row");
           const label = el("span", "legend-label");
           const swatch = el("span", "swatch");
-          swatch.style.backgroundColor = palette[index % palette.length];
+          swatch.style.backgroundColor = categoryColor(category);
           label.append(swatch, el("span", "", category));
-          row.append(label, el("strong", "", formatMoney(amount)));
+          const value = el("span", "legend-value");
+          value.append(el("small", "", `${Math.round(amount * 100 / grandTotal)} %`), el("strong", "", formatMoney(amount)));
+          row.append(label, value);
           legend.append(row);
         });
         host.append(legend);
@@ -1004,45 +1281,66 @@
       function renderCategoryDetails(items) {
         const host = $("#category-details");
         host.replaceChildren();
-        const groups = new Map();
-        items.forEach(tx => {
-          const category = itemText(tx.category);
-          if (!groups.has(category)) groups.set(category, []);
-          groups.get(category).push(tx);
-        });
-        if (!groups.size) { host.append(el("div", "empty-state", "No hay movimientos para este mes y moneda.")); return; }
-        Array.from(groups).sort((a, b) => a[0].localeCompare(b[0], "es")).forEach(([category, rows]) => {
-          const detail = el("details", "category-detail");
-          const decided = counted(rows);
-          const investments = rows.filter(tx => tx.decision === "investment");
-          const withdrawals = rows.filter(tx => tx.decision === "investment_withdrawal");
-          const cash = rows.filter(tx => tx.decision === "cash_withdrawal");
-          const total = investments.length
-            ? `${formatMoney(sum(investments))} en inversiones`
-            : withdrawals.length ? `${formatMoney(sum(withdrawals))} retirado de inversiones`
-              : cash.length ? `${formatMoney(sum(decided))} decidido · gasto en efectivo`
-                : `${formatMoney(sum(decided))} decidido`;
-          const summary = el("summary", "", `${category} · ${total} · ${rows.length} movimientos`);
-          detail.append(summary);
-          const body = el("div", "detail-rows");
-          rows.sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
-            const row = el("div", "detail-row");
-            const status = tx.decision === "personal" ? "Personal" : tx.decision === "family" ? "Familiar" : tx.decision === "investment" ? "Inversión" : tx.decision === "investment_withdrawal" ? "Retiro de inversión" : tx.decision === "cash_withdrawal" ? "Retiro en efectivo" : tx.decision === "exclude" ? "Excluido" : "Pendiente";
-            row.append(el("span", "", `${tx.day || "Sin fecha"} · ${itemText(tx.merchant)} · ${status}`), el("strong", "", formatMoney(tx.amount_minor)));
-            body.append(row);
+        if (!items.length) { host.append(el("div", "empty-state", "No hay movimientos para este mes y moneda.")); return; }
+        const isIncome = tx => tx.kind === "income" || tx.decision === "income";
+        const isCardPayment = tx => tx.kind === "card_payment";
+        const statusOf = tx => ({
+          personal: "Personal", family: "Familiar", investment: "Inversión", investment_withdrawal: "Retiro de inversión",
+          cash_withdrawal: "Retiro en efectivo", income: "Ingreso", exclude: isCardPayment(tx) ? "Pago de tarjeta" : "No cuenta",
+          third_party_payment: "Abono de tercero · resta del gasto"
+        })[tx.decision] || "Pendiente";
+        const sections = [
+          ["Gastos e inversiones", items.filter(tx => !isIncome(tx) && !isCardPayment(tx)), rows => {
+            const decided = counted(rows);
+            const investments = rows.filter(tx => tx.decision === "investment");
+            const withdrawals = rows.filter(tx => tx.decision === "investment_withdrawal");
+            const cash = rows.filter(tx => tx.decision === "cash_withdrawal");
+            return investments.length ? `${formatMoney(sum(investments))} en inversiones`
+              : withdrawals.length ? `${formatMoney(sum(withdrawals))} retirado de inversiones`
+                : cash.length ? `${formatMoney(sum(decided))} decidido · gasto en efectivo`
+                  : `${formatMoney(sum(decided))} decidido`;
+          }],
+          ["Ingresos", items.filter(isIncome), rows => `${formatMoney(sum(rows.filter(tx => tx.decision === "income")))} confirmado`],
+          ["Pagos y abonos a tarjetas", items.filter(isCardPayment), rows => {
+            const paidBack = thirdParty(rows);
+            return paidBack.length ? `${formatMoney(sum(paidBack))} en abonos de terceros que restan del gasto`
+              : `${formatMoney(sum(rows))} pagado · no es gasto`;
+          }]
+        ].filter(([, rows]) => rows.length);
+        sections.forEach(([heading, sectionRows, totalOf]) => {
+          if (sections.length > 1) host.append(el("p", "detail-group", heading));
+          const groups = new Map();
+          sectionRows.forEach(tx => {
+            const category = itemText(tx.category);
+            if (!groups.has(category)) groups.set(category, []);
+            groups.get(category).push(tx);
           });
-          detail.append(body);
-          host.append(detail);
+          Array.from(groups).sort((a, b) => a[0].localeCompare(b[0], "es")).forEach(([category, rows]) => {
+            const detail = el("details", "category-detail");
+            const pending = rows.filter(tx => tx.decision == null).length;
+            detail.append(el("summary", "", `${category} · ${totalOf(rows)} · ${rows.length} movimientos${pending ? ` · ${pending} por decidir` : ""}`));
+            const body = el("div", "detail-rows");
+            rows.sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
+                const row = el("div", "detail-row");
+                const text = el("span", "", `${tx.day ? formatDate(tx.day) : "Sin fecha"} · ${itemText(tx.merchant)} · ${statusOf(tx)}`);
+                appendFlags(text, tx);
+                row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
+              body.append(row);
+            });
+            detail.append(body);
+            host.append(detail);
+          });
         });
       }
 
       function renderYear() {
         const items = transactions().filter(tx => monthOf(tx).startsWith(`${state.year}-`));
-        const buckets = Array.from({ length: 12 }, (_, index) => ({ month: `${state.year}-${String(index + 1).padStart(2, "0")}`, personal: [], family: [], investments: [], cash: [], pending: [], categories: new Map() }));
+        const buckets = Array.from({ length: 12 }, (_, index) => ({ month: `${state.year}-${String(index + 1).padStart(2, "0")}`, personal: [], family: [], investments: [], cash: [], pending: [], third: [], categories: new Map() }));
         items.forEach(tx => {
           const index = Number(tx.day.slice(5, 7)) - 1;
           if (index < 0 || index > 11) return;
           if (tx.decision == null) buckets[index].pending.push(tx);
+          else if (tx.decision === "third_party_payment") { if (!hiddenInView(tx)) buckets[index].third.push(tx); }
           else if (["investment", "investment_withdrawal"].includes(tx.decision)) buckets[index].investments.push(tx);
           else if (counted([tx]).length) {
             if (tx.category === "Retiro en efectivo") buckets[index].cash.push(tx);
@@ -1053,9 +1351,10 @@
           }
         });
         const available = buckets.filter(bucket => items.some(tx => monthOf(tx) === bucket.month));
-        const completedTotals = available.map(bucket => sum(bucket.personal) + sum(bucket.family));
+        const bucketTotal = bucket => sum(bucket.personal) + sum(bucket.family) - sum(bucket.third);
+        const completedTotals = available.map(bucketTotal);
         const average = completedTotals.length ? Math.round(completedTotals.reduce((a, b) => a + b, 0) / completedTotals.length) : 0;
-        const highest = available.length ? available.reduce((best, bucket) => sum(bucket.personal) + sum(bucket.family) > sum(best.personal) + sum(best.family) ? bucket : best) : null;
+        const highest = available.length ? available.reduce((best, bucket) => bucketTotal(bucket) > bucketTotal(best) ? bucket : best) : null;
         const categoryTotals = new Map();
         counted(items).forEach(tx => {
           const category = itemText(tx.category);
@@ -1065,9 +1364,9 @@
         const yearMetrics = $("#year-metrics");
         yearMetrics.replaceChildren(
           makeMetric("Promedio mensual", formatMoney(average), `${available.length} meses con importaciones`),
-          makeMetric("Mes más alto", highest ? formatMoney(sum(highest.personal) + sum(highest.family)) : "—", highest ? monthLabel(highest.month) : "Sin datos"),
+          makeMetric("Mes más alto", highest ? formatMoney(bucketTotal(highest)) : "—", highest ? monthLabel(highest.month) : "Sin datos"),
           makeMetric("Categoría principal", leadingCategory ? leadingCategory[0] : "—", leadingCategory ? formatMoney(leadingCategory[1]) : "Sin decisiones"),
-          makeMetric("Total decidido", formatMoney(completedTotals.reduce((a, b) => a + b, 0)), `${counted(items).length} movimientos`),
+          makeMetric("Total decidido", formatMoney(completedTotals.reduce((a, b) => a + b, 0)), thirdParty(items).length ? `${counted(items).length} movimientos − ${formatMoney(sum(thirdParty(items)))} en abonos de terceros` : `${counted(items).length} movimientos`),
           makeMetric("Inversiones", formatMoney(netInvestments(items)), "Aportes menos retiros · neto, no saldo"),
           makeMetric("Retiros de inversión", formatMoney(sum(items.filter(tx => tx.decision === "investment_withdrawal"))), "Fuera de gastos"),
           makeMetric("Retiro en efectivo", formatMoney(sum(counted(items).filter(tx => tx.category === "Retiro en efectivo"))), "Incluido en gastos")
@@ -1090,10 +1389,10 @@
         const categories = Array.from(new Set(buckets.flatMap(bucket => Array.from(bucket.categories.keys())))).sort((a, b) => a.localeCompare(b, "es"));
         const legend = $("#year-category-legend");
         legend.replaceChildren();
-        categories.forEach((category, index) => {
+        categories.forEach(category => {
           const label = el("span", "legend-label");
           const swatch = el("span", "swatch");
-          swatch.style.backgroundColor = palette[index % palette.length];
+          swatch.style.backgroundColor = categoryColor(category);
           label.append(swatch, el("span", "", category));
           legend.append(label);
         });
@@ -1117,13 +1416,13 @@
           const barWidth = band * .54;
           const x = left + band * index + (band - barWidth) / 2;
           let stackedHeight = 0;
-          categories.forEach((category, categoryIndex) => {
+          categories.forEach(category => {
             const amount = Math.max(0, bucket.categories.get(category) || 0);
             const segmentHeight = chartHeight * amount / max;
             if (segmentHeight) {
               const rect = svgEl("rect", {
                 x, y: top + chartHeight - stackedHeight - segmentHeight, width: barWidth, height: segmentHeight,
-                fill: palette[categoryIndex % palette.length]
+                fill: categoryColor(category)
               });
               const title = svgEl("title");
               title.textContent = `${monthLabel(bucket.month)} · ${category}: ${formatMoney(amount)}`;
@@ -1150,8 +1449,8 @@
         const table = document.createElement("table");
         const head = document.createElement("thead");
         const header = document.createElement("tr");
-        ["Mes", "Personal", "Familiar", "Inversiones", "Retiro en efectivo", "Pendiente", "Cobertura"].forEach((label, index) => {
-          const th = el("th", index > 0 && index < 6 ? "numeric" : "", label);
+        ["Mes", "Personal", "Familiar", "Abonos de terceros", "Inversiones", "Retiro en efectivo", "Pendiente", "Cobertura"].forEach((label, index) => {
+          const th = el("th", index > 0 && index < 7 ? "numeric" : "", label);
           header.append(th);
         });
         head.append(header);
@@ -1170,6 +1469,7 @@
             el("td", "", monthLabel(bucket.month)),
             el("td", "numeric", formatMoney(sum(bucket.personal))),
             el("td", "numeric", formatMoney(sum(bucket.family))),
+            el("td", "numeric", bucket.third.length ? `−${formatMoney(sum(bucket.third))}` : formatMoney(0)),
             el("td", "numeric", formatMoney(netInvestments(bucket.investments))),
             el("td", "numeric", formatMoney(sum(bucket.cash))),
             el("td", "numeric", formatMoney(sum(bucket.pending))),
@@ -1189,39 +1489,182 @@
         $("#extraction-review").hidden = failures.length === 0;
         const failureHost = $("#extraction-list");
         failureHost.replaceChildren();
-        failures.forEach(failure => {
+        failures.slice(0, state.failureLimit).forEach(failure => {
           const card = el("article", "decision-card");
           card.append(
             el("h4", "", itemText(failure.subject)),
-            el("p", "", `${failure.received} · ${failure.sender}`),
+            el("p", "", `${formatDate(failure.received)} · ${failure.sender}`),
             el("p", "", `Carpeta: ${failure.folder}`),
             el("p", "hint", `Evidencia no literal: ${failure.field === "amount_text" ? "monto" : failure.field === "merchant" ? "comercio" : failure.field === "events" ? "el aviso indica una salida de dinero y no se extrajo" : failure.field}. Sin movimientos importados.`)
           );
           const dismiss = el("button", "button small danger", "Descartar aviso");
           dismiss.type = "button";
           dismiss.setAttribute("aria-label", `Descartar el aviso ${itemText(failure.subject)} del ${failure.day}`);
-          dismiss.addEventListener("click", () => postJson("/api/failure/dismiss", { message_id: failure.message_id }, "Aviso descartado: no se importa ning\u00fan movimiento."));
+          dismiss.addEventListener("click", () => {
+            // Leaving the queue is not undone from the panel, so ask first.
+            if (!window.confirm(`\u00bfDescartar el aviso \u00ab${itemText(failure.subject)}\u00bb del ${failure.day}? No se importar\u00e1 ning\u00fan movimiento de este aviso.`)) return;
+            postJson("/api/failure/dismiss", { message_id: failure.message_id }, "Aviso descartado: no se importa ning\u00fan movimiento.");
+          });
           const actions = el("div", "decision-actions");
           actions.append(dismiss);
           card.append(actions);
           failureHost.append(card);
         });
-        const all = safeArray(state.data.transactions).filter(tx => tx && (
+        appendMoreButton(
+          failureHost, failures.length - state.failureLimit, "avisos",
+          () => { state.failureLimit += decisionPageSize; renderDecisions(); }
+        );
+        const all = safeArray(state.data.transactions).filter(tx => tx && inOwnerView(tx) && (
           txCurrency(tx) === state.currency ||
           (state.currency === "COP" && txCurrency(tx) === "USD")
         ));
-        const pending = all.filter(tx => tx.decision == null).sort((a, b) => String(a.day || "").localeCompare(String(b.day || "")));
+        const pending = groupsOf(all.filter(tx => tx.decision == null));
+        const pendingAmount = pending.reduce((total, entry) => total + entry.total, 0);
+        $("#decision-summary").replaceChildren(
+          el("span", "label", "Por decidir"),
+          el("strong", "", String(pending.length)),
+          el("small", "", pending.length
+            ? `${pending.length === 1 ? "destino" : "destinos"} por decidir · ${formatMoney(pendingAmount)} que todavía no suman al gasto. Cada decisión vale para todos los pagos pendientes a ese mismo destino.`
+            : "No hay destinos por decidir.")
+        );
         const host = $("#pending-list");
         host.replaceChildren();
         if (!pending.length) host.append(el("div", "empty-state", "No hay movimientos pendientes para esta moneda."));
-        pending.forEach(tx => host.append(makeDecisionCard(tx, false)));
-        const previous = all.filter(tx => ["income", "personal", "family", "investment", "investment_withdrawal", "cash_withdrawal", "exclude"].includes(tx.decision))
-          .sort((a, b) => String(b.day || "").localeCompare(String(a.day || "")));
+        pending.slice(0, state.pendingLimit).forEach(entry => host.append(makeGroupCard(entry, false)));
+        appendMoreButton(
+          host, pending.length - state.pendingLimit, "destinos pendientes",
+          () => { state.pendingLimit += decisionPageSize; renderDecisions(); }
+        );
+        const previous = groupsOf(all.filter(tx => decidedValues.has(tx.decision)), true);
         $("#decision-history").hidden = previous.length === 0;
         const history = $("#history-list");
         history.replaceChildren();
-        previous.forEach(tx => history.append(makeDecisionCard(tx, true)));
+        previous.slice(0, state.historyLimit).forEach(entry => history.append(makeGroupCard(entry, true)));
+        appendMoreButton(
+          history, previous.length - state.historyLimit, "destinos decididos",
+          () => { state.historyLimit += decisionPageSize; renderDecisions(); }
+        );
         renderRules();
+      }
+
+      const decidedValues = new Set(["income", "personal", "family", "investment", "investment_withdrawal", "cash_withdrawal", "exclude", "third_party_payment"]);
+      const counterpartKinds = new Set(["transfer", "own_transfer", "income", "unknown", "card_payment", "pse"]);
+
+      // Movements to the same destination of the same member, largest first (or newest first in history).
+      function groupsOf(rows, newestFirst = false) {
+        const groups = new Map();
+        rows.forEach(tx => {
+          const key = `${tx.owner}|${tx.group}`;
+          if (!groups.has(key)) groups.set(key, { owner: tx.owner, group: tx.group, rows: [], total: 0 });
+          const entry = groups.get(key);
+          entry.rows.push(tx);
+          entry.total += reportingCurrency(tx) === state.currency && reportingCurrency(tx) !== txCurrency(tx) ? tx.cop_amount_minor
+            : txCurrency(tx) === state.currency ? tx.amount_minor : 0;
+        });
+        const entries = Array.from(groups.values());
+        entries.forEach(entry => entry.rows.sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))));
+        const last = entry => String(entry.rows[entry.rows.length - 1].day || "");
+        return entries.sort(newestFirst ? (a, b) => last(b).localeCompare(last(a)) : (a, b) => b.total - a.total);
+      }
+
+      function groupTitle(entry) {
+        const [prefix, ...rest] = String(entry.group).split(":");
+        const value = rest.join(":");
+        const first = itemText(entry.rows[0].merchant);
+        if (prefix === "qr") return `Pago por QR a la llave ${value}`;
+        if (prefix === "tr") return `Transferencia a la cuenta *${value}`;
+        if (prefix === "bb") return /bre-?b/i.test(first) ? first : `Bre-B a la llave ${value}`;
+        if (prefix === "fd") return "Retiro del fondo de inversión";
+        if (prefix === "cj") return "Retiro en cajero";
+        if (prefix === "pago") return `${first} (pago mensual)`;
+        return first;
+      }
+
+      function groupHint(entry) {
+        if (String(entry.group).startsWith("fd:")) return "Si con este dinero pagaste gastos que ya cuentan (como la tarjeta), elige «Retiro de inversión». Si pagó un gasto directo, elige Personal o Familiar.";
+        if (String(entry.group).startsWith("pago:")) return "Si es el pago de un crédito o préstamo, elige «No cuenta».";
+        return "";
+      }
+
+      function shortDate(day) {
+        if (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return "Sin fecha";
+        return `${Number(day.slice(8, 10))} ${monthNames[Number(day.slice(5, 7)) - 1]}`;
+      }
+
+      function betweenToggle(entry) {
+        if (!entry.rows.every(tx => counterpartKinds.has(tx.kind))) return null;
+        const marked = entry.rows.every(tx => tx.between_owners === 1);
+        const button = el("button", "button small", "Entre Santiago y Manuela");
+        button.type = "button";
+        button.setAttribute("aria-pressed", String(marked));
+        button.title = "No cuenta en Hogar; en la vista de cada titular conserva su decisión. Vale también para pagos futuros a este destino.";
+        button.addEventListener("click", () => postJson(
+          "/api/between-owners", { owner: entry.owner, group: entry.group, value: !marked, remember: true },
+          marked ? "Destino desmarcado: vuelve a contar en Hogar." : "Destino marcado entre titulares: no cuenta en Hogar."
+        ));
+        return button;
+      }
+
+      function makeGroupCard(entry, isPrevious) {
+        if (entry.rows.length === 1) {
+          const card = makeDecisionCard(entry.rows[0], isPrevious);
+          if (entry.rows[0].group_key) card.insertBefore(el("p", "hint", `Destino: ${groupTitle(entry)}`), card.children[1]);
+          const toggle = betweenToggle(entry);
+          if (toggle) {
+            const extra = el("div", "decision-actions");
+            extra.append(toggle);
+            card.append(extra);
+          }
+          return card;
+        }
+        const card = el("article", "group-card");
+        const meta = el("div", "decision-meta");
+        const tags = el("span");
+        if (state.owner === "hogar") tags.append(ownerTag(entry.owner), document.createTextNode(" "));
+        tags.append(el("span", "status-pill", `${entry.rows.length} movimientos`));
+        meta.append(tags, el("span", "", `${shortDate(entry.rows[0].day)} → ${shortDate(entry.rows[entry.rows.length - 1].day)}`));
+        card.append(meta, el("h3", "", groupTitle(entry)), el("span", "group-amount", formatMoney(entry.total)));
+        const hint = groupHint(entry);
+        if (hint) card.append(el("p", "hint", hint));
+        // Only choices valid for every movement of the destination are offered.
+        const optionSets = entry.rows.map(tx => decisionOptions(tx));
+        const options = optionSets[0].filter(([value]) => optionSets.every(set => set.some(([other]) => other === value)));
+        const remember = document.createElement("input");
+        remember.type = "checkbox";
+        remember.id = `group-remember-${decisionCardSequence++}`;
+        const actions = el("div", "decision-actions");
+        options.forEach(([decision, label]) => {
+          const button = el("button", `button small${decision === "exclude" ? " danger" : ""}`, label);
+          button.type = "button";
+          button.setAttribute("aria-pressed", String(entry.rows.every(tx => tx.decision === decision)));
+          button.setAttribute("aria-label", `${label}: ${entry.rows.length} movimientos a ${groupTitle(entry)}`);
+          button.addEventListener("click", () => {
+            // Changing past decisions rewrites many movements at once, so ask first.
+            if (isPrevious && !window.confirm(`¿Cambiar a «${label}» los ${entry.rows.length} movimientos de «${groupTitle(entry)}»?`)) return;
+            postJson("/api/decision-group", {
+              owner: entry.owner, group: entry.group, decision,
+              scope: isPrevious ? "all" : "pending", remember: remember.checked
+            }, `Decisión guardada para ${entry.rows.length} movimientos.`);
+          });
+          actions.append(button);
+        });
+        if (!options.length) card.append(el("p", "hint", "Estos movimientos no admiten la misma decisión; decide cada uno abajo."));
+        const toggle = betweenToggle(entry);
+        if (toggle) actions.append(toggle);
+        card.append(actions);
+        if (options.length) {
+          const line = el("label", "check-line");
+          line.htmlFor = remember.id;
+          line.append(remember, document.createTextNode("Aplicar también a pagos futuros a este destino"));
+          card.append(line);
+        }
+        const details = el("details");
+        details.append(el("summary", "", `Ver ${entry.rows.length} movimientos y decidir uno por uno`));
+        const list = el("div", "decision-list");
+        entry.rows.forEach(tx => list.append(makeDecisionCard(tx, isPrevious)));
+        details.append(list);
+        card.append(details);
+        return card;
       }
 
       function renderRules() {
@@ -1245,11 +1688,35 @@
           const remove = el("button", "button small danger", "Borrar regla");
           remove.type = "button";
           remove.setAttribute("aria-label", `Borrar la regla ${rule.pattern}`);
-          remove.addEventListener("click", () => postJson("/api/rules/delete", { id: rule.id }, "Regla borrada. Las decisiones que ya tomó se conservan."));
+          remove.addEventListener("click", () => {
+            if (!window.confirm(`\u00bfBorrar la regla \u00ab${rule.pattern}\u00bb? Las decisiones que ya tom\u00f3 se conservan.`)) return;
+            postJson("/api/rules/delete", { id: rule.id }, "Regla borrada. Las decisiones que ya tomó se conservan.");
+          });
           const actions = el("div", "decision-actions");
           actions.append(remove);
           card.append(el("h3", "", rule.pattern), el("p", "", `${itemText(rule.category)} · ${kind}`), actions);
           host.append(card);
+        });
+        const groupHost = $("#group-rules-list");
+        groupHost.replaceChildren();
+        const groupRules = safeArray(state.data.group_rules).filter(rule => rule && typeof rule.group_key === "string" && inOwnerView(rule));
+        if (!groupRules.length) groupHost.append(el("div", "empty-state", "Aún no hay reglas por destino."));
+        const decisionNames = { personal: "Gasto personal", family: "Familiar", exclude: "No cuenta", investment: "Inversión", investment_withdrawal: "Retiro de inversión", cash_withdrawal: "Retiro en efectivo", income: "Ingreso", third_party_payment: "Abono de tercero" };
+        groupRules.forEach(rule => {
+          const card = el("article", "decision-card");
+          const remove = el("button", "button small danger", "Borrar regla");
+          remove.type = "button";
+          remove.setAttribute("aria-label", `Borrar la regla del destino ${rule.group_key} de ${ownerLabel(rule.owner)}`);
+          remove.addEventListener("click", () => {
+            if (!window.confirm(`¿Borrar la regla del destino «${rule.group_key}»? Las decisiones que ya tomó se conservan.`)) return;
+            postJson("/api/group-rules/delete", { owner: rule.owner, group: rule.group_key }, "Regla de destino borrada. Las decisiones que ya tomó se conservan.");
+          });
+          const actions = el("div", "decision-actions");
+          actions.append(remove);
+          const what = [rule.decision ? decisionNames[rule.decision] || rule.decision : "", rule.between_owners === 1 ? "Entre Santiago y Manuela" : ""].filter(Boolean).join(" · ");
+          const heading = el("h3", "", rule.group_key);
+          card.append(heading, el("p", "", `${ownerLabel(rule.owner)} · ${what}`), actions);
+          groupHost.append(card);
         });
       }
 
@@ -1268,8 +1735,13 @@
       function makeDecisionCard(tx, isPrevious) {
         const card = el("article", "decision-card");
         const meta = el("div", "decision-meta");
-        meta.append(el("span", "", tx.day || "Fecha no disponible"), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
-        card.append(meta, el("h3", "", itemText(tx.merchant)), el("strong", "", formatMoney(tx.amount_minor, txCurrency(tx))));
+        meta.append(el("span", "", formatDate(tx.day)), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
+        const title = el("h3", "", itemText(tx.merchant));
+        card.append(meta, title, el("strong", "", formatMoney(tx.amount_minor, txCurrency(tx))));
+        const flags = el("p", "hint");
+        appendFlags(flags, tx);
+        if (typeof tx.time === "string" && tx.time) flags.prepend(document.createTextNode(`Hora ${tx.time}`));
+        if (flags.childNodes.length) card.append(flags);
         if (txCurrency(tx) === "USD" && Number.isSafeInteger(tx.cop_amount_minor)) {
           card.append(el("p", "hint", `Estimado: ${formatMoney(tx.cop_amount_minor, "COP")} · Tasa manual: ${tx.exchange_rate} COP por USD.`));
         }
@@ -1301,6 +1773,7 @@
           currencyLabel.htmlFor = `decision-currency-${decisionCardSequence++}`;
           currencySelect = document.createElement("select");
           currencySelect.id = currencyLabel.htmlFor;
+          currencySelect.name = "currency";
           ["COP", "USD"].forEach(code => {
             const option = el("option", "", code);
             option.value = code;
@@ -1314,9 +1787,11 @@
           rateLabel.htmlFor = `decision-rate-${decisionCardSequence++}`;
           rateInput = document.createElement("input");
           rateInput.id = rateLabel.htmlFor;
+          rateInput.name = "exchange_rate";
           rateInput.type = "text";
           rateInput.inputMode = "decimal";
-          rateInput.placeholder = "Ejemplo: 4200,50";
+          rateInput.autocomplete = "off";
+          rateInput.placeholder = "4200,50…";
           rateInput.value = tx.exchange_rate || "";
           rateField.append(rateLabel, rateInput, el("p", "hint", "Estimación ingresada por ti para la fecha del movimiento; no se consulta ni se calcula una tasa automáticamente."));
           rateField.hidden = currencySelect.value !== "USD";
@@ -1324,7 +1799,9 @@
           card.append(rateField);
         }
         const options = decisionOptions(tx);
-        if (nonExpenseKinds.has(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "")) {
+        if (tx.kind === "card_payment") {
+          card.append(el("p", "hint", "Pago recibido en una tarjeta: «No cuenta» si lo pagó el titular; «Abono de tercero» si otra persona pagó por él (resta del gasto)."));
+        } else if (nonExpenseKinds.has(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "")) {
           card.append(el("p", "hint", "Este tipo no se cuenta como gasto; solo puedes marcarlo «No cuenta»."));
         } else if (tx.kind === "income") {
           card.append(el("p", "hint", "Dinero recibido: elige su tipo y pulsa Ingreso, o No cuenta si es un traslado entre tus cuentas o un reembolso."));
@@ -1366,6 +1843,7 @@
           $(buttonSelector).tabIndex = selected ? 0 : -1;
           $(panelSelector).hidden = !selected;
         });
+        syncUrl();
       }
 
       $("#refresh-button").addEventListener("click", () => loadState());
@@ -1378,8 +1856,29 @@
         $("#config-area").hidden = true;
         $("#edit-config-button").focus();
       });
-      $("#currency-select").addEventListener("change", event => { state.currency = event.target.value; renderDashboard(); renderYear(); renderDecisions(); });
-      $("#year-select").addEventListener("change", event => { state.year = event.target.value; renderYear(); });
+      document.querySelectorAll("#owner-switch button").forEach(button => button.addEventListener("click", () => {
+        state.owner = button.dataset.owner;
+        state.pendingLimit = decisionPageSize;
+        state.historyLimit = decisionPageSize;
+        renderOwnerSwitch();
+        if (!state.data || !state.data.configured) return;
+        renderDashboard();
+        renderYear();
+        renderDecisions();
+        syncUrl();
+      }));
+      $("#currency-select").addEventListener("change", event => {
+        state.currency = event.target.value;
+        renderDashboard();
+        renderYear();
+        renderDecisions();
+        syncUrl();
+      });
+      $("#year-select").addEventListener("change", event => {
+        state.year = event.target.value;
+        renderYear();
+        syncUrl();
+      });
       $("#coverage-month").addEventListener("change", event => {
         $("#coverage-note").value = "";
         updateCoverageSummary(event.target.value);
@@ -1409,12 +1908,14 @@
         const dark = root.dataset.theme !== "dark";
         root.dataset.theme = dark ? "dark" : "light";
         event.currentTarget.setAttribute("aria-pressed", String(dark));
+        document.querySelector('meta[name="theme-color"]').content = dark ? "#10151d" : "#f3f5f8";
         try { localStorage.setItem("monthly-close-theme", dark ? "dark" : "light"); } catch { /* el tema sigue funcionando sin almacenamiento local */ }
       });
       try {
         if (localStorage.getItem("monthly-close-theme") === "dark") {
           document.documentElement.dataset.theme = "dark";
           $("#theme-toggle").setAttribute("aria-pressed", "true");
+          document.querySelector('meta[name="theme-color"]').content = "#10151d";
         }
       } catch { /* la preferencia del tema es opcional */ }
       loadState();

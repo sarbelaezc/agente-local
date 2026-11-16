@@ -11,7 +11,6 @@ import pytest
 import httpx
 from playwright.sync_api import sync_playwright
 
-from monthly_close.domain import CATEGORIES
 from monthly_close.server import create_server
 from monthly_close.store import Store
 
@@ -34,13 +33,13 @@ def test_idle_browser_connection_does_not_block_dashboard(tmp_path):
 
 
 @pytest.fixture
-def dashboard(tmp_path):
+def dashboard(tmp_path, categories):
     store = Store(tmp_path / "dashboard.sqlite3")
     store.configure({
         "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
         "accounts": ["Tarjeta A"], "excluded_accounts": [],
         "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": ["avisos@example.test"], "categories": CATEGORIES,
+        "approved_senders": ["avisos@example.test"], "categories": categories,
         "confidential_confirmed": True,
     })
     month = date.today().strftime("%Y-%m")
@@ -121,6 +120,13 @@ def test_queued_notice_can_be_discarded_from_the_panel(dashboard):
     page.locator("#tab-decisions").click()
     review = page.locator("#extraction-review")
     assert "Evidencia no literal: monto" in review.inner_text()
+    # Cancelling the confirmation keeps the notice in the queue.
+    asked = []
+    page.once("dialog", lambda dialog: (asked.append(dialog.message), dialog.dismiss()))
+    review.get_by_role("button", name=re.compile("Descartar")).click()
+    assert "Aviso informativo" in asked[0]
+    assert len(store.state()["extraction_failures"]) == 1
+    page.once("dialog", lambda dialog: dialog.accept())
     with page.expect_response(lambda response: response.url.endswith("/api/failure/dismiss")) as saved:
         review.get_by_role("button", name=re.compile("Descartar")).click()
     assert saved.value.status == 200
@@ -175,7 +181,7 @@ def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
     page.locator("#tab-year").click()
     assert re.search(r"\b53[.\s]?334,74", page.locator("#year-metrics").inner_text())
     page.locator("#tab-decisions").click()
-    page.locator("#decision-history summary").click()
+    page.locator("#decision-history > summary").click()
     history = page.locator("#history-list .decision-card").filter(has_text="AMAZON MKTPLACE")
     assert "12,34" in history.inner_text()
     assert re.search(r"51[.\s]?834,17", history.inner_text())
@@ -270,6 +276,46 @@ def test_dashboard_mobile_and_desktop_screenshots(dashboard, tmp_path):
     assert not errors
 
 
+def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(dashboard):
+    page, _, month, errors = dashboard
+    page.goto(f"{page.url.split('?')[0]}?tab=year&month={month}&year={month[:4]}&currency=COP")
+    page.wait_for_load_state("networkidle")
+    assert not errors
+    page.keyboard.press("Tab")
+    skip_link = page.locator(".skip-link")
+    assert skip_link.get_attribute("href") == "#main-content"
+    assert skip_link.evaluate("element => getComputedStyle(element).transform === 'matrix(1, 0, 0, 1, 0, 0)'")
+
+    assert page.locator("#tab-year").get_attribute("aria-selected") == "true"
+    assert page.locator("#year-select").input_value() == month[:4]
+
+    params = page.evaluate("Object.fromEntries(new URLSearchParams(location.search))")
+    assert params == {"tab": "year", "month": month, "year": month[:4], "currency": "COP", "owner": "hogar"}
+    page.locator("#tab-decisions").click()
+    assert page.evaluate("new URLSearchParams(location.search).get('tab')") == "decisions"
+    assert not errors
+
+
+def test_decision_lists_only_render_fifty_cards_at_a_time(dashboard):
+    page, store, _, errors = dashboard
+    original = next(tx for tx in store.state()["transactions"] if tx["id"] == "1")
+    for index in range(51):
+        event_id = f"pending-{index}"
+        store.import_message(event_id, [{
+            **original, "id": event_id, "message_id": event_id, "decision": None,
+            "merchant": f"Tienda {index}",  # one destination per movement
+        }])
+
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.locator("#tab-decisions").click()
+    pending = page.locator("#pending-list .decision-card")
+    assert pending.count() == 50
+    page.get_by_role("button", name="Mostrar 2 destinos pendientes más").click()
+    assert pending.count() == 52
+    assert not errors
+
+
 def test_legacy_cash_withdrawal_updates_cumulative_personal_total(dashboard):
     page, store, _, errors = dashboard
     store.decide("0", "cash_withdrawal")
@@ -322,12 +368,12 @@ def test_saving_blocks_duplicate_decisions_and_recovers_after_error(dashboard):
     assert not errors
 
 
-def test_category_chart_identifies_every_segment(dashboard):
+def test_category_chart_uses_unique_consistent_colors_for_every_category(dashboard, categories):
     page, store, month, errors = dashboard
     original = next(tx for tx in store.state()["transactions"] if tx["id"] == "1")
-    categories = CATEGORIES + ["Categoria adicional A", "Categoria adicional B"]
-    store.configure({**store.preferences().to_dict(), "categories": categories})
-    for index, category in enumerate(categories):
+    extended_categories = categories + ["Categoria adicional A", "Categoria adicional B"]
+    store.configure({**store.preferences().to_dict(), "categories": extended_categories})
+    for index, category in enumerate(extended_categories):
         event_id = f"legend-{index}"
         store.import_message(event_id, [{
             **original, "id": event_id, "message_id": event_id,
@@ -336,7 +382,22 @@ def test_category_chart_identifies_every_segment(dashboard):
     page.reload()
     page.wait_for_load_state("networkidle")
     labels = page.locator("#category-chart .legend-label").all_text_contents()
-    assert set(labels) == set(categories)
+    assert set(labels) == set(extended_categories)
+    month_colors = page.locator("#category-chart .legend-row").evaluate_all("""rows =>
+        Object.fromEntries(rows.map(row => {
+            const label = row.querySelector(".legend-label");
+            return [label.lastElementChild.textContent, getComputedStyle(label.firstElementChild).backgroundColor];
+        }))
+    """)
+    assert len(set(month_colors.values())) == len(extended_categories)
+    page.locator("#tab-year").click()
+    year_colors = page.locator("#year-category-legend .legend-label").evaluate_all("""labels =>
+        Object.fromEntries(labels.map(label => [
+            label.lastElementChild.textContent,
+            getComputedStyle(label.firstElementChild).backgroundColor
+        ]))
+    """)
+    assert month_colors == year_colors
     assert not errors
 
 
@@ -400,7 +461,10 @@ def test_withdrawal_buttons_persist_and_apply_correct_expense_totals(
         ).inner_text()
         assert "Retiro en efectivo" in page.locator("#category-details").inner_text()
         assert "Retiro en efectivo" in page.locator("#category-chart").inner_text()
-        assert re.search(r"\b2[.\s]?000,59", page.locator("#calendar").inner_text())
+        calendar_labels = page.locator("#calendar [role=listitem]").evaluate_all(
+            "items => items.map(item => item.getAttribute('aria-label'))"
+        )
+        assert any(re.search(r"\b2[.\s]?000,59", label) for label in calendar_labels)
     page.locator("#tab-year").click()
     assert "500,02" in page.locator("#year-metrics").inner_text()
     assert "500,02" in page.locator("#year-table").inner_text()
@@ -412,7 +476,9 @@ def test_withdrawal_buttons_persist_and_apply_correct_expense_totals(
     assert page.locator("#history-list .decision-card").filter(
         has=page.locator('select[name=category] option:checked').filter(has_text=category),
     ).locator('button[aria-pressed="true"]').filter(has_text=label).count() == 1
-    page.locator("#decision-history summary").click()
+    page.locator("#decision-history > summary").click()
+    # The three movements share a merchant, so they form one destination card.
+    page.locator("#history-list .group-card details > summary").click()
     with page.expect_response(
         lambda response: response.url.endswith("/api/decision") and response.request.method == "POST"
     ) as excluded:
@@ -441,6 +507,9 @@ def test_configuration_form_saves_all_step_zero_answers(dashboard):
     host.locator("[name=excluded_accounts]").fill("Cuenta B")
     host.locator("[name=transfer_label]").fill("Entre mis cuentas")
     host.locator("[name=approved_senders]").fill("avisos@example.test")
+    category_field = host.locator("[name=categories]")
+    assert category_field.input_value() == ""
+    category_field.fill("Compras\nVacaciones")
     host.locator("[name=ask_savings]").check()
     host.locator("[name=ask_people]").check()
     host.locator("[name=confidential_confirmed]").check()
@@ -452,6 +521,7 @@ def test_configuration_form_saves_all_step_zero_answers(dashboard):
     saved = store.preferences()
     assert saved.excluded_accounts == ["Cuenta B"]
     assert saved.transfer_label == "Entre mis cuentas"
+    assert saved.categories == ["Compras", "Vacaciones"]
     assert saved.ask_savings and saved.ask_people
     assert not errors
 
