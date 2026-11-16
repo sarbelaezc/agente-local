@@ -94,6 +94,27 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                         event_id, decision, category,
                         currency=currency, exchange_rate=exchange_rate,
                     )
+                elif self.path == "/api/decision-group":
+                    owner, group, decision = raw.get("owner"), raw.get("group"), raw.get("decision")
+                    if not all(isinstance(value, str) for value in (owner, group, decision)):
+                        raise ValueError("Decision por destino invalida.")
+                    scope, remember = raw.get("scope", "pending"), raw.get("remember", False)
+                    if scope not in {"pending", "all"} or type(remember) is not bool:
+                        raise ValueError("Alcance de la decision invalido.")
+                    store.decide_group(
+                        owner, group, decision, pending_only=scope == "pending", remember=remember,
+                    )
+                elif self.path == "/api/between-owners":
+                    owner, group = raw.get("owner"), raw.get("group")
+                    value, remember = raw.get("value"), raw.get("remember", False)
+                    if not isinstance(owner, str) or not isinstance(group, str) or type(remember) is not bool:
+                        raise ValueError("Marca entre titulares invalida.")
+                    store.mark_between_owners(owner, group, value, remember=remember)
+                elif self.path == "/api/group-rules/delete":
+                    owner, group = raw.get("owner"), raw.get("group")
+                    if not isinstance(owner, str) or not isinstance(group, str):
+                        raise ValueError("Regla de destino invalida.")
+                    store.delete_group_rule(owner, group)
                 elif self.path == "/api/rules":
                     pattern, category, decision = (
                         raw.get("pattern"), raw.get("category"), raw.get("decision"),
