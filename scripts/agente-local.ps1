@@ -3,10 +3,16 @@
 param(
     [Parameter(Position = 0)]
     [ValidateSet(
-        "serve", "login", "check-config", "pilot", "scan", "import", "summary", "scheduled", "invoices"
+        "serve", "login", "check-config", "pilot", "scan", "import", "summary", "scheduled", "invoices",
+        "import-manuela", "owner-account"
     )]
     [string]$Command = "serve",
     [string]$DataDir,
+    [ValidateSet("santiago", "manuela", "hogar")]
+    [string]$Owner,
+    [ValidatePattern("^\d{4}$")]
+    [string]$Suffix,
+    [string]$SourceDir,
     [string]$Start,
     [string]$End,
     [string]$Month,
@@ -163,6 +169,9 @@ try {
     if ($Start) { $arguments += @("--start", $Start) }
     if ($End) { $arguments += @("--end", $End) }
     if ($Month) { $arguments += @("--month", $Month) }
+    if ($Owner) { $arguments += @("--owner", $Owner) }
+    if ($Suffix) { $arguments += @("--suffix", $Suffix) }
+    if ($SourceDir) { $arguments += @("--source-dir", $SourceDir) }
     if ($ReadOnly) { $arguments += "--read-only" }
     if ($ReprocessEmpty) { $arguments += "--reprocess-empty" }
     if ($Command -eq "import") {

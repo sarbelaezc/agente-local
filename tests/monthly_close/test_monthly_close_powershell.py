@@ -127,3 +127,56 @@ function Start-Process {
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+@pytest.mark.parametrize("arguments,expected", [
+    (["import-manuela", "-SourceDir", "C:\\datos sinteticos"],
+     ["import-manuela", "--source-dir", "C:\\datos sinteticos"]),
+    (["owner-account", "-Owner", "manuela", "-Suffix", "1234"],
+     ["owner-account", "--owner", "manuela", "--suffix", "1234"]),
+    (["summary", "-Month", "2026-03", "-Owner", "hogar"],
+     ["summary", "--month", "2026-03", "--owner", "hogar"]),
+    (["serve"], ["serve"]),
+])
+def test_household_commands_pass_arguments_without_ollama(tmp_path, arguments, expected):
+    powershell = shutil.which("powershell.exe")
+    if not powershell:
+        pytest.skip("Requires Windows PowerShell.")
+    root = tmp_path / "project"
+    (root / "scripts").mkdir(parents=True)
+    original = Path(__file__).parents[2] / "scripts" / "agente-local.ps1"
+    (root / "scripts" / original.name).write_text(
+        original.read_text().replace(".venv\\Scripts\\python.exe", ".venv\\Scripts\\python.ps1"),
+        encoding="utf-8",
+    )
+    fake = root / ".venv" / "Scripts" / "python.ps1"
+    fake.parent.mkdir(parents=True)
+    fake.write_text(
+        "$args | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'args.json')\n"
+        "exit 0\n", encoding="utf-8",
+    )
+    # No runtime.json: a command that needed Ollama would fail before calling Python.
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-ExecutionPolicy", "RemoteSigned",
+         "-File", str(root / "scripts" / original.name), *arguments],
+        env=os.environ | {"LOCALAPPDATA": str(root)}, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Ollama" not in result.stdout
+    args = json.loads((root / "args.json").read_text(encoding="utf-8-sig"))
+    assert args[3] == expected[0]
+    for flag, value in zip(expected[1::2], expected[2::2]):
+        assert args[args.index(flag) + 1] == value
+
+
+def test_launcher_rejects_invalid_account_suffix(tmp_path):
+    powershell = shutil.which("powershell.exe")
+    if not powershell:
+        pytest.skip("Requires Windows PowerShell.")
+    script = Path(__file__).parents[2] / "scripts" / "agente-local.ps1"
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File", str(script),
+         "owner-account", "-Owner", "manuela", "-Suffix", "12a4"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode != 0
