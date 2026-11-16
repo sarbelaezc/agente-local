@@ -1816,16 +1816,20 @@
             body.append(tr);
             return;
           }
+          // A kind of movement the month did not have shows a dash, not 0,00; the balance is always computed.
+          const amountCell = (rows, text) => rows.length
+            ? el("td", "numeric", text)
+            : el("td", "numeric empty-cell", "—");
           tr.append(
             monthCell,
-            el("td", "numeric", formatMoney(sum(bucket.personal))),
-            el("td", "numeric", formatMoney(sum(bucket.family))),
-            el("td", "numeric", bucket.third.length ? `−${formatMoney(sum(bucket.third))}` : formatMoney(0)),
-            el("td", "numeric", formatMoney(sum(bucket.incomes))),
+            amountCell(bucket.personal, formatMoney(sum(bucket.personal))),
+            amountCell(bucket.family, formatMoney(sum(bucket.family))),
+            amountCell(bucket.third, `−${formatMoney(sum(bucket.third))}`),
+            amountCell(bucket.incomes, formatMoney(sum(bucket.incomes))),
             el("td", "numeric", formatMoney(sum(bucket.incomes) - sum(bucket.personal) - sum(bucket.family) + sum(bucket.third))),
-            el("td", "numeric", formatMoney(netInvestments(bucket.investments))),
-            el("td", "numeric", formatMoney(sum(bucket.cash))),
-            el("td", "numeric", formatMoney(sum(bucket.pending))),
+            amountCell(bucket.investments, formatMoney(netInvestments(bucket.investments))),
+            amountCell(bucket.cash, formatMoney(sum(bucket.cash))),
+            amountCell(bucket.pending, formatMoney(sum(bucket.pending))),
             el("td", "", status)
           );
           body.append(tr);

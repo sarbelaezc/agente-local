@@ -569,8 +569,10 @@ El panel local ofrece:
   enlace para saltar al contenido y muestra decisiones en tandas de hasta 50.
 - **Año:** comparativa mensual, promedios, mes de mayor gasto, categoría líder y
   tabla personal/familiar/pendiente. Los meses no conciliados llevan advertencia.
-  En «Resumen por mes» los meses empiezan en mayúscula. Un mes sin movimientos no
-  muestra 0,00: si ya pasó, sus importes aparecen con un guion largo (—); el mes en
+  En «Resumen por mes» los meses empiezan en mayúscula y no se muestra 0,00 donde
+  no hubo movimientos: una columna sin movimientos de ese tipo en el mes (por
+  ejemplo, sin retiros en efectivo) lleva un guion largo (—), y el Balance siempre
+  se calcula. Un mes sin ningún movimiento lleva guiones si ya pasó; el mes en
   curso y los siguientes dicen «Sin notificaciones del banco aún».
   Tocar un mes en la tabla «Resumen por mes» o una barra de las gráficas abre la
   pestaña Mes en ese mes.
