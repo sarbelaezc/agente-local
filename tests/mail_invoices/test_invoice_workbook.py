@@ -42,6 +42,22 @@ def test_approved_commit_adds_number_column_and_preserves_existing_cells(store):
     workbook.close()
 
 
+def test_commit_keeps_only_the_five_newest_backups_of_this_workbook(store):
+    store.backup_dir.mkdir()
+    for day in range(1, 8):
+        (store.backup_dir / f"invoices-2020010{day}-120000-000000.xlsx").write_bytes(b"old")
+    others = [store.backup_dir / "otro-20200101-120000-000000.xlsx", store.backup_dir / "notas.txt"]
+    for path in others:
+        path.write_bytes(b"keep")
+    before = store.path.read_bytes()
+    store.record([invoice()])
+    kept = sorted(path.name for path in store.backup_dir.glob("invoices-*.xlsx"))
+    assert len(kept) == 5
+    assert kept[:4] == [f"invoices-2020010{day}-120000-000000.xlsx" for day in range(4, 8)]
+    assert (store.backup_dir / kept[-1]).read_bytes() == before  # the new copy is the workbook before this write
+    assert all(path.read_bytes() == b"keep" for path in others)
+
+
 def test_number_plus_supplier_prevents_duplicate_rows(store):
     store.record([invoice()])
     result = store.record([invoice()])

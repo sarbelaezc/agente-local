@@ -1402,7 +1402,10 @@ modelo.
 El registro preparado utiliza `Hoja1`, encabezados en B2:E2 y añade
 `Número de factura` en F2 solo al guardar un lote aprobado. Conserva las filas
 existentes, comprueba números por proveedor y crea una copia de seguridad local
-antes de reemplazar el Excel. Una coincidencia histórica sin número requiere
+antes de reemplazar el Excel. Después de reemplazarlo y verificarlo, conserva solo
+las 5 copias más recientes de ese libro en `backup_dir` y borra las anteriores:
+cada copia ya contiene todo lo de las previas. Si una copia vieja no se puede
+borrar, se deja; los demás archivos de la carpeta no se tocan. Una coincidencia histórica sin número requiere
 confirmación; no se completa por inferencia. No se mezclan monedas: el esquema
 actual admite solo valores confirmados en COP.
 Un duplicado por número y proveedor también debe coincidir con la `Empresa`
