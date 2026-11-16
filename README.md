@@ -336,6 +336,11 @@ capital, intereses, seguros y total), se configura en
 .\scripts\agente-local.ps1 import-credit-ledger
 ```
 
+- **Formato de la hoja.** Los encabezados pueden estar en cualquiera de las primeras
+  10 filas: «Fecha», «Pago Capital», «Pago Intereses», «Seguros y Cargos Adicionales»
+  y «Pago Total»; las demás columnas y los resúmenes a un lado se ignoran. La
+  columna «Abono Capital» es opcional: sin ella, una fila con solo capital (sin
+  intereses ni seguros) es un abono a capital.
 - **Contraste obligatorio.** El capital del registro entre dos cortes debe ser igual,
   al peso, a lo que bajó el saldo de capital en los extractos del banco. Si un
   periodo no cuadra, o una fila no suma su total, no se importa nada. Solo se leen

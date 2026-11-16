@@ -20,12 +20,13 @@ from openpyxl.utils.exceptions import InvalidFileException
 LEDGERS_FILE = "credit_ledgers.json"
 HEADERS = {
     "day": "fecha",
-    "extra": "abono capital",
     "capital": "pago capital",
     "interest": "pago intereses",
     "insurance": "seguros y cargos adicionales",
     "total": "pago total",
 }
+OPTIONAL_HEADERS = {"extra": "abono capital"}
+HEADER_SEARCH_ROWS = 10
 
 
 class LedgerError(ValueError):
@@ -107,25 +108,34 @@ def read_payments(config: LedgerConfig, since: date | None = None) -> list[Payme
         if config.sheet not in book.sheetnames:
             raise LedgerError(f"El libro no tiene la hoja {config.sheet}.")
         rows = book[config.sheet].iter_rows(values_only=True)
-        header = [str(cell).strip().lower() if cell is not None else "" for cell in next(rows, ())]
-        try:
-            columns = {key: header.index(title) for key, title in HEADERS.items()}
-        except ValueError as exc:
-            raise LedgerError("La hoja no tiene los encabezados esperados.") from exc
+        columns, number = None, 0
+        for number, row in enumerate(rows, start=1):
+            header = [str(cell).strip().lower() if cell is not None else "" for cell in row]
+            if all(title in header for title in HEADERS.values()):
+                columns = {key: header.index(title) for key, title in HEADERS.items()}
+                columns.update({key: header.index(title) for key, title in OPTIONAL_HEADERS.items() if title in header})
+                break
+            if number >= HEADER_SEARCH_ROWS:
+                break
+        if columns is None:
+            raise LedgerError("La hoja no tiene los encabezados esperados.")
         payments = []
-        for number, row in enumerate(rows, start=2):
+        for number, row in enumerate(rows, start=number + 1):
             when = row[columns["day"]] if len(row) > columns["day"] else None
             if not isinstance(when, datetime) or (since is not None and when.date() < since):
                 continue  # opening balance, empty rows or a period without statements
             values = {key: _minor(row[index], key, number) for key, index in columns.items() if key != "day"}
             if values["total"] <= 0:
                 continue
-            capital = values["capital"] + values["extra"]
+            capital = values["capital"] + values.get("extra", 0)
             if capital + values["interest"] + values["insurance"] != values["total"]:
                 raise LedgerError(f"Fila {number}: capital, intereses y seguros no suman el total.")
+            # Without an "Abono Capital" column, a row of capital only is a capital payment.
+            extra = values["extra"] > 0 if "extra" in values else (
+                capital > 0 and values["interest"] == 0 and values["insurance"] == 0
+            )
             payments.append(Payment(
-                when.date(), capital, values["interest"], values["insurance"], values["total"],
-                values["extra"] > 0,
+                when.date(), capital, values["interest"], values["insurance"], values["total"], extra,
             ))
         return payments
     finally:

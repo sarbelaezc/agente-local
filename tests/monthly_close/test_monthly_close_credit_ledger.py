@@ -145,6 +145,25 @@ def test_statement_instalments_are_not_imported_again_for_a_credit_with_register
     assert statement_instalments(store) == 0
 
 
+def test_sheet_with_header_below_and_without_capital_payment_column(tmp_path):
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "Libre Consumo"
+    sheet.append([])
+    sheet.append(["", "N", "Fecha", "Pago Intereses", "Pago Capital", "Seguros y Cargos Adicionales", "Pago Total", "", "Total Crédito", 21000000])
+    sheet.append(["", 1, datetime(2026, 1, 15), 92729, 31021, 2887, 126637])
+    sheet.append(["", 2, datetime(2026, 6, 3), 0, 1470000, 0, 1470000])
+    sheet.append(["", 3, datetime(2026, 11, 15), 0, 0, 0, 0])
+    book.save(tmp_path / "libro.xlsx")
+    config = credit_ledger.LedgerConfig("santiago", "4444", "Consumo", tmp_path / "libro.xlsx", "Libre Consumo", (6, 12))
+    payments = credit_ledger.read_payments(config, date(2026, 1, 1))
+    assert [(p.day.isoformat(), p.capital_minor, p.total_minor, p.extra) for p in payments] == [
+        ("2026-01-15", 3102100, 12663700, False), ("2026-06-03", 147000000, 147000000, True),
+    ]
+    sources = [e["message_id"].rsplit(":", 1)[1] for e in credit_ledger.events(config, payments, "Vivienda")]
+    assert sources == ["payroll", "bonus"]
+
+
 def test_register_settings_are_validated(tmp_path):
     assert credit_ledger.load_configs(tmp_path) == []
     (tmp_path / credit_ledger.LEDGERS_FILE).write_text(json.dumps([{"suffix": "12a4"}]), encoding="utf-8")
