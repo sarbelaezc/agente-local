@@ -7,7 +7,7 @@ implementa.
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
-| Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado y probado con datos sintéticos y con una copia de la base real; importación en la base real pendiente de confirmación); conciliación y tarea pendientes | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` |
+| Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); conciliación y tarea pendientes | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` |
 
 ## Stack tecnológico
 
@@ -262,16 +262,16 @@ titulares queda en `audit` con su origen.
   diferencia aprobada del cajero en los meses con retiros. Los totales y
   resúmenes de Santiago quedaron idénticos y la segunda importación no cambió
   nada.
+- En la base real (con copia previa) se importó con la misma paridad, se
+  registraron las cuentas de ambos titulares y los abonos de Santiago a las
+  tarjetas de Manuela se marcaron entre titulares, con auditoría.
 
 **Pendiente.**
 
-- Ejecutar la importación y registrar las cuentas en la base real.
 - Las transferencias entre titulares no se detectaron automáticamente en esa
   prueba: los avisos de Santiago no guardan la cuenta destino y los datos de
   Manuela no mencionan la cuenta de Santiago. Por ahora se marcan a mano por
   destino.
-- Algunos abonos a las tarjetas de Manuela nombran a Santiago. No se marcaron
-  como movimientos entre titulares sin una decisión explícita.
 
 ### Lectura del buzón por Microsoft Graph
 
