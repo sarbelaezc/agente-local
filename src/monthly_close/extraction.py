@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from mail_invoices.local_model import JsonModel
+from monthly_close.destinations import assign_destinations
 from monthly_close.domain import (
     INCOME_CATEGORIES, KINDS, NON_EXPENSES, Preferences, amount_minor, clean_text,
     decision_reason, notice_currency, received_local,
@@ -99,7 +100,7 @@ def extract(mail: Mail, preferences: Preferences, model: JsonModel) -> list[dict
     source = mail.subject + "\n" + body
     fixed = _card_payments(mail, preferences, source) or _account_transfers(mail, preferences, source)
     if fixed:
-        return fixed
+        return assign_destinations(fixed, source)
     context = {
         "accounts": preferences.accounts,
         "excluded_accounts": preferences.excluded_accounts,
@@ -146,7 +147,7 @@ def extract(mail: Mail, preferences: Preferences, model: JsonModel) -> list[dict
                 # The notice says money left the account but the model returned nothing:
                 # never drop it silently, a person reviews it.
                 raise EvidenceError("events")
-            return proposals
+            return assign_destinations(proposals, source)
         except EvidenceError as exc:
             if exc.field == "events":
                 raise

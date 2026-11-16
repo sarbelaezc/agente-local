@@ -137,6 +137,7 @@ function Start-Process {
     (["summary", "-Month", "2026-03", "-Owner", "hogar"],
      ["summary", "--month", "2026-03", "--owner", "hogar"]),
     (["serve"], ["serve"]),
+    (["backfill-destinations"], ["backfill-destinations"]),
 ])
 def test_household_commands_pass_arguments_without_ollama(tmp_path, arguments, expected):
     powershell = shutil.which("powershell.exe")

@@ -265,9 +265,9 @@ class Store:
                 db.execute(
                     """INSERT INTO transactions (
                     id,message_id,day,merchant,account,amount_minor,currency,
-                    category,kind,decision,reason) VALUES (
+                    category,kind,decision,reason,group_key) VALUES (
                     :id,:message_id,:day,:merchant,:account,:amount_minor,:currency,
-                    :category,:kind,:decision,:reason)""", event,
+                    :category,:kind,:decision,:reason,:group_key)""", {"group_key": None, **event},
                 )
                 db.execute(
                     """UPDATE coverage SET status='partial',
@@ -593,6 +593,27 @@ class Store:
             )
             self._audit(db, "owner-account-local-user", "*" + suffix, owner)
             return self._flag_between_owners(db, None)
+
+    def set_destinations(self, destinations: dict[str, str]) -> int:
+        """Record destinations read again from the original notices.
+
+        Only movements without one change; amounts, decisions and categories stay as
+        they are. Each change is audited, and transfers to a registered account of the
+        other member are then marked as money between members.
+        """
+        changed: list[str] = []
+        with self.connect() as db:
+            for event_id, key in destinations.items():
+                if not isinstance(key, str) or not re.fullmatch(r"(tr|bb|qr|fd):[\w@.\-]{1,60}", key):
+                    raise ValueError("Destino invalido.")
+                if db.execute(
+                    "UPDATE transactions SET group_key=? WHERE id=? AND group_key IS NULL",
+                    (key, event_id),
+                ).rowcount:
+                    self._audit(db, "destination-backfill", event_id, key)
+                    changed.append(event_id)
+            self._flag_between_owners(db, changed)
+        return len(changed)
 
     def _flag_between_owners(self, db: sqlite3.Connection, ids: list[str] | None) -> int:
         """Mark movements naming another member's account, or a remembered destination.
