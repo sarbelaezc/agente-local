@@ -289,6 +289,12 @@ avisos, como Manuela contrastaba los suyos.
   como no había ninguno importado, los totales anteriores no cambian.
 - **Solo lectura.** `-ReadOnly` informa la conciliación sin escribir nada.
 
+**Estilo del panel.** El panel conjunto sigue el estilo del panel de Manuela:
+paleta, letra redondeada, pestañas y chips en píldora, cifras grandes, colores
+fijos por categoría y calendario con intensidad por día. Usa dos columnas en
+escritorio y una en celular. El tema sigue el modo claro u oscuro del sistema, y
+el botón «Tema» puede fijar uno.
+
 **Panel.** El selector **Santiago / Manuela / Hogar** (Hogar por defecto, guardado
 en la URL como `owner`) filtra Mes, Año y Decisión.
 
