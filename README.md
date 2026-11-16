@@ -754,7 +754,7 @@ Todas las reglas del proyecto están en un solo archivo, [`AGENTS.md`](AGENTS.md
 
 | Archivo | Quién lo lee | Contenido |
 |---|---|---|
-| [`AGENTS.md`](AGENTS.md) | Copilot directamente; Claude Code a través de `CLAUDE.md` | Las reglas del proyecto: seguridad, datos locales, comandos, GitFlow y pruebas |
+| [`AGENTS.md`](AGENTS.md) | Copilot directamente; Claude Code a través de `CLAUDE.md` | Reglas del proyecto, seguridad y catálogo/selección de skills |
 | [`CLAUDE.md`](CLAUDE.md) | Claude Code | Una sola línea, `@AGENTS.md`, porque Claude Code no lee `AGENTS.md` por sí solo |
 | [`.claude/skills/`](.claude/skills/) | Ambos | Única ubicación de las skills compartidas |
 | [`.claude/settings.json`](.claude/settings.json) | Claude Code | Permisos compartidos: impide leer el token de Microsoft y el perfil de Opera |
@@ -762,26 +762,9 @@ Todas las reglas del proyecto están en un solo archivo, [`AGENTS.md`](AGENTS.md
 Para cambiar una regla, edita solo `AGENTS.md`. Los ajustes
 personales de Claude Code van en `.claude/settings.local.json`, que Git ignora.
 
-## Skills de Copilot y Claude Code
-
-Las skills compartidas se mantienen una sola vez, como carpetas directas en
-[`.claude/skills/`](.claude/skills/), ubicación reconocida por ambos asistentes.
-No se usan junctions hacia `.agents/skills/` ni `skills-lock.json`: ese lock
-administraba una segunda ubicación de instalación.
-
-| Skill | Uso |
-|---|---|
-| [agent-browser](.claude/skills/agent-browser/SKILL.md) | Automatización de navegador y aplicaciones Electron con el CLI `agent-browser`; requiere instalar el CLI por separado. |
-| [find-skills](.claude/skills/find-skills/SKILL.md) | Buscar skills disponibles cuando se solicita ampliar las capacidades del agente. |
-| [frontend-design](.claude/skills/frontend-design/SKILL.md) | Diseñar interfaces web distintivas y adaptables, con atención a accesibilidad y detalle visual. |
-| [pdf](.claude/skills/pdf/SKILL.md) | Leer, extraer, convertir y crear PDFs, incluidos formularios. Fuente: [anthropics/skills](https://github.com/anthropics/skills); licencia [Apache-2.0](.claude/skills/pdf/LICENSE.txt). Aplican las restricciones de seguridad y aprobación de `AGENTS.md`. |
-| [ponytail](.claude/skills/ponytail/SKILL.md) | Priorizar el cambio más simple que resuelva completamente el trabajo, sin recortar validación, seguridad ni pruebas. Fuente: [dietrichgebert/ponytail](https://github.com/dietrichgebert/ponytail), revisión `96608e078b2d5ea607c5c3b8b5a54d1c1fba6846`; licencia [MIT](.claude/skills/ponytail/LICENSE). |
-| [ui-ux-pro-max](.claude/skills/ui-ux-pro-max/SKILL.md) | Consultar datos y herramientas locales para diseño visual, accesibilidad, interacción y experiencia de usuario. Fuente: [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill), licencia [MIT](.claude/skills/ui-ux-pro-max/LICENSE). |
-| [web-design-guidelines](.claude/skills/web-design-guidelines/SKILL.md) | Revisar interfaces según los lineamientos web vigentes de Vercel; consulta su fuente en línea al revisar. |
-
-Las licencias de terceros se conservan junto a las skills que las requieren.
-`find-skills` consulta el catálogo público y solo debe usarse cuando la solicitud
-lo requiera; no forma parte de las automatizaciones del agente local.
+El catálogo y los criterios para elegir la skill adecuada se mantienen solo en
+[`AGENTS.md`](AGENTS.md). Las instrucciones completas de cada skill están en su
+`SKILL.md` dentro de [`.claude/skills/`](.claude/skills/).
 
 ## Aviso
 
