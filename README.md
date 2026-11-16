@@ -96,6 +96,7 @@ Sustituye a `run-monthly-close.ps1`, `import-monthly-close.ps1` y
 | `summary -Month AAAA-MM [-Owner santiago\|manuela\|hogar]` | Resumen de un mes (por defecto de Santiago) | No |
 | `import-manuela [-SourceDir <carpeta>]` | Importa los movimientos de Manuela desde `.local\ImportManuela` y compara sus totales | No |
 | `owner-account -Owner <titular> -Suffix NNNN` | Asigna una cuenta (últimos 4 dígitos) a un titular | No |
+| `backfill-destinations` | Vuelve a leer por Graph (solo lectura) los avisos de Santiago para guardar el destino de sus pagos ya importados | No |
 | `scheduled` | Cierre de la tarea programada | Solo en la hora de cierre |
 | `invoices` | Lote de facturas (`-BatchSize`, `-Days`, `-Resume`) | Sí |
 
@@ -225,6 +226,30 @@ Las cuentas se registran solo en la base local, nunca en Git:
 Registrar una cuenta revisa todos los movimientos existentes. La marca automática
 nunca quita una marca puesta por una persona.
 
+**Destino de los pagos de Santiago.** Igual que en los movimientos de Manuela,
+cada pago saliente de Santiago guarda su destino (`group_key`). Lo lee un lector
+determinista, sin Ollama, de la frase fija del banco; si la frase no lo dice o es
+ambigua, no se asigna. Los formatos reconocidos son:
+
+| Aviso | Destino |
+|---|---|
+| «Transferiste $… (por QR) desde tu cuenta … a la cuenta *NNNN» | `tr:NNNN` |
+| «Transferiste $… a la llave @alias o número desde tu cuenta …» (Bre-B) | `bb:@alias` o `bb:NNNN` |
+| «Pagaste $… por código QR desde tu cuenta … a la llave …» | `qr:…` |
+| «Retiraste $… de tu cuenta de inversión *XXXX …» | `fd:XXXX` |
+
+- De las cuentas y llaves numéricas se guardan solo los últimos 4 dígitos.
+- Los avisos nuevos guardan el destino al importarse.
+- Para los ya importados, `backfill-destinations` vuelve a leer por Graph solo los
+  avisos de pagos salientes sin destino. Usa la sesión guardada, en solo lectura y
+  sin Ollama, y se detiene cuando los encuentra todos.
+- Solo completa destinos vacíos y audita cada uno como `destination-backfill`. No
+  cambia importes, categorías ni decisiones.
+- Un destino `tr:` que coincide con una cuenta registrada del otro titular se marca
+  entre titulares.
+- Los avisos sin estas frases (por ejemplo, aportes a inversión o cajero) siguen
+  agrupados por comercio, porque no se adivinan formatos.
+
 **Panel.** El selector **Santiago / Manuela / Hogar** (Hogar por defecto, guardado
 en la URL como `owner`) filtra Mes, Año y Decisión.
 
@@ -262,6 +287,10 @@ titulares queda en `audit` con su origen.
   diferencia aprobada del cajero en los meses con retiros. Los totales y
   resúmenes de Santiago quedaron idénticos y la segunda importación no cambió
   nada.
+- En la base real, `backfill-destinations` (con copia manual previa) leyó todos
+  los avisos pendientes y guardó el destino de casi todos los pagos salientes de
+  Santiago. Los demás no tienen una frase de destino. Importes, decisiones y totales no cambiaron. Ninguna
+  transferencia fue a la cuenta registrada de Manuela.
 - En la base real (con copia previa) se importó con la misma paridad, se
   registraron las cuentas de ambos titulares y los abonos de Santiago a las
   tarjetas de Manuela se marcaron entre titulares, con auditoría.

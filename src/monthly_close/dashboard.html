@@ -1573,6 +1573,7 @@
         const first = itemText(entry.rows[0].merchant);
         if (prefix === "qr") return `Pago por QR a la llave ${value}`;
         if (prefix === "tr") return `Transferencia a la cuenta *${value}`;
+        if (prefix === "bb") return /bre-?b/i.test(first) ? first : `Bre-B a la llave ${value}`;
         if (prefix === "fd") return "Retiro del fondo de inversión";
         if (prefix === "cj") return "Retiro en cajero";
         if (prefix === "pago") return `${first} (pago mensual)`;
