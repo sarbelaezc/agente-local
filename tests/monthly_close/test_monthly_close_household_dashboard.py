@@ -148,7 +148,12 @@ def test_year_summary_capitalizes_months_and_leaves_months_without_data_blank(ho
     page.locator("#tab-year").click()
     rows = page.locator("#year-table tbody tr")
     expect(rows).to_have_count(12)
-    assert rows.nth(2).locator("td").first.inner_text() == "Marzo de 2026"
+    march = rows.nth(2).locator("td")
+    assert march.first.inner_text() == "Marzo de 2026"
+    # A month with data shows a dash for the kinds it did not have; the balance is always computed.
+    assert march.nth(1).inner_text() != "—"  # personal spending
+    assert [march.nth(index).inner_text() for index in (4, 6, 7)] == ["—", "—", "—"]  # income, investments, cash
+    assert "COP" in march.nth(5).inner_text()  # balance
     # An elapsed month without movements shows dashes, never 0,00.
     january = rows.nth(0).inner_text()
     assert january.startswith("Enero de 2026")
