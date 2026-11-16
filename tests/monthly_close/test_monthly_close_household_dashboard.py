@@ -139,6 +139,58 @@ def test_year_view_shows_income_for_each_member_and_household(household):
     assert not errors
 
 
+def test_month_view_is_interactive_like_manuelas_dashboard(household):
+    page, store, errors = household
+    for event_id, day, merchant, amount, kind, decision, category in [
+        ("u1", "20", "UBER RIDES", 15000, "purchase", "personal", "Transporte"),
+        ("u2", "21", "UBER *TRIP", 25000, "purchase", "personal", "Transporte"),
+        ("s3", "15", "EMPRESA SINTETICA", 300000, "income", "income", "Nómina"),
+    ]:
+        store.import_message(event_id, [{
+            "id": event_id, "message_id": event_id, "day": f"{MONTH}-{day}", "merchant": merchant,
+            "account": "Tarjeta A", "amount_minor": amount, "currency": "COP", "category": category,
+            "kind": kind, "decision": decision, "reason": "Sintetico.",
+        }])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    tip = page.locator("#tip")
+
+    # Instant tooltip on a chart slice, and on keyboard focus of a calendar day.
+    # Point at the top of the ring (viewBox 240 × 190, center 120,95, radius 54–84).
+    box = page.locator("#category-chart-svg").bounding_box()
+    page.mouse.move(box["x"] + box["width"] * 121 / 240, box["y"] + box["height"] * 25 / 190)
+    expect(tip).to_be_visible()
+    assert re.search(r"(Transporte|Compras): .*COP \(", tip.inner_text())
+    day = page.locator('#calendar button.day-cell[data-tip*=", 2 "]')
+    day.focus()
+    expect(tip).to_contain_text(re.compile(r"1[.\s]?000,00"))
+
+    # A day opens its movements and closes on a second click.
+    day.click()
+    detail = page.locator("#day-detail")
+    expect(detail).to_be_visible()
+    assert "TIENDA S" in detail.inner_text() and "Personal" in detail.inner_text()
+    expect(page.locator("#calendar button.day-cell.selected")).to_have_count(1)
+    page.locator("#calendar button.day-cell.selected").click()
+    expect(detail).to_be_hidden()
+    assert page.locator("#calendar div.day-cell:not(.empty)").count() > 0  # days without spending stay plain
+
+    # Rankings have proportional bars and group the same merchant written two ways.
+    merchants = page.locator("#merchant-ranking").inner_text()
+    assert "Uber · 2" in merchants and "UBER RIDES" not in merchants
+    assert page.locator("#weekday-chart .bar-row").count() == 7
+    assert page.locator("#merchant-ranking .bar-fill").count() >= 2
+
+    # Incomes and third-party payments open from their cards.
+    income = page.locator("#month-metrics .metric").filter(has_text="Ingresos").first
+    income.locator("summary", has_text="Ver el ingreso").click()
+    assert "EMPRESA SINTETICA" in income.inner_text()
+    spending = page.locator("#month-metrics .metric").filter(has_text="Gasto del mes")
+    spending.locator("summary", has_text="Ver el abono de terceros").click()
+    assert "Pagos de otras personas" in spending.inner_text()
+    assert not errors
+
+
 def test_destination_card_decides_every_pending_payment_with_audit(household):
     page, store, errors = household
     page.locator("#tab-decisions").click()

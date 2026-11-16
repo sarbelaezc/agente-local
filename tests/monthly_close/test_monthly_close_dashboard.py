@@ -461,7 +461,7 @@ def test_withdrawal_buttons_persist_and_apply_correct_expense_totals(
         ).inner_text()
         assert "Retiro en efectivo" in page.locator("#category-details").inner_text()
         assert "Retiro en efectivo" in page.locator("#category-chart").inner_text()
-        calendar_labels = page.locator("#calendar [role=listitem]").evaluate_all(
+        calendar_labels = page.locator("#calendar .day-cell[aria-label]").evaluate_all(
             "items => items.map(item => item.getAttribute('aria-label'))"
         )
         assert any(re.search(r"\b2[.\s]?000,59", label) for label in calendar_labels)

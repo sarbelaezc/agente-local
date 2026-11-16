@@ -185,8 +185,25 @@
     .chart-wrap { width: 100%; overflow-x: auto; }
     svg.chart { display: block; width: 100%; min-width: 280px; height: auto; overflow: visible; }
     #category-chart-svg { display: block; width: 100%; max-width: 230px; margin: 0 auto 12px; }
-    .axis-label { fill: var(--ink2); font-size: 11px; font-weight: 500; }
+    .axis-label { fill: var(--ink2); font-size: 11px; font-weight: 500; pointer-events: none; }
     .chart-grid { stroke: var(--line); }
+
+    /* Interaction, after Manuela's dashboard: instant tooltip, clickable days and bar rankings */
+    #tip { position: fixed; z-index: 20; display: none; max-width: 240px; padding: 6px 9px; border-radius: 8px; background: var(--ink); color: var(--bg); font-size: 12px; line-height: 1.35; pointer-events: none; box-shadow: 0 4px 14px #0003; }
+    button.day-cell { width: 100%; color: inherit; font: inherit; cursor: pointer; }
+    button.day-cell:hover { border-color: var(--ink2); }
+    button.day-cell:focus-visible { outline: 2px solid var(--acc, var(--s1)); outline-offset: 1px; }
+    .day-cell.selected { outline: 2px solid var(--ink); outline-offset: -1px; }
+    .day-detail { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+    .day-detail h4 { margin: 0 0 4px; color: var(--ink); font-size: 14px; }
+    .bar-row { display: grid; grid-template-columns: minmax(0, 120px) minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; }
+    .bar-row .bar-name { overflow: hidden; color: var(--ink2); text-overflow: ellipsis; white-space: nowrap; }
+    .bar-row .bar-track { height: 10px; }
+    .bar-row .bar-fill { height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--s1); }
+    .bar-row strong { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .metric details.inline-detail { margin-top: 6px; }
+    .metric details.inline-detail > summary { padding: 4px 0; color: var(--ink2); font-size: 13px; font-weight: 500; }
+    .metric .inline-detail .detail-row strong, .metric .inline-detail .flag-tag { display: inline; margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0; white-space: nowrap; }
 
     /* Tables and details */
     .table-wrap { width: 100%; overflow-x: auto; }
@@ -332,7 +349,8 @@
           <div class="grid-2">
             <article class="card">
               <div class="card-header"><div><h3>Calendario diario</h3><p>Montos personales y familiares decididos</p></div></div>
-              <div id="calendar" class="calendar" role="list" aria-label="Días del mes"></div>
+              <div id="calendar" class="calendar" role="group" aria-label="Días del mes; toca un día con gasto para ver sus movimientos"></div>
+              <div id="day-detail" class="day-detail" aria-live="polite" hidden></div>
             </article>
             <article class="card">
               <div class="card-header"><div><h3>Gasto por categoría</h3><p>Parte del gasto personal y familiar del mes</p></div></div>
@@ -443,6 +461,7 @@
     </main>
   </div>
 
+  <div id="tip" role="tooltip"></div>
   <script>
     "use strict";
     (() => {
@@ -475,6 +494,7 @@
         activeTab: ["month", "year", "decisions"].includes(initialTab) ? initialTab : "month",
         owner: ["santiago", "manuela", "hogar"].includes(initialParams.get("owner")) ? initialParams.get("owner") : "hogar",
         busy: false,
+        selectedDay: null, // { key: "month|owner|currency", day }
         categoryColors: new Map(),
         pendingLimit: 50,
         historyLimit: 50,
@@ -666,6 +686,77 @@
         if (tx.between_owners === 1) flags.push(el("span", "flag-tag", "Entre Santiago y Manuela · no cuenta en Hogar"));
         if (typeof tx.note === "string" && tx.note) flags.push(el("span", "flag-tag", tx.note));
         flags.forEach(flag => host.append(document.createTextNode(" "), flag));
+      }
+      // One floating tooltip for every element with data-tip: mouse, touch and keyboard focus.
+      const tip = $("#tip");
+      function showTip(target, x, y) {
+        tip.textContent = target.dataset.tip;
+        tip.style.display = "block";
+        const width = tip.offsetWidth;
+        tip.style.left = `${Math.max(6, Math.min(innerWidth - width - 6, x - width / 2))}px`;
+        tip.style.top = `${Math.max(6, y - tip.offsetHeight - 14)}px`;
+      }
+      function hideTip() { tip.style.display = "none"; }
+      function tipTarget(event) {
+        return event.target instanceof Element ? event.target.closest("[data-tip]") : null;
+      }
+      document.addEventListener("pointermove", event => {
+        if (event.pointerType !== "mouse") return;
+        const target = tipTarget(event);
+        if (target) showTip(target, event.clientX, event.clientY); else hideTip();
+      });
+      // A tap has no hover: show the tooltip where the finger lands, and hide it on the next tap elsewhere.
+      document.addEventListener("pointerdown", event => {
+        if (event.pointerType === "mouse") return;
+        const target = tipTarget(event);
+        if (target) showTip(target, event.clientX, event.clientY); else hideTip();
+      });
+      document.addEventListener("focusin", event => {
+        const target = tipTarget(event);
+        if (!target) { hideTip(); return; }
+        const box = target.getBoundingClientRect();
+        showTip(target, box.left + box.width / 2, box.top);
+      });
+      document.addEventListener("pointerleave", hideTip);
+      addEventListener("scroll", hideTip, { passive: true });
+      function setTip(node, text) {
+        node.dataset.tip = text;
+        node.setAttribute("aria-label", text);
+        return node;
+      }
+      // Same merchant written several ways in the notices (UBER RIDES, UBER *TRIP…), as in Manuela's dashboard.
+      // Only the "where you spent most" ranking uses it; stored data keeps the notice's text.
+      function merchantName(text) {
+        const upper = text.toUpperCase();
+        const rest = pattern => text.replace(pattern, "").trim();
+        if (/^(R08 )?CREPES/.test(upper)) return "Crepes & Waffles";
+        if (upper.startsWith("KS*")) return "Restaurante (KS*Just)";
+        const brands = [
+          [/UBER/, "Uber"], [/NETFLIX/, "Netflix"], [/EXITO/, "Éxito"], [/PRICESMART/, "PriceSmart"], [/RAPPI/, "Rappi"],
+          [/FRISBY/, "Frisby"], [/LATIENDADELCAFE|LA TIENDA DEL CAFE/, "La Tienda del Café"], [/PERGAMINO/, "Café Pergamino"],
+          [/SANTA BARBAR/, "Café de Santa Bárbara"], [/DOMINOS/, "Domino’s"], [/AMAZON/, "Amazon"]
+        ];
+        const brand = brands.find(([found]) => found.test(upper));
+        if (brand) return brand[1];
+        if (upper.startsWith("BOLD")) return `Bold (${rest(/^BOLD\s?S?A?\*/i)})`;
+        if (upper.includes("WOMPI")) return `Wompi (${rest(/WOMPI\*?\s?/i)})`;
+        if (/^(MERCPAGO|MERCADO PAGO)/.test(upper)) return `Mercado Pago (${rest(/^(MERCPAGO|MERCADO PAGO)\*?\s?/i)})`;
+        return text;
+      }
+      // A short list of movements under a metric, opened on demand.
+      function inlineDetail(summary, rows) {
+        const detail = el("details", "inline-detail");
+        detail.append(el("summary", "", summary));
+        const body = el("div", "detail-rows");
+        rows.slice().sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
+          const row = el("div", "detail-row");
+          const text = el("span", "", `${tx.day ? formatDate(tx.day) : "Sin fecha"} · ${itemText(tx.merchant)} · ${itemText(tx.category)}`);
+          appendFlags(text, tx);
+          row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
+          body.append(row);
+        });
+        detail.append(body);
+        return detail;
       }
       function makeMetric(label, value, note = "") {
         const box = el("div", "metric");
@@ -1054,6 +1145,8 @@
             : `${incomes.length} confirmados`
         );
         income.classList.add("hero");
+        if (incomes.length) income.append(inlineDetail(`Ver ${incomes.length === 1 ? "el ingreso" : `los ${incomes.length} ingresos`}`, incomes));
+        if (paidBack.length) spend.append(inlineDetail(`Ver ${paidBack.length === 1 ? "el abono" : `los ${paidBack.length} abonos`} de terceros`, paidBack));
         const net = makeMetric(
           "Balance", formatMoney(balance),
           incomeTotal === 0 && total === 0 ? "Sin ingresos ni gastos decididos"
@@ -1099,7 +1192,7 @@
         renderCumulative(inMonth, monthDate);
         renderWeekdays(decisions);
         renderRanking("#account-ranking", decisions, tx => tx.account, "Sin cuenta");
-        renderRanking("#merchant-ranking", decisions, tx => tx.merchant, "Sin comercio");
+        renderRanking("#merchant-ranking", decisions, tx => typeof tx.merchant === "string" && tx.merchant.trim() ? merchantName(tx.merchant.trim()) : tx.merchant, "Sin comercio");
         renderCategoryDetails(inMonth);
         renderStatements();
       }
@@ -1175,23 +1268,60 @@
           if (date >= 1 && date <= days) grouped.set(date, (grouped.get(date) || 0) + tx.amount_minor);
         }
         const busiest = Math.max(1, ...grouped.values());
+        // A selected day belongs to one month, owner and currency; any change closes it.
+        const key = `${state.month}|${state.owner}|${state.currency}`;
+        if (!state.selectedDay || state.selectedDay.key !== key || !grouped.has(state.selectedDay.day)) state.selectedDay = null;
         for (let day = 1; day <= days; day++) {
           const date = new Date(year, month, day);
-          const cell = el("div", `day-cell${date.toDateString() === new Date().toDateString() ? " today" : ""}`);
-          cell.setAttribute("role", "listitem");
-          cell.setAttribute("aria-label", `${weekdayNames[(date.getDay() + 6) % 7]}, ${day} ${monthLabel(state.month)}${grouped.has(day) ? `, ${formatMoney(grouped.get(day))}` : ""}`);
-          cell.append(el("span", "day-number", String(day)));
-          if (grouped.has(day)) {
-            // Darker days spent more, as in Manuela's calendar.
-            cell.style.background = `color-mix(in srgb, var(--s1) ${Math.round(12 + 60 * Math.max(0, grouped.get(day)) / busiest)}%, var(--surf))`;
-            // The cell is narrow: show the number alone; the currency is in the label and tooltip.
-            // Compact like Manuela's calendar (1,5 M); the label and tooltip keep the exact amount.
-            const amount = el("span", "day-amount", shortAmount(grouped.get(day) / 100));
-            amount.title = formatMoney(grouped.get(day));
-            cell.append(amount);
+          const today = date.toDateString() === new Date().toDateString() ? " today" : "";
+          const label = `${weekdayNames[(date.getDay() + 6) % 7]}, ${day} ${monthLabel(state.month)}`;
+          if (!grouped.has(day)) {
+            const cell = el("div", `day-cell${today}`);
+            cell.setAttribute("aria-label", label);
+            cell.append(el("span", "day-number", String(day)));
+            host.append(cell);
+            continue;
           }
+          const selected = state.selectedDay && state.selectedDay.day === day;
+          const cell = el("button", `day-cell${today}${selected ? " selected" : ""}`);
+          cell.type = "button";
+          cell.setAttribute("aria-pressed", String(Boolean(selected)));
+          setTip(cell, `${label}: ${formatMoney(grouped.get(day))}`);
+          // Darker days spent more, as in Manuela's calendar.
+          cell.style.background = `color-mix(in srgb, var(--s1) ${Math.round(12 + 60 * Math.max(0, grouped.get(day)) / busiest)}%, var(--surf))`;
+          // Compact like Manuela's calendar (1,5 M); the tooltip keeps the exact amount.
+          cell.append(el("span", "day-number", String(day)), el("span", "day-amount", shortAmount(grouped.get(day) / 100)));
+          cell.addEventListener("click", () => {
+            state.selectedDay = selected ? null : { key, day };
+            renderCalendar(items, firstDay);
+            const again = Array.from(host.querySelectorAll("button.day-cell")).find(button => button.querySelector(".day-number").textContent === String(day));
+            if (again) again.focus();
+          });
           host.append(cell);
         }
+        renderDayDetail(items);
+      }
+
+      // Movements counted on the selected calendar day, as in Manuela's dashboard.
+      function renderDayDetail(items) {
+        const host = $("#day-detail");
+        host.replaceChildren();
+        host.hidden = !state.selectedDay;
+        if (!state.selectedDay) return;
+        const day = state.selectedDay.day;
+        const rows = counted(items).filter(tx => Number(tx.day.slice(8, 10)) === day)
+          .sort((a, b) => String(a.time || "").localeCompare(String(b.time || "")));
+        host.append(el("h4", "", `${day} de ${monthLabel(state.month)} · ${formatMoney(sum(rows))}`));
+        const body = el("div", "detail-rows");
+        rows.forEach(tx => {
+          const row = el("div", "detail-row");
+          const scope = tx.decision === "family" ? "Familiar" : "Personal";
+          const text = el("span", "", `${itemText(tx.merchant)} · ${itemText(tx.category)} · ${scope}`);
+          appendFlags(text, tx);
+          row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
+          body.append(row);
+        });
+        host.append(body);
       }
 
       function renderDonut(items) {
@@ -1218,8 +1348,7 @@
             return `M ${point(outer, from)} A ${outer} ${outer} 0 ${large} 1 ${point(outer, to)} L ${point(inner, to)} A ${inner} ${inner} 0 ${large} 0 ${point(inner, from)} Z`;
           }).join(" ");
           const slice = svgEl("path", { d, fill: categoryColor(category), stroke: "var(--surface)", "stroke-width": entries.length > 1 ? 2 : 0, "stroke-linejoin": "round" });
-          slice.append(svgEl("title"));
-          slice.lastChild.textContent = `${category}: ${formatMoney(amount)} (${(amount * 100 / grandTotal).toFixed(1).replace(".", ",")} %)`;
+          setTip(slice, `${category}: ${formatMoney(amount)} (${(amount * 100 / grandTotal).toFixed(1).replace(".", ",")} %)`);
           svg.append(slice);
           angle += sweep;
         });
@@ -1294,6 +1423,14 @@
           label.textContent = String(day);
           svg.append(label);
         });
+        // One invisible column per day carries the running totals of that day.
+        const column = chartWidth / days;
+        cumulative.forEach(([personalSoFar, familySoFar], index) => {
+          const x = left + (days === 1 ? chartWidth / 2 : chartWidth * index / (days - 1)) - column / 2;
+          const hit = svgEl("rect", { x, y: top, width: column, height: chartHeight, fill: "transparent" });
+          setTip(hit, `Día ${index + 1}: personal ${formatMoney(personalSoFar)} · familiar ${formatMoney(familySoFar)} · total ${formatMoney(personalSoFar + familySoFar)}`);
+          svg.append(hit);
+        });
         host.append(svg);
         const legend = el("div", "legend-row");
         legend.append(el("span", "legend-label", `Personal ${formatMoney(personalTotal)}`), el("span", "legend-label", `Familiar ${formatMoney(familyTotal)}`));
@@ -1311,17 +1448,18 @@
           totals[index] += tx.amount_minor;
         });
         const max = Math.max(0, ...totals);
-        weekdayNames.forEach((name, index) => {
-          const row = el("div", "rank-row");
-          const label = el("span", "legend-label", name);
-          const progress = document.createElement("progress");
-          progress.max = max || 1;
-          progress.value = Math.max(0, totals[index]);
-          progress.setAttribute("aria-label", `${name}: ${formatMoney(totals[index])}`);
-          progress.style.width = "38%";
-          row.append(label, progress, el("strong", "", formatMoney(totals[index])));
-          host.append(row);
-        });
+        weekdayNames.forEach((name, index) => host.append(barRow(name, totals[index], max)));
+      }
+
+      // Name, proportional bar and amount, as in Manuela's rankings.
+      function barRow(name, amount, max, tipText = `${name}: ${formatMoney(amount)}`) {
+        const row = setTip(el("div", "bar-row"), tipText);
+        const track = el("div", "bar-track");
+        const fill = el("div", "bar-fill");
+        fill.style.width = `${max > 0 ? Math.max(1, 100 * Math.max(0, amount) / max) : 0}%`;
+        track.append(fill);
+        row.append(el("span", "bar-name", name), track, el("strong", "", formatMoney(amount)));
+        return row;
       }
 
       function renderRanking(selector, items, keyOf, missingLabel, filter = counted) {
@@ -1337,11 +1475,11 @@
         });
         const top = Array.from(groups).sort((a, b) => b[1].total - a[1].total).slice(0, 7);
         if (!top.length) { host.append(el("div", "empty-state", "Sin datos decididos.")); return; }
-        top.forEach(([name, value]) => {
-          const row = el("div", "rank-row");
-          row.append(el("span", "legend-label", `${name} · ${value.count}`), el("strong", "", formatMoney(value.total)));
-          host.append(row);
-        });
+        const max = Math.max(0, ...top.map(([, value]) => value.total));
+        top.forEach(([name, value]) => host.append(barRow(
+          `${name} · ${value.count}`, value.total, max,
+          `${name}: ${formatMoney(value.total)} en ${value.count} ${value.count === 1 ? "movimiento" : "movimientos"}`
+        )));
       }
 
       function renderCategoryDetails(items) {
@@ -1486,9 +1624,7 @@
               x: left + band * index + band * .12 + position * (barWidth + 2), y: top + chartHeight - barHeight,
               width: barWidth, height: barHeight, fill: colors[position]
             });
-            const tip = svgEl("title");
-            tip.textContent = `${monthLabel(bucket.month)} · ${name}: ${formatMoney(amount)}`;
-            rect.append(tip);
+            setTip(rect, `${monthLabel(bucket.month)} · ${name}: ${formatMoney(amount)}`);
             svg.append(rect);
           });
           const label = svgEl("text", { x: left + band * index + band / 2, y: height - 12, "text-anchor": "middle", class: "axis-label" });
@@ -1548,9 +1684,7 @@
                 x, y: top + chartHeight - stackedHeight - segmentHeight, width: barWidth, height: segmentHeight,
                 fill: categoryColor(category)
               });
-              const title = svgEl("title");
-              title.textContent = `${monthLabel(bucket.month)} · ${category}: ${formatMoney(amount)}`;
-              rect.append(title);
+              setTip(rect, `${monthLabel(bucket.month)} · ${category}: ${formatMoney(amount)}`);
               svg.append(rect);
             }
             stackedHeight += segmentHeight;
