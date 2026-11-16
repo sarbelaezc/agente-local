@@ -74,6 +74,8 @@ card_payment, nunca income ni compra. "Compraste ... en COMERCIO" es purchase
 aunque el comercio se llame "INVERSIONES ..." u otra palabra financiera.
 Si la cuenta destino termina en uno de own_account_suffixes, es una cuenta propia
 del usuario: usa kind own_transfer.
+Un pago o abono a un credito de known_credits (por sus ultimos digitos o su nombre)
+es kind loan, no compra ni transferencia; merchant es el texto literal del credito.
 
 Comprobacion final obligatoria: un pago o abono a la deuda de una tarjeta de
 credito NO es una compra. Si identificaste card_payment, no lo incluyas en events,
@@ -102,6 +104,7 @@ class EvidenceError(ValueError):
 
 def extract(
     mail: Mail, preferences: Preferences, model: JsonModel, own_accounts: list[str] | None = None,
+    known_credits: list[dict] | None = None,
 ) -> list[dict]:
     """Extract evidence-backed proposals; no model proposal is a human approval.
 
@@ -123,6 +126,7 @@ def extract(
     context = {
         "accounts": preferences.accounts,
         "own_account_suffixes": sorted(own_accounts or []),
+        "known_credits": known_credits or [],
         "excluded_accounts": preferences.excluded_accounts,
         "categories": preferences.categories,
         "income_categories": INCOME_CATEGORIES,

@@ -20,6 +20,7 @@ import httpx
 from mail_invoices.local_model import LocalModelError, validate_local_url
 from mail_invoices.storage import data_root
 from monthly_close.model import OllamaJsonModel
+from monthly_close import credit_ledger
 from monthly_close import statements as statements_module
 from monthly_close.domain import EMAIL, Preferences, received_local
 from monthly_close.extraction import EvidenceError, extract, income_category
@@ -247,7 +248,10 @@ def _walk(
                 return
             assert model is not None
             try:
-                proposals = extract(mail, preferences, model, store.own_account_suffixes("santiago"))
+                proposals = extract(
+                    mail, preferences, model, store.own_account_suffixes("santiago"),
+                    [{"suffix": c.suffix, "name": c.name} for c in credit_ledger.load_configs(data_dir)],
+                )
             except EvidenceError as exc:
                 folder = " / ".join(reader.active_folder or ())
                 store.record_extraction_failure(
@@ -452,6 +456,10 @@ def reconcile_statements(
                 except statements_module.StatementError as exc:
                     raise ValueError(f"Extracto {match['product']} {match['period']}: {exc}") from exc
                 found.setdefault(statement.identity, statement)
+    with_register = {config.suffix for config in credit_ledger.load_configs(data_dir)}
+    for statement in found.values():
+        if statement.product == "CREDITO" and statement.suffix in with_register:
+            statement.movements = []  # its payment register is the source; balances still count
     report = statements_module.reconcile(list(found.values()), store.state()["transactions"], start)
     events = [
         statements_module.missing_event(
@@ -464,6 +472,41 @@ def reconcile_statements(
         "statements": len(found), "matched": len(report.matched), "missing": len(report.missing),
         "imported": imported, "balances": sum(s.balance_minor is not None for s in found.values()),
     }
+
+
+def import_credit_ledgers(store: Store, data_dir: Path, preferences: Preferences) -> list[str]:
+    """Import every configured payment register after checking it against the statements.
+
+    A register whose capital differs from any statement period stops the run without
+    importing anything from it.
+    """
+    lines = []
+    configs = credit_ledger.load_configs(data_dir)
+    if not configs:
+        raise ValueError(f"No hay registros de credito en {credit_ledger.LEDGERS_FILE}.")
+    for config in configs:
+        with store.connect() as db:
+            balances = [
+                (row["period_end"], row["balance_minor"]) for row in db.execute(
+                    """SELECT period_end, balance_minor FROM statement_checks WHERE product='CREDITO'
+                    AND suffix=? AND balance_minor IS NOT NULL ORDER BY period_end""", (config.suffix,),
+                )
+            ]
+        if len(balances) < 2:
+            raise ValueError(f"Faltan extractos del credito *{config.suffix} para contrastar el registro.")
+        first = date.fromisoformat(balances[0][0])
+        payments = credit_ledger.read_payments(config, first.replace(day=1))
+        problems = credit_ledger.contrast(payments, balances)
+        if problems:
+            raise ValueError(f"El registro del credito *{config.suffix} no cuadra con el banco: " + "; ".join(problems))
+        category = config.category if config.category in preferences.categories else preferences.categories[-1]
+        result = store.import_credit_ledger(config.owner, config.suffix, credit_ledger.events(config, payments, category))
+        lines.append(
+            f"Credito *{config.suffix}: {len(payments)} pagos leidos; cuadra con {len(balances) - 1} periodos del banco; "
+            f"{result['imported']} nuevos, {result['replaced']} cuotas del extracto reemplazadas, "
+            f"{result['possible_duplicates']} posibles duplicados anotados."
+        )
+    return lines
 
 
 def run_member_import(store: Store, folder: Path) -> None:
@@ -502,6 +545,9 @@ def run(args: argparse.Namespace) -> None:
         return
     if args.command == "import-manuela":
         run_member_import(store, args.source_dir.expanduser().resolve())
+        return
+    if args.command == "import-credit-ledger":
+        print("\n".join(import_credit_ledgers(store, data_dir, store.preferences())))
         return
     if args.command == "payroll-deduction":
         if not args.owner or not args.suffix:
@@ -583,7 +629,7 @@ def main() -> None:
         "command",
         choices=[
             "serve", "login", "pilot", "scan", "summary", "scheduled", "check-config",
-            "import-manuela", "owner-account", "backfill-destinations", "reconcile-statements", "payroll-deduction",
+            "import-manuela", "owner-account", "backfill-destinations", "reconcile-statements", "payroll-deduction", "import-credit-ledger",
         ],
     )
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())

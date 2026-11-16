@@ -51,6 +51,7 @@ class Statement:
     period_end: date
     movements: list[Movement] = field(default_factory=list)
     balance_minor: int | None = None  # investment value or outstanding credit
+    due_minor: int | None = None  # credit instalment due for the next period
 
     @property
     def identity(self) -> str:
@@ -255,7 +256,10 @@ def parse_consumer_credit(text: str) -> Statement:
     if not number or not cut or not total or not balance:
         raise StatementError("Extracto de crédito con formato no reconocido.")
     end = date(int(cut["year"]), int(cut["month"]), int(cut["day"]))
-    statement = Statement("CREDITO", number[1][-4:], end.replace(day=1), end, balance_minor=_us_amount(balance[1]))
+    statement = Statement(
+        "CREDITO", number[1][-4:], end.replace(day=1), end,
+        balance_minor=_us_amount(balance[1]), due_minor=_us_amount(total[2]),
+    )
     paid = _us_amount(total[1])  # "abono anterior": what was paid since the last statement
     if paid:
         statement.movements.append(Movement(end, "Cuota de crédito pagada", paid, "COP", "loan"))
@@ -414,6 +418,7 @@ class Reconciliation:
                 "suffix": statement.suffix, "period_start": statement.period_start.isoformat(),
                 "period_end": statement.period_end.isoformat(), "movements": len(statement.movements),
                 "matched": matched, "missing": missing, "balance_minor": statement.balance_minor,
+                "due_minor": statement.due_minor,
             })
         return rows
 

@@ -99,6 +99,7 @@ Sustituye a `run-monthly-close.ps1`, `import-monthly-close.ps1` y
 | `owner-account -Owner <titular> -Suffix NNNN` | Asigna una cuenta (últimos 4 dígitos) a un titular | No |
 | `reconcile-statements [-Start AAAA-MM-DD] [-ReadOnly]` | Lee por Graph los extractos PDF de Santiago, los concilia con los avisos e importa como pendientes los movimientos que solo muestra el extracto; guarda saldos de inversiones y créditos | No |
 | `payroll-deduction -Owner <titular> -Suffix NNNN` | Marca un crédito cuyas cuotas se descuentan de la nómina; cada cuota que cuenta como gasto suma también como ingreso de nómina | No |
+| `import-credit-ledger` | Importa los pagos de los créditos desde tu registro en Excel, tras contrastarlos al peso con los extractos | No |
 | `backfill-destinations` | Vuelve a leer por Graph (solo lectura) los avisos de Santiago para guardar el destino de sus pagos ya importados | No |
 | `scheduled` | Cierre de la tarea programada | Solo en la hora de cierre |
 | `invoices` | Lote de facturas (`-BatchSize`, `-Days`, `-Resume`) | Sí |
@@ -318,6 +319,42 @@ mismo valor y fecha, auditado como `payroll-deduction-income`. Si la cuota deja 
 contar, el ingreso espejo desaparece. El gasto no cambia; el ingreso refleja el
 salario completo y el balance deja de contar el descuento dos veces. Aplica a las
 cuotas ya decididas y a las que lleguen con extractos futuros.
+
+**Registro de pagos de un crédito (información complementaria).** El extracto del
+crédito solo muestra el último pago de cada periodo. Cuando llevas tu propio
+registro de pagos en Excel (una fila por pago, con fecha, abono a capital, pago a
+capital, intereses, seguros y total), se configura en
+`.local\MonthlyCloseAgent\credit_ledgers.json`, fuera de Git:
+
+```json
+[{"owner": "santiago", "suffix": "NNNN", "name": "Nombre del crédito",
+  "path": "C:\\ruta\\al\\libro.xlsx", "sheet": "Hoja1",
+  "bonus_months": [6, 12], "category": "Transporte"}]
+```
+
+```powershell
+.\scripts\agente-local.ps1 import-credit-ledger
+```
+
+- **Contraste obligatorio.** El capital del registro entre dos cortes debe ser igual,
+  al peso, a lo que bajó el saldo de capital en los extractos del banco. Si un
+  periodo no cuadra, o una fila no suma su total, no se importa nada. Solo se leen
+  las filas desde el mes del primer extracto disponible; las filas con total 0 (aún
+  sin pagar) se omiten.
+- **Reemplaza la vista parcial del extracto.** Las cuotas de ese crédito leídas del
+  extracto se eliminan (con auditoría) y `reconcile-statements` deja de importarlas;
+  los saldos del extracto se siguen guardando para el contraste.
+- **Cada pago entra pendiente**, con capital, intereses y seguros en la nota, y se
+  agrupa en el destino `cr:NNNN`. No se estima nada.
+- **Origen del dinero:** las cuotas quincenales son descuento de nómina; un abono a
+  capital es descuento de prima si cae en `bonus_months`, y si no, salió de tu
+  cuenta. Con el crédito marcado en `payroll-deduction`, cada cuota quincenal decidida
+  suma su ingreso de nómina espejo; un abono en mes de prima queda como ingreso
+  pendiente para que lo confirmes; un abono propio no suma ingreso.
+- **Duplicados:** un movimiento de tu cuenta con el mismo valor a menos de 3 días de
+  un pago del registro queda anotado para que lo marques «No cuenta».
+- **Contexto del modelo:** los créditos registrados se le pasan a Ollama como
+  `known_credits`, para que un aviso de pago a esos créditos sea `loan`.
 
 **Tasa USD sugerida.** Un movimiento USD pendiente puede llevar una tasa sugerida
 (por ejemplo, el promedio de las tasas que asignaste ese mes). Queda guardada y

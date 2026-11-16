@@ -343,3 +343,27 @@ def test_payroll_deduction_applies_to_already_decided_instalments(store):
     store.decide(store.state()["transactions"][0]["id"], "personal")
     assert store.set_payroll_deduction("santiago", "4444") == 1
     assert store.set_payroll_deduction("santiago", "4444") == 0
+
+
+def test_only_the_ordinary_instalment_counts_as_payroll_and_the_extra_waits(store):
+    january = st.parse("CREDITO", "202601", CREDIT.replace("2/05/2026", "1/05/2026").replace(
+        "TOTAL 450,000.00 451,000.00", "TOTAL 400,000.00 400,000.00"))
+    june = st.parse("CREDITO", "202602", CREDIT.replace(
+        "TOTAL 450,000.00 451,000.00", "TOTAL 1,900,000.00 400,000.00"))
+    report = st.reconcile([january, june], [], date(2026, 1, 1))
+    store.record_statements(report.checks(), [st.missing_event(c, "Otros gastos", "Otros ingresos") for c in report.missing])
+    store.set_payroll_deduction("santiago", "4444")
+    loans = sorted((r for r in store.state()["transactions"] if r["kind"] == "loan"), key=lambda r: r["day"])
+    for loan in loans:
+        store.decide(loan["id"], "family")
+    rows = {r["id"]: r for r in store.state()["transactions"]}
+    big = loans[1]
+    assert (rows["payroll:" + big["id"]]["amount_minor"], rows["payroll:" + big["id"]]["decision"]) == (40000000, "income")
+    extra = rows["payroll-extra:" + big["id"]]
+    assert (extra["amount_minor"], extra["decision"], extra["kind"]) == (150000000, None, "income")
+    assert "payroll-extra:" + loans[0]["id"] not in rows  # paid exactly the instalment
+    store.decide(extra["id"], "exclude")  # it was paid from an account
+    store.decide(big["id"], "family")  # syncing again keeps the person's choice
+    assert {r["id"]: r for r in store.state()["transactions"]}[extra["id"]]["decision"] == "exclude"
+    store.decide(big["id"], "exclude")
+    assert not any(r["id"].endswith(big["id"]) and r["id"] != big["id"] for r in store.state()["transactions"])

@@ -136,6 +136,9 @@ class Store:
             for name, definition in HOUSEHOLD_COLUMNS.items():
                 if name not in columns:
                     db.execute(f"ALTER TABLE transactions ADD COLUMN {name} {definition}")
+            checks = {row["name"] for row in db.execute("PRAGMA table_info(statement_checks)")}
+            if "due_minor" not in checks:
+                db.execute("ALTER TABLE statement_checks ADD COLUMN due_minor INTEGER")
             if backup is not None:
                 self._audit(db, "migrate-household", self.path.name, backup.name)
 
@@ -631,39 +634,171 @@ class Store:
             self._audit(db, "payroll-deduction-local-user", "*" + suffix, owner)
             return self._sync_payroll_income(db)
 
-    def _sync_payroll_income(self, db: sqlite3.Connection) -> int:
-        """Keep one payroll income per counted instalment of a payroll-deducted credit.
+    @staticmethod
+    def _ordinary_instalment(db: sqlite3.Connection, suffix: str, period_end: str, paid: int) -> int:
+        """The instalment due for a payment: the previous statement's "cuota a pagar".
 
-        The income mirrors the instalment (same day and amount) while it is decided
-        Personal or Familiar, and disappears when it stops counting. Returns changes.
+        Without a previous statement it falls back to this statement's own due amount,
+        and without any it is the payment itself.
         """
+        row = db.execute(
+            """SELECT due_minor FROM statement_checks WHERE product='CREDITO' AND suffix=?
+            AND due_minor IS NOT NULL AND period_end < ? ORDER BY period_end DESC LIMIT 1""",
+            (suffix, period_end),
+        ).fetchone() or db.execute(
+            """SELECT due_minor FROM statement_checks WHERE product='CREDITO' AND suffix=?
+            AND due_minor IS NOT NULL AND period_end = ?""", (suffix, period_end),
+        ).fetchone()
+        return row["due_minor"] if row else paid
+
+    def import_credit_ledger(self, owner: str, suffix: str, events: list[dict]) -> dict[str, int]:
+        """Import a credit's payments from the person's register, in one transaction.
+
+        The register replaces the instalments read from the credit statement, which only
+        show the last payment of each period. Payments enter pending; account movements
+        with the same amount within three days get a note, so a person can mark the
+        duplicate as «No cuenta». Repeating the import changes nothing.
+        """
+        owner = owner_id(owner)
+        with self.connect() as db:
+            inserted = []
+            for event in events:
+                if event["decision"] is not None or not event["id"].startswith("ledger:"):
+                    raise ValueError("Un pago del registro solo entra pendiente.")
+                if db.execute(
+                    """INSERT OR IGNORE INTO transactions (id,message_id,day,merchant,account,
+                    amount_minor,currency,category,kind,decision,reason,group_key,note,owner)
+                    VALUES (:id,:message_id,:day,:merchant,:account,:amount_minor,:currency,
+                    :category,:kind,NULL,:reason,:group_key,:note,:owner)""", {**event, "owner": owner},
+                ).rowcount:
+                    inserted.append(event)
+                    self._audit(db, "ledger-import", event["id"], event["message_id"])
+            replaced = 0
+            for loan in db.execute(
+                "SELECT id FROM transactions WHERE owner=? AND message_id LIKE ?",
+                (owner, f"statement:CREDITO:{suffix}:%"),
+            ).fetchall():
+                for twin in ("payroll:" + loan["id"], "payroll-extra:" + loan["id"], loan["id"]):
+                    if db.execute("DELETE FROM transactions WHERE id=?", (twin,)).rowcount:
+                        self._audit(db, "ledger-supersedes-statement", twin, suffix)
+                replaced += 1
+            linked = 0
+            for event in inserted:
+                for other in db.execute(
+                    """SELECT id FROM transactions WHERE owner=? AND decision IS NULL AND amount_minor=?
+                    AND id NOT LIKE 'ledger:%' AND id NOT LIKE 'payroll%'
+                    AND abs(julianday(day) - julianday(?)) <= 3""",
+                    (owner, event["amount_minor"], event["day"]),
+                ).fetchall():
+                    db.execute(
+                        "UPDATE transactions SET note=? WHERE id=?",
+                        (f"Mismo valor que el pago del {event['day']} a tu crédito *{suffix} (registro de pagos): "
+                         "si es el mismo dinero, elige No cuenta", other["id"]),
+                    )
+                    self._audit(db, "ledger-possible-duplicate", other["id"], event["id"])
+                    linked += 1
+            self._sync_payroll_income(db)
+        self.apply_rules()
+        return {"imported": len(inserted), "replaced": replaced, "possible_duplicates": linked}
+
+    def _sync_ledger_payroll(self, db: sqlite3.Connection, owner: str, suffix: str) -> int:
+        """Payroll income for payments read from a register: one per fortnight, pending for bonus extras."""
         changes = 0
-        for credit in db.execute("SELECT * FROM payroll_deductions").fetchall():
-            loans = db.execute(
-                "SELECT * FROM transactions WHERE owner=? AND kind='loan' AND message_id LIKE ?",
-                (credit["owner"], f"statement:CREDITO:{credit['suffix']}:%"),
-            ).fetchall()
-            for loan in loans:
-                twin = "payroll:" + loan["id"]
+        for loan in db.execute(
+            "SELECT * FROM transactions WHERE owner=? AND kind='loan' AND message_id LIKE ?",
+            (owner, f"ledger:CREDITO:{suffix}:%"),
+        ).fetchall():
+            source = loan["message_id"].rsplit(":", 1)[1]
+            counted = loan["decision"] in {"personal", "family"}
+            twins = {
+                "payroll:" + loan["id"]: (source == "payroll", "income", "Descuento de nómina: cuota quincenal",
+                                          f"Tu nómina llega neta: se descontó esta cuota del crédito *{suffix}."),
+                "payroll-extra:" + loan["id"]: (source == "bonus", None, f"Abono de prima al crédito *{suffix}: ¿descontado de la prima?",
+                                                f"Tu registro muestra un abono a capital en mes de prima. Si se descontó de la prima, "
+                                                "elige Ingreso; si lo pagaste desde tu cuenta, No cuenta."),
+            }
+            for twin, (applies, decision, merchant, reason) in twins.items():
                 exists = db.execute("SELECT 1 FROM transactions WHERE id=?", (twin,)).fetchone()
-                counted = loan["decision"] in {"personal", "family"}
-                if counted and not exists:
+                if counted and applies and not exists:
                     db.execute(
                         """INSERT INTO transactions (id,message_id,day,merchant,account,amount_minor,
                         currency,category,kind,decision,reason,owner) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (twin, "payroll:" + loan["message_id"], loan["day"],
-                         f"Descuento de nómina: cuota del crédito *{credit['suffix']}", "Nómina",
-                         loan["amount_minor"], loan["currency"], INCOME_CATEGORIES[0], "income", "income",
-                         f"Tu nómina llega neta: este valor se descontó para pagar la cuota del crédito "
-                         f"*{credit['suffix']}. Se suma al ingreso para que la cuota no se cuente dos veces.",
-                         loan["owner"]),
+                        (twin, "payroll:" + loan["message_id"], loan["day"], merchant, "Nómina",
+                         loan["amount_minor"], loan["currency"], INCOME_CATEGORIES[0], "income", decision,
+                         reason, owner),
                     )
                     self._audit(db, "payroll-deduction-income", twin, "added")
                     changes += 1
-                elif not counted and exists:
+                elif not (counted and applies) and exists:
                     db.execute("DELETE FROM transactions WHERE id=?", (twin,))
                     self._audit(db, "payroll-deduction-income", twin, "removed")
                     changes += 1
+        return changes
+
+    def _sync_payroll_income(self, db: sqlite3.Connection) -> int:
+        """Keep the payroll income that mirrors each counted instalment of a deducted credit.
+
+        Only the ordinary instalment is mirrored as decided payroll income. Anything paid
+        above it (a bonus-month payment, or a capital payment made from an account) gets
+        a pending income for a person to confirm. Both disappear when the instalment
+        stops counting. Returns the number of changes.
+        """
+        changes = 0
+        for credit in db.execute("SELECT * FROM payroll_deductions").fetchall():
+            suffix = credit["suffix"]
+            if db.execute(
+                "SELECT 1 FROM transactions WHERE owner=? AND message_id LIKE ? LIMIT 1",
+                (credit["owner"], f"ledger:CREDITO:{suffix}:%"),
+            ).fetchone():
+                # A payment register replaces the statement's partial view of this credit.
+                changes += self._sync_ledger_payroll(db, credit["owner"], suffix)
+                continue
+            loans = db.execute(
+                "SELECT * FROM transactions WHERE owner=? AND kind='loan' AND message_id LIKE ?",
+                (credit["owner"], f"statement:CREDITO:{suffix}:%"),
+            ).fetchall()
+            for loan in loans:
+                counted = loan["decision"] in {"personal", "family"}
+                period_end = loan["message_id"].split(":")[3]
+                ordinary = min(
+                    loan["amount_minor"],
+                    self._ordinary_instalment(db, suffix, period_end, loan["amount_minor"]),
+                )
+                parts = {
+                    "payroll:" + loan["id"]: (ordinary, "income", (
+                        f"Tu nómina llega neta: se descontó la cuota ordinaria del crédito *{suffix}. "
+                        "Se suma al ingreso para que la cuota no se cuente dos veces."
+                    ), f"Descuento de nómina: cuota del crédito *{suffix}"),
+                    "payroll-extra:" + loan["id"]: (loan["amount_minor"] - ordinary, None, (
+                        f"Pagaste al crédito *{suffix} más que la cuota ordinaria. Si el extra se descontó "
+                        "de la nómina o de la prima, elige Ingreso; si lo pagaste desde tu cuenta, No cuenta."
+                    ), f"Abono extra al crédito *{suffix}: ¿descontado de la nómina?"),
+                }
+                for twin, (amount, decision, reason, merchant) in parts.items():
+                    existing = db.execute("SELECT * FROM transactions WHERE id=?", (twin,)).fetchone()
+                    wanted = counted and amount > 0
+                    if wanted and existing is None:
+                        db.execute(
+                            """INSERT INTO transactions (id,message_id,day,merchant,account,amount_minor,
+                            currency,category,kind,decision,reason,owner) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            (twin, "payroll:" + loan["message_id"], loan["day"], merchant, "Nómina", amount,
+                             loan["currency"], INCOME_CATEGORIES[0], "income", decision, reason, loan["owner"]),
+                        )
+                        self._audit(db, "payroll-deduction-income", twin, "added")
+                        changes += 1
+                    elif wanted and existing["amount_minor"] != amount and (
+                        twin.startswith("payroll:") or existing["decision"] is None
+                    ):
+                        db.execute(
+                            "UPDATE transactions SET amount_minor=?, merchant=?, reason=? WHERE id=?",
+                            (amount, merchant, reason, twin),
+                        )
+                        self._audit(db, "payroll-deduction-income", twin, f"amount {existing['amount_minor']} -> {amount}")
+                        changes += 1
+                    elif not wanted and existing is not None:
+                        db.execute("DELETE FROM transactions WHERE id=?", (twin,))
+                        self._audit(db, "payroll-deduction-income", twin, "removed")
+                        changes += 1
         return changes
 
     def own_account_suffixes(self, owner: str) -> list[str]:
@@ -698,12 +833,14 @@ class Store:
         with self.connect() as db:
             for check in checks:
                 db.execute(
-                    """INSERT INTO statement_checks VALUES (
+                    """INSERT INTO statement_checks (identity,product,suffix,period_start,period_end,
+                    movements,matched,missing,balance_minor,checked_at,due_minor) VALUES (
                     :identity,:product,:suffix,:period_start,:period_end,:movements,:matched,
-                    :missing,:balance_minor,:checked_at) ON CONFLICT(identity) DO UPDATE SET
+                    :missing,:balance_minor,:checked_at,:due_minor) ON CONFLICT(identity) DO UPDATE SET
                     movements=excluded.movements,matched=excluded.matched,missing=excluded.missing,
-                    balance_minor=excluded.balance_minor,checked_at=excluded.checked_at""",
-                    {**check, "checked_at": now},
+                    balance_minor=excluded.balance_minor,checked_at=excluded.checked_at,
+                    due_minor=excluded.due_minor""",
+                    {"due_minor": None, **check, "checked_at": now},
                 )
                 self._audit(db, "statement-check", check["identity"], f"{check['matched']}/{check['movements']}")
             for event in events:
