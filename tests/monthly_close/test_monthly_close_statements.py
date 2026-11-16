@@ -37,6 +37,7 @@ Moneda de cuenta en: PESOS
 1234 TIENDA FICTICIA 03/01/2026 $ 45.000,00 1/1 $ 45.000,00 0,0000 % 0,0000 % $ 0,00
 TRASLADO SALDO A DIFERIR 04/01/2026 $ -1.000,00 $ -1.000,00 $ 0,00
 ABONO SUCURSAL VIRTUALC24280 06/01/2026 $ -50.000,00 $ -50.000,00 $ 0,00
+CUOTA DE MANEJO000000 02/01/2026 $ 35.672,00 1/1 $ 35.672,00 0,0000 % 0,0000 % $ 0,00
 Moneda de cuenta en: DÓLARES
 5678 SERVICIO FICTICIO 08/01/2026 $ 12,34 1/1 $ 12,34 0,0000 % 0,0000 % $ 0,00
 movimientos
@@ -106,6 +107,7 @@ def test_card_statement_keeps_currency_sections_and_skips_internal_lines():
     assert [(m.description, m.amount_minor, m.currency, m.hint) for m in statement.movements] == [
         ("TIENDA FICTICIA", 4500000, "COP", "purchase"),
         ("ABONO SUCURSAL VIRTUAL", -5000000, "COP", "card_payment"),
+        ("CUOTA DE MANEJO", 3567200, "COP", "purchase"),
         ("SERVICIO FICTICIO", 1234, "USD", "purchase"),
     ]
 
@@ -134,7 +136,7 @@ def test_same_money_in_two_statements_is_counted_once():
     savings = [c.movement.description for c in candidates if c.statement.product == "CTA_AHORROS"]
     # The card payment and the fund addition are kept from the card and fund statements.
     assert "PAGO SUC VIRT TC MASTER DOLAR" not in savings and "TRASLADO A FONDO DE INVERSION" not in savings
-    assert len(candidates) == 5 + 3 + 1 - 2
+    assert len(candidates) == 5 + 4 + 1 - 2
 
 
 def row(event_id: str, day: str, amount: int, currency: str = "COP", owner: str = "santiago") -> dict:
@@ -146,24 +148,24 @@ def test_reconcile_matches_known_movements_once_and_from_the_start_date():
     rows = [row("a", "2026-01-05", 4500000), row("b", "2026-01-04", 4500000), row("m", "2026-01-03", 1234, "USD", "manuela")]
     report = st.reconcile([card], rows, date(2026, 1, 1))
     assert [(c.movement.description, matched) for c, matched in report.matched] == [("TIENDA FICTICIA", "b")]
-    assert [c.movement.description for c in report.missing] == ["ABONO SUCURSAL VIRTUAL", "SERVICIO FICTICIO"]
+    assert [c.movement.description for c in report.missing] == ["CUOTA DE MANEJO", "ABONO SUCURSAL VIRTUAL", "SERVICIO FICTICIO"]
     assert st.reconcile([card], rows, date(2026, 1, 7)).missing[0].movement.description == "SERVICIO FICTICIO"
     check = report.checks()[0]
-    assert (check["movements"], check["matched"], check["missing"]) == (3, 1, 2)
+    assert (check["movements"], check["matched"], check["missing"]) == (4, 1, 3)
 
 
 def test_statement_movements_enter_pending_audited_and_only_once(store):
     card = st.parse("TARJETA_MASTERCARD", "202601", CARD)
     report = st.reconcile([card], [], date(2026, 1, 1))
     events = [st.missing_event(c, "Otros gastos", "Otros ingresos") for c in report.missing]
-    assert store.record_statements(report.checks(), events) == 3
+    assert store.record_statements(report.checks(), events) == 4
     assert store.record_statements(report.checks(), events) == 0
     rows = store.state()["transactions"]
     assert {r["decision"] for r in rows} == {None}
     assert {r["kind"] for r in rows} == {"purchase", "card_payment"}
-    assert store.state()["statement_checks"][0]["missing"] == 3
+    assert store.state()["statement_checks"][0]["missing"] == 4
     with store.connect() as db:
-        assert db.execute("SELECT COUNT(*) FROM audit WHERE action='statement-import'").fetchone()[0] == 3
+        assert db.execute("SELECT COUNT(*) FROM audit WHERE action='statement-import'").fetchone()[0] == 4
     with pytest.raises(ValueError, match="pendiente"):
         store.record_statements([], [{**events[0], "id": "stmt:x", "decision": "personal"}])
 
@@ -252,10 +254,10 @@ def test_reconcile_command_reports_read_only_then_imports(store, tmp_path, prefe
         "Extracto_1_202601_CONSOLIDADO_0003.pdf": "no se lee",
     }
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=True)
-    assert result == {"statements": 2, "matched": 0, "missing": 4, "imported": 0, "balances": 1}
+    assert result == {"statements": 2, "matched": 0, "missing": 5, "imported": 0, "balances": 1}
     assert store.state()["transactions"] == [] and store.state()["statement_checks"] == []
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
-    assert result["imported"] == 4
+    assert result["imported"] == 5
     assert {r["account"] for r in store.state()["transactions"]} == {"Tarjeta de crédito Master", "Fiducuenta"}
 
 

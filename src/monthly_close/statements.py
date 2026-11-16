@@ -183,9 +183,10 @@ def parse_card(product: str, text: str, period: str) -> Statement:
         amount = _co_amount(match["amount"])
         day_text = match["day"]
         day = date(int(day_text[6:]), int(day_text[3:5]), int(day_text[:2]))
-        # The bank glues a reference to the merchant ("ABONO SUCURSAL VIRTUALC24280");
+        # The bank glues a reference to the merchant: a letter and five digits
+        # ("VIRTUALC24280") or six or more digits ("MANEJO000000");
         # without it, payments to the same merchant group together.
-        description = re.sub(r"\s*[A-Z]?\d{5,}$", "", re.sub(r"^\d{4,}\s+", "", match["desc"])) or match["desc"]
+        description = re.sub(r"\s*(?:[A-Z]\d{5}|\d{6,})$", "", re.sub(r"^\d{4,}\s+", "", match["desc"])) or match["desc"]
         key = (day, description, amount, currency)
         if key in seen:
             continue  # the PDF repeats some rows across its three columns
