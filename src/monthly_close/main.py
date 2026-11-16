@@ -456,9 +456,9 @@ def reconcile_statements(
                 except statements_module.StatementError as exc:
                     raise ValueError(f"Extracto {match['product']} {match['period']}: {exc}") from exc
                 found.setdefault(statement.identity, statement)
-    with_register = {config.suffix for config in credit_ledger.load_configs(data_dir)}
+    with_register = {(config.product, config.suffix) for config in credit_ledger.load_configs(data_dir)}
     for statement in found.values():
-        if statement.product == "CREDITO" and statement.suffix in with_register:
+        if (statement.product, statement.suffix) in with_register:
             statement.movements = []  # its payment register is the source; balances still count
     report = statements_module.reconcile(list(found.values()), store.state()["transactions"], start)
     events = [
@@ -485,28 +485,53 @@ def import_credit_ledgers(store: Store, data_dir: Path, preferences: Preferences
     if not configs:
         raise ValueError(f"No hay registros de credito en {credit_ledger.LEDGERS_FILE}.")
     for config in configs:
+        column = "balance_minor" if config.contrast == "capital" else "paid_minor"
         with store.connect() as db:
-            balances = [
-                (row["period_end"], row["balance_minor"]) for row in db.execute(
-                    """SELECT period_end, balance_minor FROM statement_checks WHERE product='CREDITO'
-                    AND suffix=? AND balance_minor IS NOT NULL ORDER BY period_end""", (config.suffix,),
+            periods = [
+                (row["period_end"], row[column]) for row in db.execute(
+                    f"""SELECT period_end, {column} FROM statement_checks WHERE product=?
+                    AND suffix=? AND {column} IS NOT NULL ORDER BY period_end""", (config.product, config.suffix),
                 )
             ]
-        if len(balances) < 2:
+        if len(periods) < 2:
             raise ValueError(f"Faltan extractos del credito *{config.suffix} para contrastar el registro.")
-        first = date.fromisoformat(balances[0][0])
+        first = date.fromisoformat(periods[0][0])
         payments = credit_ledger.read_payments(config, first.replace(day=1))
-        problems = credit_ledger.contrast(payments, balances)
+        problems = (
+            credit_ledger.contrast(payments, periods) if config.contrast == "capital"
+            else credit_ledger.contrast_payments(payments, periods)
+        )
         if problems:
             raise ValueError(f"El registro del credito *{config.suffix} no cuadra con el banco: " + "; ".join(problems))
+        balances = periods
         category = config.category if config.category in preferences.categories else preferences.categories[-1]
-        result = store.import_credit_ledger(config.owner, config.suffix, credit_ledger.events(config, payments, category))
+        result = store.import_credit_ledger(
+            config.owner, config.suffix, credit_ledger.events(config, payments, category), config.product,
+        )
         lines.append(
             f"Credito *{config.suffix}: {len(payments)} pagos leidos; cuadra con {len(balances) - 1} periodos del banco; "
             f"{result['imported']} nuevos, {result['replaced']} cuotas del extracto reemplazadas, "
             f"{result['possible_duplicates']} posibles duplicados anotados."
         )
     return lines
+
+
+def run_complements(store: Store, data_dir: Path, settings: dict, preferences: Preferences, start: date) -> None:
+    """After a mailbox scan: reconcile the bank statements, then import the credit registers.
+
+    Each step runs only when its local configuration exists. Statements come first,
+    because the registers are checked against their balances and payments. Any
+    failure stops the run, like the scan itself.
+    """
+    if (data_dir / STATEMENTS_FILE).is_file():
+        since = date(start.year, 1, 1)
+        result = reconcile_statements(store, data_dir, settings, preferences, since, read_only=False)
+        print(
+            f"Extractos: {result['statements']} leidos desde {since.isoformat()}; {result['matched']} coinciden con "
+            f"los avisos; {result['imported']} importados como pendientes.", flush=True,
+        )
+    if credit_ledger.load_configs(data_dir):
+        print("\n".join(import_credit_ledgers(store, data_dir, preferences)), flush=True)
 
 
 def run_member_import(store: Store, folder: Path) -> None:
@@ -607,6 +632,7 @@ def run(args: argparse.Namespace) -> None:
         end = now.date() + timedelta(days=1)
         # A completed scan is idempotent and human choices survive every run.
         scan(store, data_dir, settings, preferences, start, end)
+        run_complements(store, data_dir, settings, preferences, start)
         summary = store.summary(closing_month)
         (data_dir / "last-close.txt").write_text(summary + "\n", encoding="utf-8")
         print(summary)
@@ -620,6 +646,7 @@ def run(args: argparse.Namespace) -> None:
         read_only=args.read_only, reprocess_empty=args.reprocess_empty,
     )
     if not args.read_only:
+        run_complements(store, data_dir, settings, preferences, start)
         print("Importacion terminada. Revisa movimientos, meses parciales y decisiones en el panel.")
 
 

@@ -329,8 +329,16 @@ capital, intereses, seguros y total), se configura en
 ```json
 [{"owner": "santiago", "suffix": "NNNN", "name": "Nombre del crédito",
   "path": "C:\\ruta\\al\\libro.xlsx", "sheet": "Hoja1",
-  "bonus_months": [6, 12], "category": "Transporte"}]
+  "bonus_months": [6, 12], "category": "Transporte", "payroll": true,
+  "product": "CREDITO", "contrast": "capital"}]
 ```
+
+| Clave | Uso |
+|---|---|
+| `product` | `CREDITO` (crédito de consumo o vehículo) o `HIPOTECARIO` |
+| `contrast` | `capital`: el capital del registro contra la baja del saldo de capital del extracto. `payments`: los pagos del registro contra los pagos que lista el extracto en cada periodo (hipotecario, cuyo saldo incluye intereses) |
+| `payroll` | `true` si las cuotas se descuentan de la nómina (por defecto `false`) |
+| `bonus_months` | Meses de prima en que un abono a capital es descuento de nómina |
 
 ```powershell
 .\scripts\agente-local.ps1 import-credit-ledger
@@ -341,8 +349,14 @@ capital, intereses, seguros y total), se configura en
   y «Pago Total»; las demás columnas y los resúmenes a un lado se ignoran. La
   columna «Abono Capital» es opcional: sin ella, una fila con solo capital (sin
   intereses ni seguros) es un abono a capital.
-- **Contraste obligatorio.** El capital del registro entre dos cortes debe ser igual,
-  al peso, a lo que bajó el saldo de capital en los extractos del banco. Si un
+- **Escaneo completo.** Cada `scan`, `import` o `scheduled` (sin `-ReadOnly`), al
+  terminar de leer los avisos, concilia los extractos (si existe `statements.json`) y
+  después importa los registros de crédito (si existe `credit_ledgers.json`), en ese
+  orden y en la misma ejecución. Un fallo en cualquier paso detiene todo.
+- **Valores con decimales.** Los valores calculados con fórmulas se redondean a
+  centavos; una fila puede diferir de la suma de sus partes en 2 centavos como máximo.
+- **Contraste obligatorio.** El registro debe coincidir con el banco en cada periodo
+  (dentro de 1 peso): por capital, o por pagos según `contrast`. Si un
   periodo no cuadra, o una fila no suma su total, no se importa nada. Solo se leen
   las filas desde el mes del primer extracto disponible; las filas con total 0 (aún
   sin pagar) se omiten.

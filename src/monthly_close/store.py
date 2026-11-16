@@ -139,6 +139,8 @@ class Store:
             checks = {row["name"] for row in db.execute("PRAGMA table_info(statement_checks)")}
             if "due_minor" not in checks:
                 db.execute("ALTER TABLE statement_checks ADD COLUMN due_minor INTEGER")
+            if "paid_minor" not in checks:
+                db.execute("ALTER TABLE statement_checks ADD COLUMN paid_minor INTEGER")
             if backup is not None:
                 self._audit(db, "migrate-household", self.path.name, backup.name)
 
@@ -651,7 +653,9 @@ class Store:
         ).fetchone()
         return row["due_minor"] if row else paid
 
-    def import_credit_ledger(self, owner: str, suffix: str, events: list[dict]) -> dict[str, int]:
+    def import_credit_ledger(
+        self, owner: str, suffix: str, events: list[dict], product: str = "CREDITO",
+    ) -> dict[str, int]:
         """Import a credit's payments from the person's register, in one transaction.
 
         The register replaces the instalments read from the credit statement, which only
@@ -676,7 +680,7 @@ class Store:
             replaced = 0
             for loan in db.execute(
                 "SELECT id FROM transactions WHERE owner=? AND message_id LIKE ?",
-                (owner, f"statement:CREDITO:{suffix}:%"),
+                (owner, f"statement:{product}:{suffix}:%"),
             ).fetchall():
                 for twin in ("payroll:" + loan["id"], "payroll-extra:" + loan["id"], loan["id"]):
                     if db.execute("DELETE FROM transactions WHERE id=?", (twin,)).rowcount:
@@ -834,13 +838,14 @@ class Store:
             for check in checks:
                 db.execute(
                     """INSERT INTO statement_checks (identity,product,suffix,period_start,period_end,
-                    movements,matched,missing,balance_minor,checked_at,due_minor) VALUES (
+                    movements,matched,missing,balance_minor,checked_at,due_minor,paid_minor) VALUES (
                     :identity,:product,:suffix,:period_start,:period_end,:movements,:matched,
-                    :missing,:balance_minor,:checked_at,:due_minor) ON CONFLICT(identity) DO UPDATE SET
+                    :missing,:balance_minor,:checked_at,:due_minor,:paid_minor) ON CONFLICT(identity) DO UPDATE SET
                     movements=excluded.movements,matched=excluded.matched,missing=excluded.missing,
                     balance_minor=excluded.balance_minor,checked_at=excluded.checked_at,
-                    due_minor=excluded.due_minor""",
-                    {"due_minor": None, **check, "checked_at": now},
+                    due_minor=excluded.due_minor,
+                    paid_minor=COALESCE(excluded.paid_minor, statement_checks.paid_minor)""",
+                    {"due_minor": None, "paid_minor": None, **check, "checked_at": now},
                 )
                 self._audit(db, "statement-check", check["identity"], f"{check['matched']}/{check['movements']}")
             for event in events:

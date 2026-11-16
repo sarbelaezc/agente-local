@@ -12,6 +12,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -27,6 +28,12 @@ HEADERS = {
 }
 OPTIONAL_HEADERS = {"extra": "abono capital"}
 HEADER_SEARCH_ROWS = 10
+# Workbooks with formulas carry binary fractions: a row may differ from its parts by
+# a couple of cents, and a period may differ from the bank by less than one peso.
+ROW_TOLERANCE_MINOR = 2
+PERIOD_TOLERANCE_MINOR = 100
+PRODUCTS = {"CREDITO", "HIPOTECARIO"}
+CONTRASTS = {"capital", "payments"}
 
 
 class LedgerError(ValueError):
@@ -42,6 +49,9 @@ class LedgerConfig:
     sheet: str
     bonus_months: tuple[int, ...]
     category: str | None = None
+    product: str = "CREDITO"
+    payroll: bool = False
+    contrast: str = "capital"
 
     @classmethod
     def parse(cls, raw: object) -> LedgerConfig:
@@ -60,7 +70,13 @@ class LedgerConfig:
         category = raw.get("category")
         if category is not None and (not isinstance(category, str) or not category.strip()):
             raise LedgerError("category debe ser una categoria de gasto configurada.")
-        return cls(owner, suffix, name.strip()[:60], Path(path), sheet, tuple(months), category)
+        product, payroll, contrast_mode = raw.get("product", "CREDITO"), raw.get("payroll", False), raw.get("contrast", "capital")
+        if product not in PRODUCTS or type(payroll) is not bool or contrast_mode not in CONTRASTS:
+            raise LedgerError("product debe ser CREDITO o HIPOTECARIO, payroll true o false y contrast capital o payments.")
+        return cls(
+            owner, suffix, name.strip()[:60], Path(path), sheet, tuple(months), category,
+            product, payroll, contrast_mode,
+        )
 
 
 def load_configs(data_dir: Path) -> list[LedgerConfig]:
@@ -89,8 +105,8 @@ def _minor(value: object, field: str, row: int) -> int:
         return 0
     if type(value) is int:
         return value * 100
-    if isinstance(value, float) and value == round(value, 2):
-        return round(value * 100)
+    if isinstance(value, float):
+        return int((Decimal(repr(value)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
     raise LedgerError(f"Fila {row}: valor no numerico en {field}.")
 
 
@@ -128,7 +144,7 @@ def read_payments(config: LedgerConfig, since: date | None = None) -> list[Payme
             if values["total"] <= 0:
                 continue
             capital = values["capital"] + values.get("extra", 0)
-            if capital + values["interest"] + values["insurance"] != values["total"]:
+            if abs(capital + values["interest"] + values["insurance"] - values["total"]) > ROW_TOLERANCE_MINOR:
                 raise LedgerError(f"Fila {number}: capital, intereses y seguros no suman el total.")
             # Without an "Abono Capital" column, a row of capital only is a capital payment.
             extra = values["extra"] > 0 if "extra" in values else (
@@ -148,8 +164,23 @@ def contrast(payments: list[Payment], balances: list[tuple[str, int]]) -> list[s
     for (start, before), (end, after) in zip(balances, balances[1:]):
         low, high = date.fromisoformat(start), date.fromisoformat(end)
         capital = sum(p.capital_minor for p in payments if low < p.day <= high)
-        if capital != before - after:
+        if abs(capital - (before - after)) >= PERIOD_TOLERANCE_MINOR:
             problems.append(f"{end}: el registro abona {capital / 100:,.0f} y el saldo bajo {(before - after) / 100:,.0f}")
+    return problems
+
+
+def contrast_payments(payments: list[Payment], paid: list[tuple[str, int]]) -> list[str]:
+    """Periods where the register's payments differ from the payments the statement lists.
+
+    For credits whose statement shows every payment of the period but a balance that
+    includes accrued interest (a mortgage), the payments are what can be compared.
+    """
+    problems = []
+    for (start, _), (end, listed) in zip(paid, paid[1:]):
+        low, high = date.fromisoformat(start), date.fromisoformat(end)
+        total = sum(p.total_minor for p in payments if low < p.day <= high)
+        if abs(total - listed) >= PERIOD_TOLERANCE_MINOR:
+            problems.append(f"{end}: el registro paga {total / 100:,.0f} y el extracto lista {listed / 100:,.0f}")
     return problems
 
 
@@ -161,19 +192,19 @@ def events(config: LedgerConfig, payments: list[Payment], category: str) -> list
     """
     result = []
     for payment in payments:
-        payroll = not payment.extra or payment.day.month in config.bonus_months
+        payroll = config.payroll and (not payment.extra or payment.day.month in config.bonus_months)
         source = "own" if not payroll else ("bonus" if payment.extra else "payroll")
         identity = f"{config.suffix}|{payment.day.isoformat()}|{payment.total_minor}|{int(payment.extra)}"
         merchant = (
             f"Abono a capital crédito {config.name} *{config.suffix}" if payment.extra
-            else f"Cuota quincenal crédito {config.name} *{config.suffix}"
+            else f"Cuota {'quincenal ' if config.payroll else ''}crédito {config.name} *{config.suffix}"
         )
         origin = "descontado de la prima" if payment.extra and payroll else (
-            "pagado desde tu cuenta" if payment.extra else "descontado de la nómina"
+            "descontado de la nómina" if payroll else "pagado desde tu cuenta"
         )
         result.append({
             "id": "ledger:" + hashlib.sha256(identity.encode()).hexdigest(),
-            "message_id": f"ledger:CREDITO:{config.suffix}:{source}",
+            "message_id": f"ledger:{config.product}:{config.suffix}:{source}",
             "day": payment.day.isoformat(), "merchant": merchant, "account": f"Crédito {config.name}",
             "amount_minor": payment.total_minor, "currency": "COP", "category": category, "kind": "loan",
             "decision": None, "group_key": f"cr:{config.suffix}",
@@ -182,6 +213,6 @@ def events(config: LedgerConfig, payments: list[Payment], category: str) -> list
                 f"seguros {payment.insurance_minor / 100:,.0f}"
             ).replace(",", "."),
             "reason": f"Tomado de tu registro de pagos del crédito *{config.suffix} ({origin}); "
-                      "su capital cuadra con los extractos del banco.",
+                      "cuadra con los extractos del banco.",
         })
     return result

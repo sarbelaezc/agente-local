@@ -52,6 +52,7 @@ class Statement:
     movements: list[Movement] = field(default_factory=list)
     balance_minor: int | None = None  # investment value or outstanding credit
     due_minor: int | None = None  # credit instalment due for the next period
+    paid_minor: int | None = None  # payments a credit statement lists, kept even if its lines are not imported
 
     @property
     def identity(self) -> str:
@@ -263,6 +264,7 @@ def parse_consumer_credit(text: str) -> Statement:
     paid = _us_amount(total[1])  # "abono anterior": what was paid since the last statement
     if paid:
         statement.movements.append(Movement(end, "Cuota de crédito pagada", paid, "COP", "loan"))
+    statement.paid_minor = paid
     return statement
 
 
@@ -283,6 +285,7 @@ def parse_mortgage(text: str) -> Statement:
         if match:
             day = date(*map(int, match["day"].split("/")))
             statement.movements.append(Movement(day, match["desc"].capitalize(), _us_amount(match["total"]), "COP", "loan"))
+    statement.paid_minor = sum(m.amount_minor for m in statement.movements)
     return statement
 
 
@@ -418,7 +421,7 @@ class Reconciliation:
                 "suffix": statement.suffix, "period_start": statement.period_start.isoformat(),
                 "period_end": statement.period_end.isoformat(), "movements": len(statement.movements),
                 "matched": matched, "missing": missing, "balance_minor": statement.balance_minor,
-                "due_minor": statement.due_minor,
+                "due_minor": statement.due_minor, "paid_minor": statement.paid_minor,
             })
         return rows
 
