@@ -170,6 +170,9 @@
     .day-number { display: block; color: var(--ink); font-size: 12px; font-weight: 600; text-align: left; }
     .day-amount { display: block; color: var(--ink); font-size: 10.5px; font-weight: 700; overflow-wrap: anywhere; }
     .legend, .rank-list, .account-list { display: flex; flex-direction: column; gap: 6px; }
+    /* Legend under a chart, flowing in rows like in Manuela's yearly view. */
+    .legend-inline { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; color: var(--ink2); font-size: 12.5px; }
+    .legend-inline .legend-label { color: var(--ink2); gap: 6px; }
     .legend-row, .rank-row, .account-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 14px; }
     .legend-label { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
     .rank-row progress { height: 10px; accent-color: var(--s1); }
@@ -240,6 +243,8 @@
       .toolbar-group { width: 100%; }
       .month-chips { margin-right: -14px; padding-right: 14px; }
       .day-cell { min-height: 46px; padding: 3px; }
+      /* Wide charts shrink to about half on a phone: double their axis text so it stays readable. */
+      #year-chart-svg .axis-label, #year-income-chart-svg .axis-label, #cumulative-chart-svg .axis-label { font-size: 22px; }
       .day-amount { font-size: 9.5px; }
       .coverage-form { grid-template-columns: 1fr; }
       .coverage-form .button { width: 100%; }
@@ -390,10 +395,9 @@
             <div id="year-income-chart" class="chart-wrap"></div>
           </article>
           <article class="card">
-            <div class="card-header"><div><h3>Totales mensuales por categoría</h3><p>Las columnas apiladas representan las categorías decididas.</p></div>
-              <div id="year-category-legend" class="legend"></div>
-            </div>
+            <div class="card-header"><div><h3>Totales mensuales por categoría</h3><p>Las columnas apiladas representan las categorías decididas.</p></div></div>
             <div id="year-chart" class="chart-wrap"></div>
+            <div id="year-category-legend" class="legend-inline"></div>
           </article>
           <article class="card" style="margin-top:14px">
             <div class="card-header"><div><h3>Resumen por mes</h3><p>Pendiente se muestra aparte y no se incluye en los totales decididos.</p></div></div>
@@ -1264,7 +1268,7 @@
         });
         const maxValue = Math.max(0, ...cumulative.flat().map(Math.abs));
         if (!maxValue) { host.append(el("div", "empty-state", "Sin movimientos decididos este mes.")); return; }
-        const width = 720, height = 220, left = 70, right = 12, top = 14, bottom = 30;
+        const width = 720, height = 220, left = 104, right = 12, top = 14, bottom = 30;
         const chartWidth = width - left - right, chartHeight = height - top - bottom;
         const svg = svgEl("svg", { id: "cumulative-chart-svg", viewBox: `0 0 ${width} ${height}`, class: "chart", role: "img", "aria-label": "Gráfico de líneas del acumulado diario personal y familiar" });
         const title = svgEl("title"); title.textContent = "Acumulado diario, personal y familiar"; svg.append(title);
@@ -1458,7 +1462,7 @@
         host.replaceChildren();
         const max = Math.max(0, ...buckets.map(bucket => Math.max(sum(bucket.incomes), spendOf(bucket))));
         if (!max) { host.append(el("div", "empty-state", "Sin ingresos ni gastos decididos este año.")); return; }
-        const width = 760, height = 230, left = 70, right = 12, top = 14, bottom = 34;
+        const width = 760, height = 230, left = 104, right = 12, top = 14, bottom = 34;
         const chartWidth = width - left - right, chartHeight = height - top - bottom;
         const svg = svgEl("svg", { id: "year-income-chart-svg", viewBox: `0 0 ${width} ${height}`, class: "chart", role: "img", "aria-label": "Barras mensuales de ingresos y gastos" });
         const title = svgEl("title"); title.textContent = `Ingresos y gastos de ${state.year}`; svg.append(title);
@@ -1518,7 +1522,7 @@
         });
         const max = Math.max(0, ...buckets.map(bucket => categories.reduce((total, category) => total + Math.max(0, bucket.categories.get(category) || 0), 0)));
         if (!max) { host.append(el("div", "empty-state", "Sin importes decididos este año.")); return; }
-        const width = 760, height = 270, left = 70, right = 12, top = 18, bottom = 38;
+        const width = 760, height = 270, left = 104, right = 12, top = 18, bottom = 38;
         const chartWidth = width - left - right, chartHeight = height - top - bottom;
         const svg = svgEl("svg", { id: "year-chart-svg", viewBox: `0 0 ${width} ${height}`, class: "chart", role: "img", "aria-label": "Barras mensuales apiladas por categoría" });
         const title = svgEl("title"); title.textContent = `Importes mensuales del año ${state.year}`; svg.append(title);

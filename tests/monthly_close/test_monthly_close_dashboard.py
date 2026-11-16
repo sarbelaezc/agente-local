@@ -564,3 +564,13 @@ def test_annual_chart_has_visible_numeric_axis_labels(dashboard):
     numeric = [label for label in labels if re.match(r"^\d", label["text"])]
     assert numeric, labels
     assert all(label["x"] >= 0 and label["width"] > 0 and label["height"] > 0 for label in numeric), numeric
+
+
+def test_year_category_legend_sits_under_the_chart(dashboard):
+    page, _, _, errors = dashboard
+    page.locator("#tab-year").click()
+    chart = page.locator("#year-chart-svg").bounding_box()
+    legend = page.locator("#year-category-legend").bounding_box()
+    assert legend["y"] >= chart["y"] + chart["height"] - 1
+    assert legend["width"] > chart["width"] * .8  # it spans the card instead of a side column
+    assert not errors
