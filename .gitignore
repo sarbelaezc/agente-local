@@ -20,3 +20,6 @@ tmp/
 *.sqlite
 *.sqlite3
 .vscode/settings.json
+
+# Personal assistant settings
+.claude/settings.local.json

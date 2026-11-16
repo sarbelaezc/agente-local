@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from mail_invoices.local_model import MAX_RESPONSE_CHARS, LocalModelError, validate_local_url
-from monthly_close.domain import KINDS
+from monthly_close.domain import KINDS, notice_currency
 
 EVENT_PROPERTIES = {
     **{key: {"type": "string"} for key in (
@@ -46,11 +46,12 @@ class OllamaJsonModel:
         properties["account"]["enum"] = (
             context["accounts"] + context["excluded_accounts"] + ["Desconocida"]
         )
-        properties["currency"]["enum"] = [context["default_currency"]]
+        currency = notice_currency(context["untrusted_email"], context["default_currency"])
+        properties["currency"]["enum"] = [currency]
         # Constrain explicitly marked amounts without rewriting the source evidence.
         amounts = sorted(set(re.findall(
-            rf"(?<!\w)(?:{re.escape(context['default_currency'])}[ \t]*[$€£]?[ \t]*"
-            r"|[$€£][ \t]*)\d+(?:[.,]\d+|[ \t]\d{3})*(?!\d)",
+            rf"(?<!\w)(?:{re.escape(currency)}[ \t]*[$€£]?[ \t]*"
+            r"|US[ \t]*\$[ \t]*|[$€£][ \t]*)\d+(?:[.,]\d+|[ \t]\d{3})*(?!\d)",
             context["untrusted_email"],
         )))
         if amounts:

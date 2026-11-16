@@ -1,4 +1,3 @@
-from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -25,8 +24,6 @@ def settings(tmp_path):
     [
         ("--login", "login"),
         ("--scan-inbox", "scan_inbox"),
-        ("--download-attachments", "download_and_analyze"),
-        ("--review-invoices", "review_invoices"),
         ("--analyze-file", "analyze_file"),
         ("--classify-invoices", "classify_invoices"),
     ],
@@ -58,38 +55,6 @@ def test_cli_routes_to_workflow_with_unchanged_arguments(monkeypatch, settings, 
         assert calls == [(settings, 7, [], False, "SYNTH-001")]
     else:
         assert calls == [(settings, 7, False)]
-
-
-def test_review_workflow_preserves_document_and_model_errors(monkeypatch, tmp_path, settings):
-    attachment = tmp_path / "invoice.pdf"
-    attachment.write_bytes(b"synthetic")
-    candidate = InvoiceCandidate(
-        source="invoice.pdf", digest="test", number="TEST-1",
-        legal_name="Synthetic SAS", issued=date(2026, 10, 31),
-        amount=Decimal("100"), currency="COP", method="pdf_text",
-    )
-    issue = {"source": "other.pdf", "error": "encrypted", "requires_review": True}
-    monkeypatch.setattr(workflow, "_download_batch", lambda *args: ([("message", attachment)], [issue]))
-    monkeypatch.setattr(workflow, "parse_document", lambda *args: [candidate])
-
-    def unavailable_model(*args):
-        raise LocalModelError("Model unavailable")
-
-    monkeypatch.setattr(workflow, "complete_candidate", unavailable_model)
-    reviews = []
-
-    def review(items, issues, actual_settings):
-        reviews.append((items, issues, actual_settings))
-        return False
-
-    monkeypatch.setattr(workflow, "run_invoice_review", review)
-    assert workflow.review_invoices(settings, 30, True) == 1
-    items, issues, actual_settings = reviews[0]
-    assert items[0].candidate == candidate
-    assert items[0].model_error == "Model unavailable"
-    assert items[0].message == "message"
-    assert issues == [issue]
-    assert actual_settings == settings
 
 
 def test_failed_extraction_keeps_readonly_json_shape(monkeypatch, tmp_path):
@@ -142,45 +107,29 @@ def test_classification_report_uses_relative_archive_source(tmp_path):
     assert result.source == "classification-1/invoice.zip:invoice.xml"
 
 
-def test_download_analysis_cleans_only_its_run_files(tmp_path, monkeypatch, settings):
-    attachments = tmp_path / "attachments"
-    attachments.mkdir()
-    unrelated = attachments / "keep.txt"
-    unrelated.write_text("user file", encoding="utf-8")
-    actual_settings = replace(settings, attachments_dir=attachments)
-    created = []
+def test_extract_file_keeps_valid_zip_invoices_and_reports_failed_member(monkeypatch, tmp_path):
+    path = tmp_path / "invoice.zip"
+    path.write_bytes(b"synthetic")
+    candidate = InvoiceCandidate(source="invoice.zip:a.xml", digest="test", method="pdf_text")
 
-    def download(_settings, _days, target_dir):
-        path = target_dir / "invoice.xml"
-        path.write_bytes(b"synthetic")
-        created.append(path)
-        return [("synthetic message", path)], []
+    def parse(data, source, ocr, member_errors):
+        member_errors.append(("invoice.zip:other.pdf", "Scanned PDF"))
+        return [candidate]
 
-    monkeypatch.setattr(workflow, "_download_batch", download)
-    monkeypatch.setattr(workflow, "_build_ocr", lambda _settings: None)
-    monkeypatch.setattr(workflow, "_summarize_file", lambda *args: [])
+    def unavailable_model(*args):
+        raise LocalModelError("Model unavailable")
 
-    assert workflow.download_and_analyze(actual_settings, 30, False) == 0
-    assert not created[0].exists()
-    assert unrelated.read_text(encoding="utf-8") == "user file"
-    assert list(attachments.iterdir()) == [unrelated]
+    monkeypatch.setattr(workflow, "parse_document", parse)
+    monkeypatch.setattr(workflow, "complete_candidate", unavailable_model)
+    extracted, issues = workflow._extract_file(path, None, object())
+    assert extracted == [(candidate, (), "Model unavailable")]
+    assert issues == [
+        {"source": "invoice.zip:other.pdf", "error": "Scanned PDF", "requires_review": True},
+    ]
 
 
-def test_review_cancel_cleans_run_attachments(tmp_path, monkeypatch, settings):
-    attachments = tmp_path / "attachments"
-    actual_settings = replace(settings, attachments_dir=attachments)
-    created = []
-
-    def download(_settings, _days, target_dir):
-        path = target_dir / "invoice.xml"
-        path.write_bytes(b"synthetic")
-        created.append(path)
-        return [("synthetic message", path)], []
-
-    monkeypatch.setattr(workflow, "_download_batch", download)
-    monkeypatch.setattr(workflow, "_build_ocr", lambda _settings: None)
-    monkeypatch.setattr(workflow, "_extract_file", lambda *args: ([], []))
-
-    assert workflow.review_invoices(actual_settings, 30, False) == 1
-    assert not created[0].exists()
-    assert list(attachments.iterdir()) == []
+@pytest.mark.parametrize("flag", ["--process-one-invoice", "--review-invoices", "--download-attachments"])
+def test_removed_legacy_modes_are_rejected(monkeypatch, flag):
+    monkeypatch.setattr("sys.argv", ["mail-invoices", flag])
+    with pytest.raises(SystemExit):
+        main.main()

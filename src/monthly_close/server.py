@@ -4,6 +4,7 @@ import json
 import secrets
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from importlib.resources import files
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfoNotFoundError
 
 from monthly_close.store import Store
@@ -45,12 +46,13 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
             if not self.valid_host():
                 self.json_response(403, {"error": "Host no autorizado."})
                 return
-            if self.path == "/":
+            path = urlsplit(self.path).path
+            if path == "/":
                 self.respond(
                     200, files("monthly_close").joinpath("dashboard.html").read_bytes(),
                     "text/html; charset=utf-8",
                 )
-            elif self.path == "/api/state":
+            elif path == "/api/state":
                 self.json_response(200, {**store.state(), "csrf": csrf})
             else:
                 self.json_response(404, {"error": "Ruta inexistente."})
@@ -83,7 +85,51 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                     category = raw.get("category")
                     if category is not None and not isinstance(category, str):
                         raise ValueError("Categoria invalida.")
-                    store.decide(event_id, decision, category)
+                    currency, exchange_rate = raw.get("currency"), raw.get("exchange_rate")
+                    if currency is not None and not isinstance(currency, str):
+                        raise ValueError("Moneda invalida.")
+                    if exchange_rate is not None and not isinstance(exchange_rate, str):
+                        raise ValueError("Tasa invalida: debe enviarse como texto decimal.")
+                    store.decide(
+                        event_id, decision, category,
+                        currency=currency, exchange_rate=exchange_rate,
+                    )
+                elif self.path == "/api/decision-group":
+                    owner, group, decision = raw.get("owner"), raw.get("group"), raw.get("decision")
+                    if not all(isinstance(value, str) for value in (owner, group, decision)):
+                        raise ValueError("Decision por destino invalida.")
+                    scope, remember = raw.get("scope", "pending"), raw.get("remember", False)
+                    if scope not in {"pending", "all"} or type(remember) is not bool:
+                        raise ValueError("Alcance de la decision invalido.")
+                    store.decide_group(
+                        owner, group, decision, pending_only=scope == "pending", remember=remember,
+                    )
+                elif self.path == "/api/between-owners":
+                    owner, group = raw.get("owner"), raw.get("group")
+                    value, remember = raw.get("value"), raw.get("remember", False)
+                    if not isinstance(owner, str) or not isinstance(group, str) or type(remember) is not bool:
+                        raise ValueError("Marca entre titulares invalida.")
+                    store.mark_between_owners(owner, group, value, remember=remember)
+                elif self.path == "/api/group-rules/delete":
+                    owner, group = raw.get("owner"), raw.get("group")
+                    if not isinstance(owner, str) or not isinstance(group, str):
+                        raise ValueError("Regla de destino invalida.")
+                    store.delete_group_rule(owner, group)
+                elif self.path == "/api/rules":
+                    pattern, category, decision = (
+                        raw.get("pattern"), raw.get("category"), raw.get("decision"),
+                    )
+                    if not all(isinstance(value, str) for value in (pattern, category, decision)):
+                        raise ValueError("Regla invalida.")
+                    store.add_rule(pattern, category, decision)
+                elif self.path == "/api/rules/delete":
+                    if type(raw.get("id")) is not int:
+                        raise ValueError("Regla invalida.")
+                    store.delete_rule(raw["id"])
+                elif self.path == "/api/failure/dismiss":
+                    if not isinstance(raw.get("message_id"), str):
+                        raise ValueError("Aviso invalido.")
+                    store.dismiss_failure(raw["message_id"])
                 elif self.path == "/api/coverage":
                     if raw.get("status") != "reviewed":
                         raise ValueError("Solo se permite confirmar una revision manual.")

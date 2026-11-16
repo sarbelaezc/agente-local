@@ -13,10 +13,6 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--process-invoice-batch", action="store_true", help="Review and approve a small E2E batch.")
     mode.add_argument("--resume-invoice-batch", action="store_true", help="Resume local pending batches without rescanning.")
-    mode.add_argument(
-        "--process-one-invoice", action="store_true",
-        help="Controlled one-email test: approve Excel registration, then approve a real move.",
-    )
     mode.add_argument("--login", action="store_true", help="Open Outlook for a manual sign-in")
     mode.add_argument(
         "--classify-invoices", action="store_true",
@@ -29,15 +25,6 @@ def main() -> int:
     mode.add_argument(
         "--scan-inbox", action="store_true",
         help="List invoice candidates in the inbox list (read-only, opens no message)",
-    )
-    mode.add_argument(
-        "--download-attachments", action="store_true",
-        help="Download candidate invoice attachments to a temporary directory and analyze them. "
-        "Opening a message marks it as read.",
-    )
-    mode.add_argument(
-        "--review-invoices", action="store_true",
-        help="Download and analyze candidates, then require explicit human approval before saving to Excel.",
     )
     parser.add_argument(
         "--batch-size", type=int, default=3, help="Controlled E2E batch size (1-5, default 3)",
@@ -73,8 +60,6 @@ def main() -> int:
         return process_invoice_batch(
             settings, args.days, not args.no_model, args.batch_size, resume=args.resume_invoice_batch,
         )
-    if args.process_one_invoice:
-        return workflow.process_one_invoice(settings, args.days, not args.no_model)
     if args.classify_invoices:
         return workflow.classify_invoices(
             settings, args.days, args.history_folder, not args.no_model, args.candidate_text,
@@ -83,10 +68,6 @@ def main() -> int:
         return workflow.login(settings)
     if args.scan_inbox:
         return workflow.scan_inbox(settings, args.days)
-    if args.download_attachments:
-        return workflow.download_and_analyze(settings, args.days, not args.no_model)
-    if args.review_invoices:
-        return workflow.review_invoices(settings, args.days, not args.no_model)
     return workflow.analyze_file(settings, args.analyze_file, not args.no_model)
 
 

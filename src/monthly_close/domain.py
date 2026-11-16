@@ -7,16 +7,42 @@ from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-CATEGORIES = [
-    "Domicilios y restaurantes", "Compras", "Salud y farmacia", "Transporte",
-    "Suscripciones", "Mercado y tiendas", "Otros gastos",
-]
 KINDS = {
     "purchase", "pse", "transfer", "own_transfer", "loan", "income",
     "card_payment", "rejected", "promotion", "verification", "unknown", "investment",
 }
-NON_EXPENSES = {"loan", "income", "card_payment", "rejected", "promotion", "verification"}
+INCOME_CATEGORIES = ["Nómina", "Transferencia recibida", "Consignación", "Otros ingresos"]
+INCOME_KINDS = {"income", "transfer", "unknown"}  # kinds a person may confirm as income
+# A loan instalment counts as spending once a person decides it (personal or family).
+NON_EXPENSES = {"card_payment", "rejected", "promotion", "verification"}
+LOAN_DECISIONS = {"personal", "family", "exclude"}
+# Household members; existing records belong to the first one.
+OWNERS = {"santiago": "Santiago", "manuela": "Manuela"}
+HOUSEHOLD = "hogar"
+DECISIONS = {
+    "personal", "family", "exclude", "investment", "investment_withdrawal", "cash_withdrawal",
+    "income", "third_party_payment",
+}
+# Kinds whose counterpart may be the other household member's account.
+COUNTERPART_KINDS = {"transfer", "own_transfer", "income", "unknown", "card_payment", "pse"}
+
+
+def owner_id(value: object, allow_household: bool = False) -> str:
+    """Validate a household member (or the whole household when allowed)."""
+    if value in OWNERS or (allow_household and value == HOUSEHOLD):
+        return value  # type: ignore[return-value]
+    raise ValueError("Titular no reconocido.")
 EMAIL = re.compile(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+")
+
+
+def notice_currency(source: str, default: str) -> str:
+    """Keep explicitly identified USD separate from the configured currency."""
+    usd = re.search(r"\bUSD(?=\b|\d)|\bUS\s*\$", source, re.IGNORECASE)
+    if usd and default != "USD":
+        if default != "COP" or re.search(r"\bCOP(?=\b|\d)", source, re.IGNORECASE):
+            raise ValueError("Aviso con monedas distintas o ambiguas: requiere revision manual.")
+        return "USD"
+    return default
 
 
 def clean_text(value: object, limit: int = 300) -> str:
@@ -91,7 +117,7 @@ class Preferences:
 def amount_minor(text: str) -> int:
     """Parse a source amount, never binary floating point or model arithmetic."""
     text = clean_text(text, 80)
-    if not re.fullmatch(r"(?:[A-Z]{3}\s*)?[$€£]?\s*\d[\d., ]*", text):
+    if not re.fullmatch(r"(?:(?:[A-Z]{3}\s*)?[$€£]?|US\s*\$)\s*\d[\d., ]*", text):
         raise ValueError("Monto no reconocido; requiere revision del correo.")
     number = re.sub(r"[^\d.,]", "", text)
     separators = [index for index, char in enumerate(number) if char in ",."]
@@ -134,6 +160,10 @@ def received_local(value: str, timezone: str) -> datetime:
 def decision_reason(kind: str, account: str, savings: bool, preferences: Preferences) -> str:
     if kind in NON_EXPENSES:
         return "No es gasto: " + kind
+    if kind == "loan":
+        return "Cuota de credito: confirma si es gasto personal o familiar."
+    if kind == "income":
+        return "Dinero recibido: confirma si cuenta como ingreso o es un traslado propio."
     if account in preferences.excluded_accounts or kind == "own_transfer":
         return "Revisar como " + preferences.transfer_label
     if kind == "investment":
