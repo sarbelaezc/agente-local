@@ -99,6 +99,7 @@ Sustituye a `run-monthly-close.ps1`, `import-monthly-close.ps1` y
 | `owner-account -Owner <titular> -Suffix NNNN` | Asigna una cuenta (últimos 4 dígitos) a un titular | No |
 | `reconcile-statements [-Start AAAA-MM-DD] [-ReadOnly]` | Lee por Graph los extractos PDF de Santiago, los concilia con los avisos e importa como pendientes los movimientos que solo muestra el extracto; guarda saldos de inversiones y créditos | No |
 | `payroll-deduction -Owner <titular> -Suffix NNNN` | Marca un crédito cuyas cuotas se descuentan de la nómina; cada cuota que cuenta como gasto suma también como ingreso de nómina | No |
+| `merge-category -FromCategory <categoría> -ToCategory <categoría>` | Une una categoría de gasto a otra: mueve sus movimientos y reglas (auditado) y la quita de la lista; decisiones e importes no cambian | No |
 | `import-credit-ledger` | Importa los pagos de los créditos desde tu registro en Excel, tras contrastarlos al peso con los extractos | No |
 | `backfill-destinations` | Vuelve a leer por Graph (solo lectura) los avisos de Santiago para guardar el destino de sus pagos ya importados | No |
 | `scheduled` | Cierre de la tarea programada | Solo en la hora de cierre |
@@ -329,15 +330,34 @@ capital, intereses, seguros y total), se configura en
 ```json
 [{"owner": "santiago", "suffix": "NNNN", "name": "Nombre del crédito",
   "path": "C:\\ruta\\al\\libro.xlsx", "sheet": "Hoja1",
-  "bonus_months": [6, 12], "category": "Transporte"}]
+  "bonus_months": [6, 12], "category": "Transporte", "payroll": true,
+  "product": "CREDITO", "contrast": "capital"}]
 ```
+
+| Clave | Uso |
+|---|---|
+| `product` | `CREDITO` (crédito de consumo o vehículo) o `HIPOTECARIO` |
+| `contrast` | `capital`: el capital del registro contra la baja del saldo de capital del extracto. `payments`: los pagos del registro contra los pagos que lista el extracto en cada periodo (hipotecario, cuyo saldo incluye intereses) |
+| `payroll` | `true` si las cuotas se descuentan de la nómina (por defecto `false`) |
+| `bonus_months` | Meses de prima en que un abono a capital es descuento de nómina |
 
 ```powershell
 .\scripts\agente-local.ps1 import-credit-ledger
 ```
 
-- **Contraste obligatorio.** El capital del registro entre dos cortes debe ser igual,
-  al peso, a lo que bajó el saldo de capital en los extractos del banco. Si un
+- **Formato de la hoja.** Los encabezados pueden estar en cualquiera de las primeras
+  10 filas: «Fecha», «Pago Capital», «Pago Intereses», «Seguros y Cargos Adicionales»
+  y «Pago Total»; las demás columnas y los resúmenes a un lado se ignoran. La
+  columna «Abono Capital» es opcional: sin ella, una fila con solo capital (sin
+  intereses ni seguros) es un abono a capital.
+- **Escaneo completo.** Cada `scan`, `import` o `scheduled` (sin `-ReadOnly`), al
+  terminar de leer los avisos, concilia los extractos (si existe `statements.json`) y
+  después importa los registros de crédito (si existe `credit_ledgers.json`), en ese
+  orden y en la misma ejecución. Un fallo en cualquier paso detiene todo.
+- **Valores con decimales.** Los valores calculados con fórmulas se redondean a
+  centavos; una fila puede diferir de la suma de sus partes en 2 centavos como máximo.
+- **Contraste obligatorio.** El registro debe coincidir con el banco en cada periodo
+  (dentro de 1 peso): por capital, o por pagos según `contrast`. Si un
   periodo no cuadra, o una fila no suma su total, no se importa nada. Solo se leen
   las filas desde el mes del primer extracto disponible; las filas con total 0 (aún
   sin pagar) se omiten.

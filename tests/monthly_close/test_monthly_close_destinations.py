@@ -187,6 +187,22 @@ def test_transfer_to_an_own_registered_account_is_an_own_transfer(preferences):
     assert (event["kind"], event["group_key"]) == ("own_transfer", "tr:5586")
 
 
+def test_merge_category_moves_movements_and_rules_and_removes_it(preferences, tmp_path):
+    raw = preferences.to_dict()
+    raw["categories"] = raw["categories"] + ["Predial", "Vivienda"]
+    store = Store(tmp_path / "close.sqlite3")
+    store.configure(raw)
+    store.import_message("p1", [{**santiago_row("p1", 1000, kind="purchase"), "category": "Predial", "decision": "family"}])
+    store.add_rule("IMPUESTO PREDIAL", "Predial", "family")
+    assert store.merge_category("Predial", "Vivienda") == {"movements": 1, "rules": 1}
+    row = store.state()["transactions"][0]
+    assert (row["category"], row["decision"], row["amount_minor"]) == ("Vivienda", "family", 1000)
+    assert "Predial" not in store.preferences().categories
+    assert store.rules()[0]["category"] == "Vivienda"
+    with pytest.raises(ValueError):
+        store.merge_category("Predial", "Vivienda")
+
+
 def test_suggested_rate_prefills_pending_usd_without_deciding(preferences, tmp_path):
     store = Store(tmp_path / "close.sqlite3")
     store.configure(preferences.to_dict())
