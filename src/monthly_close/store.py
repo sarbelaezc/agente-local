@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Iterator
 
 from monthly_close.domain import (
-    COUNTERPART_KINDS, DECISIONS, HOUSEHOLD, INCOME_CATEGORIES, INCOME_KINDS, NON_EXPENSES,
+    COUNTERPART_KINDS, DECISIONS, HOUSEHOLD, INCOME_CATEGORIES, INCOME_KINDS, LOAN_DECISIONS, NON_EXPENSES,
     OWNERS, Preferences, clean_text, owner_id,
 )
 
@@ -48,6 +48,12 @@ CREATE TABLE IF NOT EXISTS group_rules (
     between_owners INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (owner, group_key)
 );
 CREATE TABLE IF NOT EXISTS owner_accounts (suffix TEXT PRIMARY KEY, owner TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS statement_checks (
+    identity TEXT PRIMARY KEY, product TEXT NOT NULL, suffix TEXT NOT NULL,
+    period_start TEXT NOT NULL, period_end TEXT NOT NULL, movements INTEGER NOT NULL,
+    matched INTEGER NOT NULL, missing INTEGER NOT NULL, balance_minor INTEGER,
+    checked_at TEXT NOT NULL
+);
 """
 
 # Household columns added to databases created before owners existed. The defaults keep
@@ -321,7 +327,7 @@ class Store:
         with self.connect() as db:
             pending = db.execute(
                 """SELECT id,merchant,kind FROM transactions
-                WHERE decision IS NULL AND kind IN ('purchase','income')""",
+                WHERE decision IS NULL AND kind IN ('purchase','income') AND id NOT LIKE 'stmt:%'""",
             ).fetchall()
         decided = 0
         for row in pending:
@@ -351,7 +357,9 @@ class Store:
             }
             if not rules:
                 return 0
-            pending = db.execute("SELECT * FROM transactions WHERE decision IS NULL").fetchall()
+            pending = db.execute(
+                "SELECT * FROM transactions WHERE decision IS NULL AND id NOT LIKE 'stmt:%'",
+            ).fetchall()
         decided = 0
         for row in pending:
             group = group_of(row)
@@ -401,6 +409,8 @@ class Store:
             raise ValueError("Solo un abono recibido en una tarjeta puede ser abono de tercero.")
         if row["kind"] in NON_EXPENSES and decision not in {"exclude", "third_party_payment"}:
             raise ValueError("Prestamos y pagos de tarjeta no cuentan como gasto ni ingreso.")
+        if row["kind"] == "loan" and decision not in LOAN_DECISIONS:
+            raise ValueError("Una cuota de credito es gasto personal, familiar o no cuenta.")
         if row["kind"] == "income" and decision not in {"income", "exclude"}:
             raise ValueError("El dinero recibido no es un gasto: Ingreso o No cuenta.")
         if decision == "income":
@@ -593,6 +603,41 @@ class Store:
             )
             self._audit(db, "owner-account-local-user", "*" + suffix, owner)
             return self._flag_between_owners(db, None)
+
+    def record_statements(self, checks: list[dict], events: list[dict]) -> int:
+        """Store each statement's reconciliation and import the movements it alone shows.
+
+        Imported movements stay pending: a person decides each one. Repeating the
+        reconciliation changes nothing, because every imported id is derived from the
+        statement line and existing ids are skipped.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        inserted: list[str] = []
+        with self.connect() as db:
+            for check in checks:
+                db.execute(
+                    """INSERT INTO statement_checks VALUES (
+                    :identity,:product,:suffix,:period_start,:period_end,:movements,:matched,
+                    :missing,:balance_minor,:checked_at) ON CONFLICT(identity) DO UPDATE SET
+                    movements=excluded.movements,matched=excluded.matched,missing=excluded.missing,
+                    balance_minor=excluded.balance_minor,checked_at=excluded.checked_at""",
+                    {**check, "checked_at": now},
+                )
+                self._audit(db, "statement-check", check["identity"], f"{check['matched']}/{check['movements']}")
+            for event in events:
+                if event["decision"] is not None or not event["id"].startswith("stmt:"):
+                    raise ValueError("Un movimiento de extracto solo entra pendiente.")
+                if db.execute(
+                    """INSERT OR IGNORE INTO transactions (
+                    id,message_id,day,merchant,account,amount_minor,currency,category,kind,
+                    decision,reason) VALUES (:id,:message_id,:day,:merchant,:account,
+                    :amount_minor,:currency,:category,:kind,NULL,:reason)""", event,
+                ).rowcount:
+                    inserted.append(event["id"])
+                    self._audit(db, "statement-import", event["id"], event["message_id"])
+            self._flag_between_owners(db, inserted)
+        # No rule decides them: what only a statement shows is always confirmed by a person.
+        return len(inserted)
 
     def set_destinations(self, destinations: dict[str, str]) -> int:
         """Record destinations read again from the original notices.
@@ -792,6 +837,11 @@ class Store:
                 ],
                 "group_rules": [
                     dict(row) for row in db.execute("SELECT * FROM group_rules ORDER BY owner,group_key")
+                ],
+                "statement_checks": [
+                    dict(row) for row in db.execute(
+                        "SELECT * FROM statement_checks ORDER BY period_end,product,suffix",
+                    )
                 ],
                 "coverage": [dict(row) for row in db.execute("SELECT * FROM coverage ORDER BY month")],
                 "rules": [

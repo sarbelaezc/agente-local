@@ -63,6 +63,7 @@ proyecto, que Git ignora:
 | Ruta | Contenido |
 |---|---|
 | `.local\MonthlyCloseAgent\` | `runtime.json`, `close.sqlite3` (movimientos de ambos titulares, decisiones, reglas y auditoría), copias `close.sqlite3.backup-<fecha>` creadas antes de cada migración, `graph_token_cache.bin` (sesión de Microsoft) y `last-close.txt` |
+| `.local\MonthlyCloseAgent\statements.json` | Contraseña de los extractos PDF y remitentes exactos aprobados (texto plano, fuera de Git) |
 | `.local\ImportManuela\` | Archivos exportados del panel de Manuela que lee `import-manuela` (movimientos, decisiones por destino y totales de paridad) |
 | `.local\MailInvoiceAgent\` | Perfil de Opera, copias de seguridad del libro, `tessdata`, decisiones de clasificación y estados de lotes |
 | `config\settings.yaml` | Configuración personal de facturas (también ignorada por Git) |
@@ -96,6 +97,7 @@ Sustituye a `run-monthly-close.ps1`, `import-monthly-close.ps1` y
 | `summary -Month AAAA-MM [-Owner santiago\|manuela\|hogar]` | Resumen de un mes (por defecto de Santiago) | No |
 | `import-manuela [-SourceDir <carpeta>]` | Importa los movimientos de Manuela desde `.local\ImportManuela` y compara sus totales | No |
 | `owner-account -Owner <titular> -Suffix NNNN` | Asigna una cuenta (últimos 4 dígitos) a un titular | No |
+| `reconcile-statements [-Start AAAA-MM-DD] [-ReadOnly]` | Lee por Graph los extractos PDF de Santiago, los concilia con los avisos e importa como pendientes los movimientos que solo muestra el extracto; guarda saldos de inversiones y créditos | No |
 | `backfill-destinations` | Vuelve a leer por Graph (solo lectura) los avisos de Santiago para guardar el destino de sus pagos ya importados | No |
 | `scheduled` | Cierre de la tarea programada | Solo en la hora de cierre |
 | `invoices` | Lote de facturas (`-BatchSize`, `-Days`, `-Resume`) | Sí |
@@ -152,8 +154,9 @@ Función con datos y flujo separados de facturas; comparte únicamente la
 instancia local de Ollama con facturas. No requiere conector de Gmail. Lee el
 buzón con Microsoft Graph, en solo lectura, y usa un cliente local de Ollama con
 JSON Schema propio, sin mezclar el contexto ni la persistencia de los otros
-features. No descarga adjuntos, envía correos, mueve mensajes, los marca como
-leídos ni modifica libros de facturas.
+features. No envía correos, mueve mensajes, los marca como leídos ni modifica
+libros de facturas. Solo lee adjuntos para los extractos PDF de remitentes
+aprobados, en memoria y sin guardarlos (ver [Hogar: Santiago y Manuela](#hogar-santiago-y-manuela)).
 
 El lector por navegador (Playwright sobre Outlook Web con un perfil de Edge) se
 retiró: Graph es más rápido y estable. `runtime.json` ya no admite
@@ -250,6 +253,42 @@ ambigua, no se asigna. Los formatos reconocidos son:
 - Los avisos sin estas frases (por ejemplo, aportes a inversión o cajero) siguen
   agrupados por comercio, porque no se adivinan formatos.
 
+**Extractos de Santiago.** El banco envía cada mes extractos PDF protegidos con
+contraseña. `reconcile-statements` los contrasta con los movimientos leídos de los
+avisos, como Manuela contrastaba los suyos.
+
+- **Origen.** Se buscan por Graph, en solo lectura, solo los correos de los
+  remitentes exactos aprobados en `statements.json`, y solo los adjuntos con el
+  nombre de extracto del banco. Un correo de otro remitente detiene la ejecución.
+- **Contraseña.** Se guarda en `.local\MonthlyCloseAgent\statements.json`, en texto
+  plano y fuera de Git, por decisión del usuario. Nunca se imprime.
+- **Lectura.** Cada PDF se descifra y se lee en memoria; no se guarda en disco.
+  Lectores deterministas, sin Ollama, para cuenta de ahorros, tarjetas (secciones
+  en pesos y en dólares), Fiducuenta, crédito de consumo e hipotecario. El
+  consolidado se omite porque repite Fiducuenta.
+- **Validación.** El extracto de ahorros se valida con el saldo corrido, línea a
+  línea. Un extracto que no se puede leer con exactitud detiene todo sin importar
+  nada.
+- **Doble conteo.** El mismo dinero visto en dos extractos se cuenta una vez: el
+  pago de una tarjeta (débito en ahorros y abono en la tarjeta), una adición o un
+  retiro del fondo, o la cuota de un crédito. También se omiten los movimientos
+  que extractos consecutivos repiten.
+- **Conciliación.** Un movimiento del extracto coincide con uno ya conocido del
+  mismo importe y moneda, con una diferencia de hasta 5 días. Cada movimiento
+  conocido se usa una sola vez. Se concilia desde `-Start` (por defecto, el 1 de
+  enero del año en curso).
+- **Faltantes.** Lo que solo muestra el extracto entra **pendiente**, auditado
+  como `statement-import`. Ni las reglas por comercio ni las de destino lo
+  deciden: siempre lo confirma una persona. Repetir el comando no importa nada
+  dos veces.
+- **Saldos.** Se guardan por extracto el saldo de cada inversión de Fiducuenta y el
+  saldo de capital de cada crédito. El panel muestra el último saldo conocido y,
+  para el mes elegido, cuántos movimientos de cada extracto coinciden.
+- **Cuotas de crédito.** Cuentan como gasto cuando se deciden Personal o Familiar.
+  Solo admiten Personal, Familiar o No cuenta. Antes un préstamo nunca contaba;
+  como no había ninguno importado, los totales anteriores no cambian.
+- **Solo lectura.** `-ReadOnly` informa la conciliación sin escribir nada.
+
 **Panel.** El selector **Santiago / Manuela / Hogar** (Hogar por defecto, guardado
 en la URL como `owner`) filtra Mes, Año y Decisión.
 
@@ -287,6 +326,12 @@ titulares queda en `audit` con su origen.
   diferencia aprobada del cajero en los meses con retiros. Los totales y
   resúmenes de Santiago quedaron idénticos y la segunda importación no cambió
   nada.
+- En la base real (con copia manual previa), `reconcile-statements` leyó todos los
+  extractos de 2026 sin errores e importó como pendientes los movimientos que no
+  habían llegado por aviso. Una segunda ejecución no importó nada y los totales
+  decididos no cambiaron. Unos pocos importados habían quedado decididos por
+  reglas por comercio; se devolvieron a pendiente con auditoría y el código ya
+  lo impide.
 - En la base real, `backfill-destinations` (con copia manual previa) leyó todos
   los avisos pendientes y guardó el destino de casi todos los pagos salientes de
   Santiago. Los demás no tienen una frase de destino. Importes, decisiones y totales no cambiaron. Ninguna

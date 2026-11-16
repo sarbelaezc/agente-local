@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable, Iterator
 from urllib.parse import quote
 
@@ -256,6 +258,44 @@ class GraphSourceReader:
             [self.active_folder, candidate.item_id, candidate.sender, candidate.subject, received],
             sort_keys=True, ensure_ascii=False,
         ).encode()).hexdigest()
+
+    def statement_files(
+        self, sender: str, since: datetime, name_pattern, max_bytes: int,
+    ) -> Iterator[tuple[str, bytes]]:
+        """PDF statements attached by one exact approved sender, read into memory only.
+
+        Messages are listed by that sender only; any other sender in the answer stops
+        the run. Only attachments whose name matches the bank's statement pattern and
+        size limit are downloaded.
+        """
+        if not EMAIL.fullmatch(sender) or "'" in sender:
+            raise ValueError("Remitente de extractos invalido.")
+        if since.tzinfo is None:
+            raise ValueError("La fecha inicial de extractos necesita zona horaria.")
+        stamp = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for message in self._pages(f"{GRAPH_ROOT}/me/messages", {
+            "$filter": f"receivedDateTime ge {stamp} and from/emailAddress/address eq '{sender}'",
+            "$select": "id,from,receivedDateTime", "$orderby": "receivedDateTime desc", "$top": PAGE_SIZE,
+        }):
+            address = ((message.get("from") or {}).get("emailAddress") or {}).get("address")
+            identifier = message.get("id")
+            if not isinstance(address, str) or address.lower() != sender or not isinstance(identifier, str):
+                raise OutlookError("Graph devolvio un correo de otro remitente al listar extractos.")
+            base = f"{GRAPH_ROOT}/me/messages/{quote(identifier, safe='')}/attachments"
+            for attachment in self._pages(base, {"$select": "id,name,size"}):
+                name, size, attachment_id = attachment.get("name"), attachment.get("size"), attachment.get("id")
+                if not isinstance(name, str) or not name_pattern.fullmatch(name):
+                    continue
+                if type(size) is not int or not 0 < size <= max_bytes or not isinstance(attachment_id, str):
+                    raise OutlookError("Adjunto de extracto con tamano no verificable.")
+                raw = self.client.get_json(f"{base}/{quote(attachment_id, safe='')}")
+                content = raw.get("contentBytes")
+                if raw.get("@odata.type") != "#microsoft.graph.fileAttachment" or not isinstance(content, str):
+                    raise OutlookError("Adjunto de extracto no reconocido.")
+                try:
+                    yield name, base64.b64decode(content, validate=True)
+                except binascii.Error as exc:
+                    raise OutlookError("Contenido de extracto no valido.") from exc
 
     def read(self, candidate: Candidate) -> Mail:
         raw = self.client.get_bytes(

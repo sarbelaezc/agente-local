@@ -362,6 +362,11 @@
               <div class="card-header"><div><h3>Pagos por tarjeta</h3><p>Abonos a la deuda leídos del aviso; no suman al gasto</p></div></div>
               <div id="card-payment-ranking" class="rank-list"></div>
             </article>
+            <article class="card" id="statements-card" hidden>
+              <div class="card-header"><div><h3>Extractos y saldos</h3><p>Conciliación con los extractos del banco y último saldo conocido de inversiones y créditos</p></div></div>
+              <div id="statement-balances" class="rank-list"></div>
+              <div id="statement-checks" class="rank-list" style="margin-top:12px"></div>
+            </article>
             <article class="card">
               <div class="card-header"><div><h3>Cuentas de pago</h3><p>Según los datos disponibles en la importación</p></div></div>
               <div id="account-ranking" class="account-list"></div>
@@ -505,7 +510,7 @@
       );
       const monthYearFormatter = new Intl.DateTimeFormat("es", { month: "long", year: "numeric", timeZone: "UTC" });
       const dateFormatter = new Intl.DateTimeFormat("es", { day: "numeric", month: "short", year: "numeric" });
-      const nonExpenseKinds = new Set(["loan", "card_payment", "rejected", "promotion", "verification"]);
+      const nonExpenseKinds = new Set(["card_payment", "rejected", "promotion", "verification"]);
       const incomeKinds = new Set(["income", "transfer", "unknown"]);
       function incomeCategories() {
         return safeArray(state.data && state.data.income_categories).filter(category => typeof category === "string");
@@ -579,6 +584,7 @@
       function decisionOptions(tx) {
         const kind = typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : "";
         if (kind === "card_payment") return [["exclude", "No cuenta"], ["third_party_payment", "Abono de tercero"]];
+        if (kind === "loan") return [["personal", "Gasto personal"], ["family", "Familiar"], ["exclude", "No cuenta"]];
         if (nonExpenseKinds.has(kind)) return [["exclude", "No cuenta"]];
         if (kind === "income") return [["income", "Ingreso"], ["exclude", "No cuenta"]];
         if (isExcludedAccount(tx)) return kind === "investment" ? [["exclude", "No cuenta"]] : [["family", "Familiar"], ["exclude", "No cuenta"]];
@@ -910,6 +916,10 @@
         const monthKeys = new Set([currentMonth()]);
         safeArray(data.transactions).forEach(tx => { const month = tx && monthOf(tx); if (month && monthPattern.test(month)) monthKeys.add(month); });
         safeArray(data.coverage).forEach(entry => { if (entry && monthPattern.test(entry.month)) monthKeys.add(entry.month); });
+        safeArray(data.statement_checks).forEach(check => {
+          const month = check && typeof check.period_end === "string" ? check.period_end.slice(0, 7) : "";
+          if (monthPattern.test(month)) monthKeys.add(month);
+        });
         const months = Array.from(monthKeys).sort();
         if (!months.includes(state.month)) state.month = currentMonth();
         const chips = $("#month-chips");
@@ -1088,6 +1098,47 @@
         renderRanking("#account-ranking", decisions, tx => tx.account, "Sin cuenta");
         renderRanking("#merchant-ranking", decisions, tx => tx.merchant, "Sin comercio");
         renderCategoryDetails(inMonth);
+        renderStatements();
+      }
+
+      const productNames = {
+        CTA_AHORROS: "Cuenta de ahorros", TARJETA_MASTERCARD: "Mastercard", TARJETA_AMEX: "Amex",
+        TARJETA_VISA: "Visa", FIDUCUENTA: "Fiducuenta", CREDITO: "Crédito", HIPOTECARIO: "Hipotecario"
+      };
+      // Statements are Santiago's only; the household view includes them too.
+      function renderStatements() {
+        const checks = safeArray(state.data && state.data.statement_checks).filter(check => check && typeof check.period_end === "string");
+        const card = $("#statements-card");
+        card.hidden = state.owner === "manuela" || !checks.length || state.currency !== "COP";
+        if (card.hidden) return;
+        const monthEnd = `${state.month}-31`;
+        const latest = new Map();
+        checks.filter(check => check.period_end <= monthEnd && Number.isSafeInteger(check.balance_minor)).forEach(check => {
+          latest.set(`${check.product}|${check.suffix}`, check);
+        });
+        const balances = $("#statement-balances");
+        balances.replaceChildren();
+        const groups = [["Inversiones", ["FIDUCUENTA"]], ["Créditos", ["CREDITO", "HIPOTECARIO"]]];
+        groups.forEach(([label, products]) => {
+          const rows = Array.from(latest.values()).filter(check => products.includes(check.product));
+          if (!rows.length) return;
+          const total = rows.reduce((sumValue, check) => sumValue + check.balance_minor, 0);
+          const row = el("div", "rank-row");
+          row.append(el("span", "legend-label", `${label} · ${rows.length} ${rows.length === 1 ? "producto" : "productos"} · saldo al ${formatDate(rows.map(check => check.period_end).sort().pop())}`), el("strong", "", formatMoney(total, "COP")));
+          balances.append(row);
+        });
+        if (!balances.childElementCount) balances.append(el("div", "empty-state", "Sin saldos de extractos hasta este mes."));
+        const inMonth = checks.filter(check => check.period_end.slice(0, 7) === state.month);
+        const host = $("#statement-checks");
+        host.replaceChildren();
+        if (!inMonth.length) { host.append(el("p", "hint", "No hay extractos con corte en este mes.")); return; }
+        inMonth.forEach(check => {
+          const row = el("div", "rank-row");
+          const status = check.missing ? `${check.missing} no llegaron por aviso (importados como pendientes)` : "todo coincide con los avisos";
+          row.append(el("span", "legend-label", `${productNames[check.product] || check.product} *${check.suffix} · ${check.matched}/${check.movements} coinciden · ${status}`));
+          if (Number.isSafeInteger(check.balance_minor)) row.append(el("strong", "", formatMoney(check.balance_minor, "COP")));
+          host.append(row);
+        });
       }
 
       function renderCalendar(items, firstDay) {

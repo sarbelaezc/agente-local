@@ -628,7 +628,7 @@ def test_reprocess_only_adds_to_notices_that_left_no_movement(tmp_path, preferen
     assert len(store.state()["transactions"]) == 1
 
 
-@pytest.mark.parametrize("kind", ["loan","card_payment", "rejected", "promotion", "verification"])
+@pytest.mark.parametrize("kind", ["card_payment", "rejected", "promotion", "verification"])
 def test_non_expenses_cannot_be_counted(tmp_path, preferences, mail, kind):
     store = Store(tmp_path / "test.sqlite3")
     events = extract(mail, preferences, Model(kind=kind))
