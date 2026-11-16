@@ -99,6 +99,7 @@ Sustituye a `run-monthly-close.ps1`, `import-monthly-close.ps1` y
 | `owner-account -Owner <titular> -Suffix NNNN` | Asigna una cuenta (últimos 4 dígitos) a un titular | No |
 | `reconcile-statements [-Start AAAA-MM-DD] [-ReadOnly]` | Lee por Graph los extractos PDF de Santiago, los concilia con los avisos e importa como pendientes los movimientos que solo muestra el extracto; guarda saldos de inversiones y créditos | No |
 | `payroll-deduction -Owner <titular> -Suffix NNNN` | Marca un crédito cuyas cuotas se descuentan de la nómina; cada cuota que cuenta como gasto suma también como ingreso de nómina | No |
+| `merge-category -FromCategory <categoría> -ToCategory <categoría>` | Une una categoría de gasto a otra: mueve sus movimientos y reglas (auditado) y la quita de la lista; decisiones e importes no cambian | No |
 | `import-credit-ledger` | Importa los pagos de los créditos desde tu registro en Excel, tras contrastarlos al peso con los extractos | No |
 | `backfill-destinations` | Vuelve a leer por Graph (solo lectura) los avisos de Santiago para guardar el destino de sus pagos ya importados | No |
 | `scheduled` | Cierre de la tarea programada | Solo en la hora de cierre |

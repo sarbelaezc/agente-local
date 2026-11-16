@@ -622,6 +622,27 @@ class Store:
             )
             self._audit(db, "exchange-suggested", event_id, f"{rate}: {clean_text(origin, 120)}")
 
+    def merge_category(self, source: str, target: str) -> dict[str, int]:
+        """Fold one spending category into another, in one audited transaction.
+
+        Movements and merchant rules of the source move to the target, and the source
+        leaves the configured categories. Decisions and amounts do not change.
+        """
+        preferences = self.preferences()
+        if source == target or source not in preferences.categories or target not in preferences.categories:
+            raise ValueError("Indica dos categorias configuradas y distintas.")
+        settings = preferences.to_dict()
+        settings["categories"] = [category for category in preferences.categories if category != source]
+        with self.connect() as db:
+            moved = [row["id"] for row in db.execute("SELECT id FROM transactions WHERE category=?", (source,))]
+            db.execute("UPDATE transactions SET category=? WHERE category=?", (target, source))
+            for event_id in moved:
+                self._audit(db, "category-merge-local-user", event_id, f"{source} -> {target}")
+            rules = db.execute("UPDATE merchant_rules SET category=? WHERE category=?", (target, source)).rowcount
+            db.execute("UPDATE settings SET value=? WHERE id=1", (json.dumps(settings, ensure_ascii=False),))
+            self._audit(db, "category-merge-local-user", source, f"-> {target}: {len(moved)} movimientos, {rules} reglas")
+        return {"movements": len(moved), "rules": rules}
+
     def set_payroll_deduction(self, owner: str, suffix: str) -> int:
         """Register a credit whose instalments are deducted from the member's payroll.
 

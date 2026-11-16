@@ -4,7 +4,7 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet(
         "serve", "login", "check-config", "pilot", "scan", "import", "summary", "scheduled", "invoices",
-        "import-manuela", "owner-account", "backfill-destinations", "reconcile-statements", "payroll-deduction", "import-credit-ledger"
+        "import-manuela", "owner-account", "backfill-destinations", "reconcile-statements", "payroll-deduction", "import-credit-ledger", "merge-category"
     )]
     [string]$Command = "serve",
     [string]$DataDir,
@@ -13,6 +13,8 @@ param(
     [ValidatePattern("^\d{4}$")]
     [string]$Suffix,
     [string]$SourceDir,
+    [string]$FromCategory,
+    [string]$ToCategory,
     [string]$Start,
     [string]$End,
     [string]$Month,
@@ -172,6 +174,8 @@ try {
     if ($Owner) { $arguments += @("--owner", $Owner) }
     if ($Suffix) { $arguments += @("--suffix", $Suffix) }
     if ($SourceDir) { $arguments += @("--source-dir", $SourceDir) }
+    if ($FromCategory) { $arguments += @("--from", $FromCategory) }
+    if ($ToCategory) { $arguments += @("--to", $ToCategory) }
     if ($ReadOnly) { $arguments += "--read-only" }
     if ($ReprocessEmpty) { $arguments += "--reprocess-empty" }
     if ($Command -eq "import") {

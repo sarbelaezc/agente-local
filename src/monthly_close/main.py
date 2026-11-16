@@ -571,6 +571,15 @@ def run(args: argparse.Namespace) -> None:
     if args.command == "import-manuela":
         run_member_import(store, args.source_dir.expanduser().resolve())
         return
+    if args.command == "merge-category":
+        if not args.source_category or not args.target_category:
+            raise ValueError("Usa --from y --to con dos categorias configuradas.")
+        result = store.merge_category(args.source_category, args.target_category)
+        print(
+            f"Categoria «{args.source_category}» unida a «{args.target_category}»: "
+            f"{result['movements']} movimientos y {result['rules']} reglas movidos."
+        )
+        return
     if args.command == "import-credit-ledger":
         print("\n".join(import_credit_ledgers(store, data_dir, store.preferences())))
         return
@@ -656,7 +665,7 @@ def main() -> None:
         "command",
         choices=[
             "serve", "login", "pilot", "scan", "summary", "scheduled", "check-config",
-            "import-manuela", "owner-account", "backfill-destinations", "reconcile-statements", "payroll-deduction", "import-credit-ledger",
+            "import-manuela", "owner-account", "backfill-destinations", "reconcile-statements", "payroll-deduction", "import-credit-ledger", "merge-category",
         ],
     )
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
@@ -669,6 +678,8 @@ def main() -> None:
         help="Con summary, titular u hogar (por defecto santiago); con owner-account, titular.",
     )
     parser.add_argument("--suffix", help="Con owner-account, ultimos cuatro digitos de la cuenta.")
+    parser.add_argument("--from", dest="source_category", help="Con merge-category, categoria que desaparece.")
+    parser.add_argument("--to", dest="target_category", help="Con merge-category, categoria que la recibe.")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--start", help="YYYY-MM-DD")
     parser.add_argument("--end", help="YYYY-MM-DD, exclusivo")
