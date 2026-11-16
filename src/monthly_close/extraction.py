@@ -10,6 +10,7 @@ from datetime import date, datetime
 
 from mail_invoices.local_model import JsonModel
 from monthly_close.destinations import assign_destinations
+from monthly_close.statements import is_statement_notice
 from monthly_close.domain import (
     INCOME_CATEGORIES, KINDS, NON_EXPENSES, Preferences, amount_minor, clean_text,
     decision_reason, notice_currency, received_local,
@@ -113,6 +114,9 @@ def extract(
     """
     if mail.sender.lower() not in preferences.approved_senders:
         raise ValueError("Remitente no autorizado. No se envia contenido a Ollama.")
+    if is_statement_notice(mail.sender, mail.subject):
+        # The attached statement is read by reconcile-statements; the mail moves no money.
+        return []
     received = received_local(mail.received, preferences.timezone)
     body = clean_text(mail.body, 40000)
     source = mail.subject + "\n" + body

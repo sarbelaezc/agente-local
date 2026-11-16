@@ -79,6 +79,7 @@ STATE_COLUMNS = (
     "exchange_rate,cop_amount_minor,owner,group_key,time,note,account_label,"
     "category_uncertain,between_owners"
 )
+INVESTMENT_FIGURES = ("opening_minor", "contributions_minor", "withdrawals_minor", "returns_minor")
 SPECIAL_CATEGORIES = {
     "investment": "Inversiones",
     "investment_withdrawal": "Retiros de inversión",
@@ -150,6 +151,10 @@ class Store:
                 db.execute("ALTER TABLE statement_checks ADD COLUMN due_minor INTEGER")
             if "paid_minor" not in checks:
                 db.execute("ALTER TABLE statement_checks ADD COLUMN paid_minor INTEGER")
+            # Investment figures of a period (Protección); NULL for other statements.
+            for column in INVESTMENT_FIGURES:
+                if column not in checks:
+                    db.execute(f"ALTER TABLE statement_checks ADD COLUMN {column} INTEGER")
             if backup is not None:
                 self._audit(db, "migrate-household", self.path.name, backup.name)
 
@@ -935,14 +940,21 @@ class Store:
             for check in checks:
                 db.execute(
                     """INSERT INTO statement_checks (identity,product,suffix,period_start,period_end,
-                    movements,matched,missing,balance_minor,checked_at,due_minor,paid_minor) VALUES (
+                    movements,matched,missing,balance_minor,checked_at,due_minor,paid_minor,
+                    opening_minor,contributions_minor,withdrawals_minor,returns_minor) VALUES (
                     :identity,:product,:suffix,:period_start,:period_end,:movements,:matched,
-                    :missing,:balance_minor,:checked_at,:due_minor,:paid_minor) ON CONFLICT(identity) DO UPDATE SET
+                    :missing,:balance_minor,:checked_at,:due_minor,:paid_minor,
+                    :opening_minor,:contributions_minor,:withdrawals_minor,:returns_minor) ON CONFLICT(identity) DO UPDATE SET
                     movements=excluded.movements,matched=excluded.matched,missing=excluded.missing,
                     balance_minor=excluded.balance_minor,checked_at=excluded.checked_at,
                     due_minor=excluded.due_minor,
-                    paid_minor=COALESCE(excluded.paid_minor, statement_checks.paid_minor)""",
-                    {"due_minor": None, "paid_minor": None, **check, "checked_at": now},
+                    paid_minor=COALESCE(excluded.paid_minor, statement_checks.paid_minor),
+                    opening_minor=excluded.opening_minor,contributions_minor=excluded.contributions_minor,
+                    withdrawals_minor=excluded.withdrawals_minor,returns_minor=excluded.returns_minor""",
+                    {
+                        "due_minor": None, "paid_minor": None, **dict.fromkeys(INVESTMENT_FIGURES),
+                        **check, "checked_at": now,
+                    },
                 )
                 self._audit(db, "statement-check", check["identity"], f"{check['matched']}/{check['movements']}")
             for event in events:

@@ -367,3 +367,179 @@ def test_only_the_ordinary_instalment_counts_as_payroll_and_the_extra_waits(stor
     assert {r["id"]: r for r in store.state()["transactions"]}[extra["id"]]["decision"] == "exclude"
     store.decide(big["id"], "exclude")
     assert not any(r["id"].endswith(big["id"]) and r["id"] != big["id"] for r in store.state()["transactions"])
+
+
+# ---------------------------------------------------------------- Protección (fictitious text)
+
+VOLUNTARY_CURRENT = """Hola Persona Ficticia
+Esto pasó en el último período de tu Fondo de Pensiones Voluntarias.
+Datos personales
+Persona Ficticia
+CC 0000000000
+persona@example.test
+Datos del extracto
+Período: 30 de Septiembre 2026 a
+31 de Octubre 2026
+Fecha expedición: Noviembre 8 de 2026
+Saldo que tenías a corte del 30 de Septiembre 2026 Saldo inicial del período:$ 10,000,000
+Aportes
+El dinero que ingresó a tu cuenta. +$ 500,000
+Retiros
+Dinero que sacaste de tu cuenta. -$ 0
+Traslados a otras entidades
+Movimientos que realizaste hacia otras entidades. -$ 0
+Rendimiento neto
+Corresponde al rendimiento de tu inversión después de descontar el
+costo de administración del mes (0.10%).
+-$ 200,003
+Devolución de costo administración
+Tu beneficio por mantener una inversión constante con Protección. +$ 20,000
+Saldo a corte 31 de Octubre 2026
+Saldo final del período
+$ 10,320,000
+Aportes $ 500,000
+"""
+VOLUNTARY_PREVIOUS = """Llevas 30 meses con este fondo
+En este tiempo has invertido $ 9,000,000
+Rendimiento bruto $ 950,000
+Rendimiento neto $ 900,000
+1. Resumen de tu cuenta y período
+Resumen de tu cuenta
+Resumen de este período
+Saldo inicial
+Diciembre 31 de 2025
+$ 10,000,000
+Enero 31 de 2026
+Saldo final
+$ 11,320,000
+Fecha afiliación
+2020/01/01 Tu período
+Aportes
+$ 400,000
+Retiros Gastos y comisiones
+$ 0 -$ 50,000
+Datos del extracto
+Período: Diciembre 31 de 2025  a  Enero 31 de 2026
+Traslados de recursos de/hacia fondos de pensiones  $ 0
+Aportes  $ 0
+Retiros  $ 0
+Rendimientos  $ 0
+Aportes $ 400,000
+Rendimientos $ 900,000
+Devolución de comisión $ 20,000
+Gastos y comisiones -$ 50,000
+"""
+SEVERANCE = """EXTRACTO FONDO DE CESANTÍAS PROTECCIÓN
+Saldo del periodo comprendido entre: 2026/04/01 a 2026/09/30
+Saldo Inicial
+Aportes
+Retiro
+Valorización
+Saldo Final
+$ 20.000.000 $ 1.000.000 $ 0 $ -99.999 $ 20.900.001
+"""
+
+
+def test_protection_attachment_names_and_statement_mails_are_recognised():
+    assert st.identify("0A81F6F5012E_PensionVoluntaria_202610.pdf") == ("PROTECCION_VOLUNTARIA", "202610")
+    assert st.identify("0A81F716DA_PensionesCesantias_202609.pdf") == ("PROTECCION_CESANTIAS", "202609")
+    assert st.identify("Extracto_1_202601_FIDUCUENTA_0003.pdf") == ("FIDUCUENTA", "202601")
+    assert st.identify("PensionVoluntaria_202610.pdf") is None and st.identify("otro.pdf") is None
+    assert all(st.STATEMENT_NAME.fullmatch(name) for name in (
+        "0A81F6F5012E_PensionVoluntaria_202610.pdf", "Extracto_1_202601_FIDUCUENTA_0003.pdf",
+    ))
+    for subject in (
+        "Extracto Pensiones Voluntarias Protección S.A.", "Extracto Pensiones Voluntarias Proteccion S.A",
+        "Extracto de Cesantias Protección.",
+    ):
+        assert st.is_statement_notice("AFP_Proteccion@proteccion.com", subject)
+    assert not st.is_statement_notice("afp_proteccion@proteccion.com", "Recibimos tu aporte")
+    assert not st.is_statement_notice("otro@example.test", "Extracto Pensiones Voluntarias Protección S.A.")
+
+
+def test_current_voluntary_statement_keeps_balance_and_period_figures():
+    statement = st.parse("PROTECCION_VOLUNTARIA", "202610", VOLUNTARY_CURRENT)
+    assert (statement.product, statement.suffix) == ("PROTECCION_VOLUNTARIA", "")
+    assert (statement.period_start, statement.period_end) == (date(2026, 9, 30), date(2026, 10, 31))
+    # Printed figures are rounded to whole pesos; the stored returns absorb the gap.
+    assert (statement.opening_minor, statement.contributions_minor, statement.withdrawals_minor) == (
+        1_000_000_000, 50_000_000, 0,
+    )
+    assert (statement.returns_minor, statement.balance_minor) == (-18_000_000, 1_032_000_000)
+    assert statement.movements == []  # figures only: nothing to import
+
+
+def test_previous_voluntary_format_reads_the_labelled_detail_not_the_empty_template():
+    statement = st.parse("PROTECCION_VOLUNTARIA", "202601", VOLUNTARY_PREVIOUS)
+    assert (statement.period_start, statement.period_end) == (date(2025, 12, 31), date(2026, 1, 31))
+    assert (
+        statement.opening_minor, statement.contributions_minor, statement.withdrawals_minor,
+        statement.returns_minor, statement.balance_minor,
+    ) == (1_000_000_000, 40_000_000, 0, 92_000_000, 1_132_000_000)
+
+
+def test_severance_statement_reads_its_summary_including_a_negative_valuation():
+    statement = st.parse("PROTECCION_CESANTIAS", "202609", SEVERANCE)
+    assert (statement.period_start, statement.period_end) == (date(2026, 4, 1), date(2026, 9, 30))
+    assert (
+        statement.opening_minor, statement.contributions_minor, statement.withdrawals_minor,
+        statement.returns_minor, statement.balance_minor,
+    ) == (2_000_000_000, 100_000_000, 0, -9_999_900, 2_090_000_100)
+
+
+@pytest.mark.parametrize("product,text,old,new", [
+    ("PROTECCION_VOLUNTARIA", VOLUNTARY_CURRENT, "$ 10,320,000\nAportes", "$ 10,320,011\nAportes"),
+    ("PROTECCION_VOLUNTARIA", VOLUNTARY_PREVIOUS, "Saldo final\n$ 11,320,000", "Saldo final\n$ 11,321,000"),
+    ("PROTECCION_CESANTIAS", SEVERANCE, "$ 20.900.001", "$ 20.900.050"),
+])
+def test_protection_figures_that_do_not_add_up_beyond_rounding_are_refused(product, text, old, new):
+    assert old in text
+    with pytest.raises(st.StatementError, match="no cuadra"):
+        st.parse(product, "202610", text.replace(old, new))
+
+
+@pytest.mark.parametrize("product,text,missing", [
+    ("PROTECCION_VOLUNTARIA", VOLUNTARY_CURRENT, "Saldo final del período\n"),
+    ("PROTECCION_VOLUNTARIA", VOLUNTARY_PREVIOUS, "Rendimiento neto $ 900,000\n"),
+    ("PROTECCION_VOLUNTARIA", VOLUNTARY_CURRENT, "Período: 30 de Septiembre 2026 a\n"),
+    ("PROTECCION_CESANTIAS", SEVERANCE, "Saldo del periodo comprendido entre: 2026/04/01 a 2026/09/30\n"),
+])
+def test_incomplete_protection_statements_are_refused(product, text, missing):
+    assert missing in text
+    with pytest.raises(st.StatementError):
+        st.parse(product, "202610", text.replace(missing, ""))
+
+
+def test_reconcile_stores_protection_figures_without_importing_movements(store, tmp_path, preferences, monkeypatch):
+    texts = {
+        "0A81F6F5_PensionVoluntaria_202610.pdf": VOLUNTARY_CURRENT,
+        "0A81F716_PensionesCesantias_202609.pdf": SEVERANCE,
+        "0A81F6F5_PensionVoluntaria_202512.pdf": VOLUNTARY_PREVIOUS,  # before the start: skipped
+    }
+    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
+    assert result == {"statements": 2, "matched": 0, "missing": 0, "imported": 0, "balances": 2}
+    assert store.state()["transactions"] == []
+    checks = {check["product"]: check for check in store.state()["statement_checks"]}
+    assert checks["PROTECCION_VOLUNTARIA"]["contributions_minor"] == 50_000_000
+    assert checks["PROTECCION_VOLUNTARIA"]["returns_minor"] == -18_000_000
+    assert checks["PROTECCION_CESANTIAS"]["balance_minor"] == 2_090_000_100
+    # Repeating it changes nothing.
+    run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
+    assert len(store.state()["statement_checks"]) == 2
+
+
+def test_a_protection_statement_mail_is_never_sent_to_ollama(preferences):
+    from dataclasses import replace
+
+    from monthly_close.extraction import Mail, extract
+
+    class NoModel:
+        def complete_json(self, system, user):
+            raise AssertionError("A statement e-mail must not reach Ollama.")
+
+    own = replace(preferences, approved_senders=["afp_proteccion@proteccion.com"])
+    mail = Mail(
+        "id", "afp_proteccion@proteccion.com", "Extracto Pensiones Voluntarias Protección S.A.",
+        "2026-03-05T23:00:51+00:00", "Adjuntamos tu extracto. Saldo $ 1.234.567",
+    )
+    assert extract(mail, own, NoModel()) == []

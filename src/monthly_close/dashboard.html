@@ -1241,8 +1241,18 @@
 
       const productNames = {
         CTA_AHORROS: "Cuenta de ahorros", TARJETA_MASTERCARD: "Mastercard", TARJETA_AMEX: "Amex",
-        TARJETA_VISA: "Visa", FIDUCUENTA: "Fiducuenta", CREDITO: "Crédito", HIPOTECARIO: "Hipotecario"
+        TARJETA_VISA: "Visa", FIDUCUENTA: "Fiducuenta", CREDITO: "Crédito", HIPOTECARIO: "Hipotecario",
+        PROTECCION_VOLUNTARIA: "Pensión voluntaria Protección", PROTECCION_CESANTIAS: "Cesantías Protección"
       };
+      const investmentProducts = ["FIDUCUENTA", "PROTECCION_VOLUNTARIA", "PROTECCION_CESANTIAS"];
+      // Protección statements carry the period figures instead of movements to reconcile.
+      function investmentFigures(check) {
+        const figure = (label, value) => Number.isSafeInteger(value) ? `${label} ${formatMoney(value, "COP")}` : "";
+        return [
+          figure("aportes", check.contributions_minor), figure("retiros", check.withdrawals_minor),
+          figure("rendimientos", check.returns_minor)
+        ].filter(Boolean).join(" · ");
+      }
       // Statements are Santiago's only; the household view includes them too.
       function renderStatements() {
         const checks = safeArray(state.data && state.data.statement_checks).filter(check => check && typeof check.period_end === "string");
@@ -1256,7 +1266,7 @@
         });
         const balances = $("#statement-balances");
         balances.replaceChildren();
-        const groups = [["Inversiones", ["FIDUCUENTA"]], ["Créditos", ["CREDITO", "HIPOTECARIO"]]];
+        const groups = [["Inversiones", investmentProducts], ["Créditos", ["CREDITO", "HIPOTECARIO"]]];
         groups.forEach(([label, products]) => {
           const rows = Array.from(latest.values()).filter(check => products.includes(check.product));
           if (!rows.length) return;
@@ -1272,8 +1282,10 @@
         if (!inMonth.length) { host.append(el("p", "hint", "No hay extractos con corte en este mes.")); return; }
         inMonth.forEach(check => {
           const row = el("div", "rank-row");
+          const name = `${productNames[check.product] || check.product}${check.suffix ? ` *${check.suffix}` : ""}`;
+          const figures = investmentFigures(check);
           const status = check.missing ? `${check.missing} no llegaron por aviso (importados como pendientes)` : "todo coincide con los avisos";
-          row.append(el("span", "legend-label", `${productNames[check.product] || check.product} *${check.suffix} · ${check.matched}/${check.movements} coinciden · ${status}`));
+          row.append(el("span", "legend-label", figures ? `${name} · ${figures}` : `${name} · ${check.matched}/${check.movements} coinciden · ${status}`));
           if (Number.isSafeInteger(check.balance_minor)) row.append(el("strong", "", formatMoney(check.balance_minor, "COP")));
           host.append(row);
         });

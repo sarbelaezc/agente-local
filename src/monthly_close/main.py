@@ -569,18 +569,20 @@ def reconcile_statements(
     with open_source(data_dir, settings, preferences.approved_senders) as reader:
         for sender in config["approved_senders"]:
             for name, content in reader.statement_files(
-                sender, since, statements_module.FILE_NAME, statements_module.MAX_PDF_BYTES,
+                sender, since, statements_module.STATEMENT_NAME, statements_module.MAX_PDF_BYTES,
             ):
-                match = statements_module.FILE_NAME.fullmatch(name)
-                if match["product"] not in statements_module.PRODUCTS or match["period"] < start.strftime("%Y%m"):
+                found_name = statements_module.identify(name)
+                if found_name is None:
+                    continue
+                product, period = found_name
+                if product not in statements_module.PRODUCTS or period < start.strftime("%Y%m"):
                     continue
                 try:
                     statement = statements_module.parse(
-                        match["product"], match["period"],
-                        statements_module.decrypt_text(content, config["password"]),
+                        product, period, statements_module.decrypt_text(content, config["password"]),
                     )
                 except statements_module.StatementError as exc:
-                    raise ValueError(f"Extracto {match['product']} {match['period']}: {exc}") from exc
+                    raise ValueError(f"Extracto {product} {period}: {exc}") from exc
                 found.setdefault(statement.identity, statement)
     with_register = {(config.product, config.suffix) for config in credit_ledger.load_configs(data_dir)}
     for statement in found.values():

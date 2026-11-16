@@ -7,7 +7,7 @@ implementa.
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
-| Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); conciliación y tarea pendientes; [varios buzones](#varios-buzones-y-gmail-de-manuela) con Gmail de Manuela en solo lectura y [lectura incremental](#lectura-incremental) de Outlook y Gmail (implementado; validado con los buzones reales: inicio de sesión en Gmail, importación de Manuela y ejecuciones incrementales) | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` / `scripts/agente-local.ps1 login -Mailbox manuela` |
+| Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); conciliación y tarea pendientes; [varios buzones](#varios-buzones-y-gmail-de-manuela) con Gmail de Manuela en solo lectura y [lectura incremental](#lectura-incremental) de Outlook y Gmail (implementado; validado con los buzones reales: inicio de sesión en Gmail, importación de Manuela y ejecuciones incrementales); [extractos de Protección](#hogar-santiago-y-manuela): saldo, aportes, retiros y rendimientos de pensión voluntaria y cesantías (implementado y validado con los extractos reales de 2026) | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` / `scripts/agente-local.ps1 login -Mailbox manuela` |
 
 ## Stack tecnológico
 
@@ -296,6 +296,48 @@ avisos, como Manuela contrastaba los suyos.
   Solo admiten Personal, Familiar o No cuenta. Antes un préstamo nunca contaba;
   como no había ninguno importado, los totales anteriores no cambian.
 - **Solo lectura.** `-ReadOnly` informa la conciliación sin escribir nada.
+
+**Extractos de Protección.** `reconcile-statements` (y cada `scan` o `import`)
+también lee los extractos de Protección, para complementar las inversiones del
+panel. Solo guarda cifras: no crea movimientos, así que no duplica los avisos de
+aportes ni cambia los totales de gasto.
+
+| Producto | Correo | Adjunto | Frecuencia |
+|---|---|---|---|
+| Pensión voluntaria (planes institucionales) | «Extracto Pensiones Voluntarias Protección S.A.» | `<id>_PensionVoluntaria_AAAAMM.pdf` | Mensual |
+| Cesantías (subcuentas de corto y largo plazo) | «Extracto de Cesantias Protección.» | `<id>_PensionesCesantias_AAAAMM.pdf` | Semestral |
+
+- **Configuración.** Agrega `afp_proteccion@proteccion.com` a los remitentes
+  aprobados de `statements.json`. La contraseña es la misma de los extractos del
+  banco.
+- **Cifras por período.** Para cada producto, en total, se guardan el saldo
+  inicial, los aportes, los retiros (incluidos los traslados a otras entidades),
+  los rendimientos y el saldo final. Los rendimientos son la diferencia entre el
+  saldo final y el inicial descontados aportes y retiros, así que ya incluyen la
+  comisión y su devolución.
+- **Lectura determinista, sin Ollama.**
+  - **Pensión voluntaria desde el extracto 202610:** cada cifra viene junto a su
+    etiqueta en el resumen.
+  - **Pensión voluntaria hasta 202609:** el resumen sale desordenado en el texto
+    del PDF. Los saldos se toman anclados a sus fechas y los demás valores de la
+    sección de detalle con etiqueta, ignorando la plantilla vacía que la precede.
+  - **Cesantías:** su línea de resumen (saldo inicial, aportes, retiro,
+    valorización, saldo final).
+- **Validación.** Las cifras del extracto deben sumar su saldo final. Como
+  Protección imprime cada concepto redondeado a pesos enteros, se admite una
+  diferencia de hasta $10. Una diferencia mayor, o un concepto que falte, detiene
+  todo sin guardar nada.
+- **El correo no es un aviso.** Los correos de extracto de Protección no se envían
+  a Ollama: el lector de avisos los marca como procesados sin movimientos, porque
+  su información la aporta el PDF.
+- **Panel.** En «Extractos y saldos», el grupo **Inversiones** suma el último saldo
+  conocido de Fiducuenta, pensión voluntaria y cesantías. En el mes en que cierra
+  un extracto de Protección se muestran sus aportes, retiros y rendimientos.
+- **Estado.** Validado el 2026-11-16 con los extractos reales: 10 de pensión
+  voluntaria (enero a octubre de 2026, en los dos formatos) y 2 de cesantías.
+  El saldo inicial de cada extracto coincide exactamente con el saldo final del
+  anterior. Todas las diferencias por redondeo fueron de $10 o menos. Las pruebas
+  usan textos ficticios con la misma estructura.
 
 **Frases fijas del banco sin Ollama.** Además del pago de tarjeta y la
 transferencia a cuenta, se leen sin el modelo tres frases más:
