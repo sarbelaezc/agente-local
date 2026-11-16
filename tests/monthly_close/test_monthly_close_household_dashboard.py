@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import threading
+from datetime import datetime
 
 import pytest
 from playwright.sync_api import expect, sync_playwright
@@ -136,6 +137,26 @@ def test_year_view_shows_income_for_each_member_and_household(household):
         assert re.search(income, metric), (owner, metric)
         assert page.locator("#year-income-chart rect").count() >= 1, owner
         assert re.search(income, page.locator("#year-table").inner_text()), owner
+    assert not errors
+
+
+def test_year_summary_capitalizes_months_and_leaves_months_without_data_blank(household):
+    page, store, errors = household
+    page.clock.set_fixed_time(datetime(2026, 11, 16, 12))  # January elapsed, December still to come
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.locator("#tab-year").click()
+    rows = page.locator("#year-table tbody tr")
+    expect(rows).to_have_count(12)
+    assert rows.nth(2).locator("td").first.inner_text() == "Marzo de 2026"
+    # An elapsed month without movements shows dashes, never 0,00.
+    january = rows.nth(0).inner_text()
+    assert january.startswith("Enero de 2026")
+    assert "—" in january and "0,00" not in january
+    # A month still to come waits for the bank's notices.
+    december = rows.nth(11)
+    assert december.locator("td").nth(1).inner_text() == "Sin notificaciones del banco aún"
+    assert "0,00" not in december.inner_text()
     assert not errors
 
 

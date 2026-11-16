@@ -221,6 +221,7 @@
     th, td { padding: 8px 4px; border-top: 1px solid var(--line); text-align: left; white-space: nowrap; font-variant-numeric: tabular-nums; }
     th { border-top: 0; color: var(--mut); font-size: 11px; font-weight: 600; }
     td.numeric, th.numeric { text-align: right; }
+    td.empty-cell, td.waiting { color: var(--mut); }
     .status-pill { display: inline-flex; padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--ink2); font-size: 11px; font-weight: 600; }
     .status-pill.reviewed { background: var(--green-soft); color: var(--good); }
     .status-pill.partial { background: var(--orange-soft); color: var(--warn); }
@@ -1771,7 +1772,7 @@
         const elapsedUnverified = [];
         const coverageByMonth = new Map(safeArray(state.data.coverage).filter(entry => entry && typeof entry.month === "string").map(entry => [entry.month, entry]));
         const importedMonths = new Set(transactions().map(monthOf).filter(Boolean));
-        $("#year-coverage-note").textContent = `Los meses transcurridos que no aparecen como verificados manualmente no deben interpretarse como gasto cero. “Sin importación” indica que no hay movimientos de esta moneda registrados para ese mes.`;
+        $("#year-coverage-note").textContent = `Los meses transcurridos que no aparecen como verificados manualmente no deben interpretarse como gasto cero. Un guion (—) y “Sin importación” indican que no hay movimientos de esta moneda registrados para ese mes.`;
         const table = document.createElement("table");
         const head = document.createElement("thead");
         const header = document.createElement("tr");
@@ -1792,13 +1793,29 @@
                 : coverage && coverage.status === "partial" ? "Parcial" : "Sin verificar";
           if (bucket.month < current && status !== "Revisado manualmente") elapsedUnverified.push(`${monthLabel(bucket.month)}: ${status.toLocaleLowerCase("es")}`);
           const monthCell = el("td");
+          const name = monthLabel(bucket.month);
+          const title = name.charAt(0).toLocaleUpperCase("es") + name.slice(1);
           if (safeArray(state.months).includes(bucket.month)) {
-            const open = el("button", "link-button", monthLabel(bucket.month));
+            const open = el("button", "link-button", title);
             open.type = "button";
             open.setAttribute("aria-label", `Ver ${monthLabel(bucket.month)} en la pestaña Mes`);
             open.addEventListener("click", () => goToMonth(bucket.month));
             monthCell.append(open);
-          } else monthCell.textContent = monthLabel(bucket.month);
+          } else monthCell.textContent = title;
+          // A month without movements is not a month that cost zero: the current and coming
+          // months wait for the bank's notices, and an elapsed one shows a dash.
+          if (!hasImports && bucket.month >= current) {
+            const waiting = el("td", "waiting", "Sin notificaciones del banco aún");
+            waiting.colSpan = 9;
+            tr.append(monthCell, waiting);
+            body.append(tr);
+            return;
+          }
+          if (!hasImports) {
+            tr.append(monthCell, ...Array.from({ length: 8 }, () => el("td", "numeric empty-cell", "—")), el("td", "", status));
+            body.append(tr);
+            return;
+          }
           tr.append(
             monthCell,
             el("td", "numeric", formatMoney(sum(bucket.personal))),
