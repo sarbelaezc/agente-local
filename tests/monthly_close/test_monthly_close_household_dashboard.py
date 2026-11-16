@@ -191,6 +191,45 @@ def test_month_view_is_interactive_like_manuelas_dashboard(household):
     assert not errors
 
 
+def test_months_live_under_the_tabs_and_only_in_the_month_view(household):
+    page, store, errors = household
+    chips = page.locator("#month-chips")
+    expect(chips).to_be_visible()
+    assert chips.bounding_box()["y"] > page.locator(".tabs").bounding_box()["y"]
+    # Chronological, short, with the year where it changes.
+    months = chips.locator("button").evaluate_all("items => items.map(item => item.dataset.month)")
+    assert months[0] == MONTH
+    assert months == sorted(months)
+    expect(chips.locator("button").first).to_have_attribute("aria-label", "marzo de 2026")
+    assert chips.locator("button").first.inner_text().startswith("Mar")
+    assert "2026" in chips.locator("button").first.inner_text()
+    assert "2026" not in chips.locator("button").nth(1).inner_text()  # same year: no repeat
+    expect(chips.locator('button[aria-pressed="true"]')).to_have_attribute("data-month", MONTH)
+
+    # The Decision tab shows how many destinations are pending, from any tab.
+    expect(page.locator("#decision-badge")).to_have_text("1")
+    expect(page.locator("#tab-decisions")).to_have_attribute("aria-label", "Decisión, 1 destino por decidir")
+
+    page.locator("#tab-year").click()
+    expect(chips).to_be_hidden()
+    expect(page.locator("#coverage-summary")).to_be_hidden()
+    page.locator("#tab-decisions").click()
+    expect(chips).to_be_hidden()
+
+    # A month of the year view opens the month tab on it.
+    page.locator(f'#month-chips button:not([data-month="{MONTH}"])').first.evaluate("button => button.click()")
+    page.locator("#tab-year").click()
+    page.locator("#year-table").get_by_role("button", name="Ver marzo de 2026 en la pestaña Mes").click()
+    expect(page.locator("#tab-month")).to_have_attribute("aria-selected", "true")
+    expect(chips.locator('button[aria-pressed="true"]')).to_have_attribute("data-month", MONTH)
+    assert f"month={MONTH}" in page.url and "tab=month" in page.url
+
+    # A category of the donut opens its movements in the detail.
+    page.locator("#category-chart").get_by_role("button", name=re.compile("^Compras:")).click()
+    expect(page.locator('#category-details details[data-category="Compras"]')).to_have_attribute("open", "")
+    assert not errors
+
+
 def test_destination_card_decides_every_pending_payment_with_audit(household):
     page, store, errors = household
     page.locator("#tab-decisions").click()

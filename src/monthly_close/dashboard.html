@@ -134,6 +134,16 @@
     .chip { flex: none; border: 1px solid var(--line); border-radius: 999px; padding: 7px 13px; background: var(--surf); color: var(--ink2); font-size: 14px; }
     .chip:hover { border-color: var(--ink2); }
     .chip[aria-pressed="true"] { border-color: var(--acc); background: var(--acc); color: #fff; }
+    .tab-badge { display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px; background: var(--s2); color: #fff; font-size: 11px; line-height: 18px; }
+    .tab-badge[hidden] { display: none; }
+    #panel-month > .month-chips { position: relative; padding-top: 0; }
+    .chip .chip-year { margin-left: 4px; opacity: .7; font-size: 12px; }
+    .link-button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; cursor: pointer; }
+    .link-button:hover { text-decoration-color: currentColor; }
+    .legend-row.link-button { width: 100%; text-decoration: none; }
+    .legend-row.link-button:hover .legend-label > span:last-child { text-decoration: underline; }
+    svg .jump { cursor: pointer; }
+    .coverage-line { margin: 0 0 10px; font-size: 12.5px; }
 
     /* Headline figures: one big number per card */
     .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 0 0 12px; }
@@ -334,17 +344,18 @@
             <label class="control-label" for="currency-select">Moneda</label>
             <span class="select-button"><select id="currency-select" aria-label="Moneda para mostrar"></select></span>
           </div>
-          <div id="coverage-summary" class="hint" aria-live="polite"></div>
         </div>
         <p id="extraction-warning" class="hint" role="status" hidden></p>
-        <div id="month-chips" class="month-chips" role="group" aria-label="Seleccionar mes"></div>
         <div class="tabs" role="tablist" aria-label="Vista del cierre">
           <button class="tab" id="tab-month" type="button" role="tab" aria-selected="true" aria-controls="panel-month" tabindex="0">Mes</button>
           <button class="tab" id="tab-year" type="button" role="tab" aria-selected="false" aria-controls="panel-year" tabindex="-1">Año</button>
-          <button class="tab" id="tab-decisions" type="button" role="tab" aria-selected="false" aria-controls="panel-decisions" tabindex="-1">Decisión</button>
+          <button class="tab" id="tab-decisions" type="button" role="tab" aria-selected="false" aria-controls="panel-decisions" tabindex="-1">Decisión<span id="decision-badge" class="tab-badge" aria-hidden="true" hidden></span></button>
         </div>
 
         <section id="panel-month" role="tabpanel" aria-labelledby="tab-month">
+          <!-- Only the month view depends on the chosen month: Year has its own year and Decision shows every month. -->
+          <div id="month-chips" class="month-chips" role="group" aria-label="Seleccionar mes"></div>
+          <div id="coverage-summary" class="hint coverage-line" aria-live="polite"></div>
           <div class="month-summary" id="month-metrics"></div>
           <div class="grid-2">
             <article class="card">
@@ -494,6 +505,7 @@
         activeTab: ["month", "year", "decisions"].includes(initialTab) ? initialTab : "month",
         owner: ["santiago", "manuela", "hogar"].includes(initialParams.get("owner")) ? initialParams.get("owner") : "hogar",
         busy: false,
+        months: [],
         selectedDay: null, // { key: "month|owner|currency", day }
         categoryColors: new Map(),
         pendingLimit: 50,
@@ -1016,23 +1028,21 @@
         });
         const months = Array.from(monthKeys).sort();
         if (!months.includes(state.month)) state.month = currentMonth();
+        state.months = months;
         const chips = $("#month-chips");
         chips.replaceChildren();
-        months.slice().reverse().forEach(month => {
-          const button = el("button", "chip", monthLabel(month));
+        // Chronological and short, as in Manuela's dashboard; the year shows where it changes.
+        months.forEach((month, index) => {
+          const button = el("button", "chip", shortMonth(month));
+          if (index === 0 || months[index - 1].slice(0, 4) !== month.slice(0, 4)) button.append(el("span", "chip-year", month.slice(0, 4)));
           button.type = "button";
+          button.dataset.month = month;
+          button.setAttribute("aria-label", monthLabel(month));
           button.setAttribute("aria-pressed", String(month === state.month));
-          button.addEventListener("click", () => {
-            state.month = month;
-            renderMonthControls(months);
-            renderDashboard();
-            renderYear();
-            renderDecisions();
-            updateCoverageSummary(state.month);
-            syncUrl();
-          });
+          button.addEventListener("click", () => goToMonth(month));
           chips.append(button);
         });
+        requestAnimationFrame(centerSelectedMonth);
         const coverageSelect = $("#coverage-month");
         coverageSelect.replaceChildren();
         months.slice().reverse().forEach(month => {
@@ -1061,9 +1071,40 @@
         syncUrl();
       }
 
+      function shortMonth(month) {
+        const name = monthNames[Number(month.slice(5, 7)) - 1].replace(".", "");
+        return name.charAt(0).toLocaleUpperCase("es") + name.slice(1);
+      }
+
+      // Scrolls the chip row only (never the page) so the chosen month is in view on a phone.
+      function centerSelectedMonth() {
+        const chips = $("#month-chips");
+        const chosen = chips.querySelector('button[aria-pressed="true"]');
+        if (!chosen || !chips.clientWidth) return;
+        chips.scrollLeft = chosen.offsetLeft - (chips.clientWidth - chosen.offsetWidth) / 2;
+      }
+
+      // Opens the month view on a month that has data, from the chips or from the year view.
+      function goToMonth(month) {
+        const months = safeArray(state.months);
+        if (!months.includes(month)) return;
+        state.month = month;
+        renderMonthControls(months);
+        renderDashboard();
+        renderYear();
+        renderDecisions();
+        updateCoverageSummary(state.month);
+        if (state.activeTab !== "month") {
+          selectTab("month");
+          $("#panel-month").scrollIntoView({ block: "start" });
+        }
+        syncUrl();
+        requestAnimationFrame(centerSelectedMonth);
+      }
+
       function renderMonthControls(months) {
         const chips = $("#month-chips");
-        for (const button of chips.querySelectorAll("button")) button.setAttribute("aria-pressed", String(button.textContent === monthLabel(state.month)));
+        for (const button of chips.querySelectorAll("button")) button.setAttribute("aria-pressed", String(button.dataset.month === state.month));
         for (const option of $("#coverage-month").options) option.selected = option.value === state.month;
         const years = Array.from(new Set(months.map(month => month.slice(0, 4))));
         if (years.includes(state.month.slice(0, 4))) {
@@ -1348,7 +1389,9 @@
             return `M ${point(outer, from)} A ${outer} ${outer} 0 ${large} 1 ${point(outer, to)} L ${point(inner, to)} A ${inner} ${inner} 0 ${large} 0 ${point(inner, from)} Z`;
           }).join(" ");
           const slice = svgEl("path", { d, fill: categoryColor(category), stroke: "var(--surface)", "stroke-width": entries.length > 1 ? 2 : 0, "stroke-linejoin": "round" });
-          setTip(slice, `${category}: ${formatMoney(amount)} (${(amount * 100 / grandTotal).toFixed(1).replace(".", ",")} %)`);
+          setTip(slice, `${category}: ${formatMoney(amount)} (${(amount * 100 / grandTotal).toFixed(1).replace(".", ",")} %) · toca para ver sus movimientos`);
+          slice.classList.add("jump");
+          slice.addEventListener("click", () => openCategoryDetail(category));
           svg.append(slice);
           angle += sweep;
         });
@@ -1366,7 +1409,10 @@
         host.append(svg);
         const legend = el("div", "legend");
         entries.forEach(([category, amount]) => {
-          const row = el("div", "legend-row");
+          const row = el("button", "legend-row link-button");
+          row.type = "button";
+          row.setAttribute("aria-label", `${category}: ${formatMoney(amount)}. Ver sus movimientos en Detalle por categoría`);
+          row.addEventListener("click", () => openCategoryDetail(category));
           const label = el("span", "legend-label");
           const swatch = el("span", "swatch");
           swatch.style.backgroundColor = categoryColor(category);
@@ -1482,6 +1528,17 @@
         )));
       }
 
+      // Opens a category of the month's detail and brings it into view; spending comes first in the list.
+      function openCategoryDetail(category) {
+        const detail = Array.from(document.querySelectorAll("#category-details details.category-detail"))
+          .find(node => node.dataset.category === category);
+        if (!detail) return;
+        hideTip();
+        detail.open = true;
+        detail.scrollIntoView({ behavior: "smooth", block: "start" });
+        detail.querySelector("summary").focus({ preventScroll: true });
+      }
+
       function renderCategoryDetails(items) {
         const host = $("#category-details");
         host.replaceChildren();
@@ -1521,6 +1578,7 @@
           });
           Array.from(groups).sort((a, b) => a[0].localeCompare(b[0], "es")).forEach(([category, rows]) => {
             const detail = el("details", "category-detail");
+            detail.dataset.category = category;
             const pending = rows.filter(tx => tx.decision == null).length;
             detail.append(el("summary", "", `${category} · ${totalOf(rows)} · ${rows.length} movimientos${pending ? ` · ${pending} por decidir` : ""}`));
             const body = el("div", "detail-rows");
@@ -1594,6 +1652,14 @@
         });
       }
 
+      // A bar of the year view opens its month; the table's month name does the same for keyboards.
+      function jumpToMonth(node, month) {
+        if (!safeArray(state.months).includes(month)) return;
+        node.classList.add("jump");
+        node.dataset.tip += " · toca para ver el mes";
+        node.addEventListener("click", () => goToMonth(month));
+      }
+
       // Income next to spending for each month, as in Manuela's yearly view.
       function renderYearIncomeChart(buckets, spendOf) {
         const host = $("#year-income-chart");
@@ -1625,6 +1691,7 @@
               width: barWidth, height: barHeight, fill: colors[position]
             });
             setTip(rect, `${monthLabel(bucket.month)} · ${name}: ${formatMoney(amount)}`);
+            jumpToMonth(rect, bucket.month);
             svg.append(rect);
           });
           const label = svgEl("text", { x: left + band * index + band / 2, y: height - 12, "text-anchor": "middle", class: "axis-label" });
@@ -1685,6 +1752,7 @@
                 fill: categoryColor(category)
               });
               setTip(rect, `${monthLabel(bucket.month)} · ${category}: ${formatMoney(amount)}`);
+              jumpToMonth(rect, bucket.month);
               svg.append(rect);
             }
             stackedHeight += segmentHeight;
@@ -1723,8 +1791,16 @@
               : coverage && coverage.status === "reviewed" ? "Revisado manualmente"
                 : coverage && coverage.status === "partial" ? "Parcial" : "Sin verificar";
           if (bucket.month < current && status !== "Revisado manualmente") elapsedUnverified.push(`${monthLabel(bucket.month)}: ${status.toLocaleLowerCase("es")}`);
+          const monthCell = el("td");
+          if (safeArray(state.months).includes(bucket.month)) {
+            const open = el("button", "link-button", monthLabel(bucket.month));
+            open.type = "button";
+            open.setAttribute("aria-label", `Ver ${monthLabel(bucket.month)} en la pestaña Mes`);
+            open.addEventListener("click", () => goToMonth(bucket.month));
+            monthCell.append(open);
+          } else monthCell.textContent = monthLabel(bucket.month);
           tr.append(
-            el("td", "", monthLabel(bucket.month)),
+            monthCell,
             el("td", "numeric", formatMoney(sum(bucket.personal))),
             el("td", "numeric", formatMoney(sum(bucket.family))),
             el("td", "numeric", bucket.third.length ? `−${formatMoney(sum(bucket.third))}` : formatMoney(0)),
@@ -1780,6 +1856,12 @@
         ));
         const pending = groupsOf(all.filter(tx => tx.decision == null));
         const pendingAmount = pending.reduce((total, entry) => total + entry.total, 0);
+        // Destinations to decide stay visible from any tab, as in Manuela's dashboard.
+        const badge = $("#decision-badge");
+        badge.textContent = String(pending.length);
+        badge.hidden = pending.length === 0;
+        $("#tab-decisions").setAttribute("aria-label", pending.length
+          ? `Decisión, ${pending.length} ${pending.length === 1 ? "destino" : "destinos"} por decidir` : "Decisión");
         $("#decision-summary").replaceChildren(
           el("span", "label", "Por decidir"),
           el("strong", "", String(pending.length)),
@@ -2103,6 +2185,8 @@
           $(buttonSelector).tabIndex = selected ? 0 : -1;
           $(panelSelector).hidden = !selected;
         });
+        hideTip();
+        if (tab === "month") requestAnimationFrame(centerSelectedMonth);
         syncUrl();
       }
 

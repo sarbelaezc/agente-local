@@ -529,6 +529,13 @@ El panel local ofrece:
   `Salud y farmacia`, `Transporte`, `Suscripciones`, `Mercado y tiendas` y `Otros gastos`.
   El panel no las precarga automáticamente.
   La lectura queda bloqueada sin completar este paso.
+- **Navegación:** titular y moneda arriba; debajo, las pestañas Mes, Año y
+  Decisión. La pestaña Decisión muestra cuántos destinos faltan por decidir del
+  titular elegido, desde cualquier pestaña. Los meses y la línea de cobertura del
+  mes solo aparecen en la pestaña Mes, debajo de las pestañas: Año tiene su propio
+  selector de año y Decisión muestra todos los meses. Los meses van en orden
+  cronológico con nombre corto (Ene, Feb…), el año solo donde cambia, y en el
+  celular la fila se desplaza sola hasta el mes elegido.
 - **Mes:** meses seleccionables y un resumen de cuatro cifras: **Gasto del mes**
   (con su reparto personal/familiar), **Ingresos**, **Balance** y **Por decidir**,
   que lleva a la pestaña Decisión. Lo que no es gasto (inversiones, pagos a
@@ -553,6 +560,8 @@ El panel local ofrece:
     Es solo una forma de mostrarlos: lo guardado conserva el texto del aviso.
   - Las cifras **Ingresos** y **Gasto del mes** despliegan «Ver los ingresos» y
     «Ver los abonos de terceros» con fecha, descripción, categoría y valor.
+  - Tocar una categoría en la dona o en su leyenda abre esa categoría en
+    **Detalle por categoría** y lleva hasta ella.
   **Detalle por categoría** separa gastos e inversiones, ingresos («confirmado»)
   y pagos de tarjeta («pagado»), e indica cuántos movimientos faltan por decidir.
 - Borrar una regla o descartar un aviso de la cola pide confirmación.
@@ -560,6 +569,8 @@ El panel local ofrece:
   enlace para saltar al contenido y muestra decisiones en tandas de hasta 50.
 - **Año:** comparativa mensual, promedios, mes de mayor gasto, categoría líder y
   tabla personal/familiar/pendiente. Los meses no conciliados llevan advertencia.
+  Tocar un mes en la tabla «Resumen por mes» o una barra de las gráficas abre la
+  pestaña Mes en ese mes.
 - **Decisión:** confirmar gasto personal, familiar o no contable y corregir categoría.
   Las decisiones se guardan en SQLite y pueden revisarse después. Reimportar no
   las reemplaza. Esta vista muestra todos los meses de la moneda seleccionada,
