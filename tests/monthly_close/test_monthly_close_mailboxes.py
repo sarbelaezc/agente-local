@@ -137,10 +137,15 @@ class DeltaGraph:
         self.requests: list[str] = []
         self.raw: dict[str, bytes] = {}
         self.closed = False
+        self.searches: list[dict | None] = []
+        self.searchable: set[str] = set()
 
     def get_json(self, url: str, params: dict | None = None) -> dict:
         validate_graph_url(url)
         self.requests.append(url)
+        if urlparse(url).path == "/v1.0/me/messages":  # search used to retry the review queue
+            self.searches.append(params)
+            return {"value": [message for message in self.messages if message["id"] in self.searchable]}
         path = urlparse(url).path.removeprefix("/v1.0/me/mailFolders").strip("/")
         if not path:
             return {"value": [
@@ -599,3 +604,76 @@ def test_incremental_mode_refuses_read_only_and_reprocessing(tmp_path, preferenc
         with pytest.raises(ValueError, match="incremental"):
             app.scan(store, tmp_path, graph_settings(), preferences, date(2026, 1, 1), date(2026, 2, 1),
                      incremental=True, **flags)
+
+
+# ---------------------------------------------------------------- review queue
+
+
+class InventingModel(Model):
+    """Proposes a merchant missing from the notice until told to stop."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.invent = True
+
+    def complete_json(self, system, user):
+        result = super().complete_json(system, user)
+        if self.invent:
+            result["events"][0]["merchant"] = "Inventado"
+        return result
+
+
+def test_incremental_runs_retry_queued_notices_that_graph_no_longer_reports(
+    tmp_path, preferences, monkeypatch, capsys,
+):
+    outlook = DeltaGraph()
+    outlook.messages = [row("o1", "2026-11-13T10:00:00Z")]
+    outlook.raw["o1"] = mime("o1", "Fri, 13 Nov 2026 10:00:03 +0000")
+    model = InventingModel()
+    monkeypatch.setattr(app, "silent_token", lambda *args: (lambda: "t"))
+    monkeypatch.setattr(app, "GraphClient", lambda token: outlook)
+    monkeypatch.setattr(app, "OllamaJsonModel", lambda *args: model)
+    monkeypatch.setattr(app, "require_model", lambda settings: None)
+    store = Store(tmp_path / "close.sqlite3")
+    store.configure(preferences.to_dict())
+    args = (store, tmp_path, graph_settings(), preferences, date(2026, 1, 1), date(2026, 11, 17))
+
+    app.scan(*args, incremental=True)
+    assert [item["sender"] for item in store.queued_failures()] == [SENDER]
+    assert store.state()["transactions"] == [] and outlook.searches == []
+
+    # Next run: Graph reports no change, yet the queued notice is found and read again.
+    model.invent = False
+    outlook.searchable = {"o1"}
+    app.scan(*args, incremental=True)
+    assert store.queued_failures() == []
+    assert [row["merchant"] for row in store.state()["transactions"]] == ["Tienda"]
+    [search] = outlook.searches
+    assert f"from/emailAddress/address eq '{SENDER}'" in search["$filter"]
+    assert "receivedDateTime ge 2026-11-13T09:45:03Z" in search["$filter"]
+    assert "Cola de revision: 1 aviso(s) leidos de nuevo" in capsys.readouterr().out
+
+    # Once imported, nothing is searched again.
+    app.scan(*args, incremental=True)
+    assert len(outlook.searches) == 1
+
+
+def test_gmail_finds_a_queued_notice_only_from_its_sender_near_its_time():
+    box = gmail_box()
+    reader = GmailSourceReader(box, [SENDER])
+    moment = datetime(2026, 11, 13, 15, 2, tzinfo=timezone.utc)
+    window = app.QUEUE_WINDOW
+    assert [c.item_id for c in reader.locate(SENDER, moment, window)] == ["g1"]
+    assert 'from:("avisos@example.test")' in box.queries[0]["q"] and "before:" in box.queries[0]["q"]
+    assert reader.locate(SENDER, moment.replace(hour=17), window) == []
+    with pytest.raises(ValueError):
+        reader.locate("otro@example.test", moment, window)
+
+
+def test_graph_search_answering_another_sender_stops():
+    outlook = DeltaGraph()
+    outlook.messages = [row("x", "2026-11-13T10:00:00Z", sender="otro@example.test")]
+    outlook.searchable = {"x"}
+    reader = GraphSourceReader(outlook, [SENDER])
+    with pytest.raises(OutlookError, match="otro remitente"):
+        reader.locate(SENDER, datetime(2026, 11, 13, 10, tzinfo=timezone.utc), app.QUEUE_WINDOW)

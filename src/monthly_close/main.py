@@ -367,7 +367,34 @@ def _walk(
 
         reports = reader.walk_changes(store.sync_state(box.name), since, settings["max_messages"], visit, save)
         store.prune_sync(box.name, saved)
+        retried = _retry_queue(store, reader, visit, failed_ids)
+        if retried:
+            reports.append({"folder": "Cola de revision", "rows": retried, "authorized": retried, "retried": True})
         return reports
+
+
+# Received header and list timestamps of the same notice differ by seconds; this
+# window finds it again without reading a day's worth of alerts.
+QUEUE_WINDOW = timedelta(minutes=15)
+
+
+def _retry_queue(store: Store, reader, visit, failed_ids: set[str]) -> int:
+    """Read again every queued notice of this mailbox: Graph and Gmail no longer report them.
+
+    A notice of another mailbox never matches, because its identity hashes its origin.
+    Each one goes through the same visit as a new notice and is imported, queued again
+    or skipped exactly as in a full run.
+    """
+    retried = 0
+    for failure in store.queued_failures():
+        if failure["message_id"] in failed_ids or failure["sender"] not in reader.approved_senders:
+            continue
+        received = datetime.fromisoformat(failure["received"])
+        for candidate in reader.locate(failure["sender"], received, QUEUE_WINDOW):
+            reader.active_folder = tuple(failure["folder"].split(" / "))
+            visit(candidate)
+            retried += 1
+    return retried
 
 
 def _report(
@@ -378,7 +405,7 @@ def _report(
         if failed_ids:
             print(
                 f"Recorrido finalizado con {len(failed_ids)} aviso(s) sin extraer. "
-                "Revisalos en Decision; cobertura parcial. Repite el rango para reintentarlos.",
+                "Revisalos en Decision; cobertura parcial. La siguiente ejecucion los reintenta.",
                 flush=True,
             )
     for report in reports:
@@ -386,6 +413,9 @@ def _report(
             "; corte al encontrar un aviso anterior al inicio"
             if report.get("stopped_before_start") else ""
         )
+        if report.get("retried"):
+            print(f"Cola de revision: {report['rows']} aviso(s) leidos de nuevo para reintentar su extraccion.")
+            continue
         if report.get("incremental"):
             cutoff += "; primera sincronizacion" if report.get("initial") else "; solo cambios desde la anterior"
         print(

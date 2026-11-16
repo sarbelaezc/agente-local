@@ -7,7 +7,7 @@ implementa.
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
-| Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); conciliación y tarea pendientes; [varios buzones](#varios-buzones-y-gmail-de-manuela) con Gmail de Manuela en solo lectura y [lectura incremental](#lectura-incremental) de Outlook y Gmail (implementado y probado con buzones simulados; **sin validar todavía con los buzones reales**) | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` / `scripts/agente-local.ps1 login -Mailbox manuela` |
+| Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); conciliación y tarea pendientes; [varios buzones](#varios-buzones-y-gmail-de-manuela) con Gmail de Manuela en solo lectura y [lectura incremental](#lectura-incremental) de Outlook y Gmail (implementado; validado con los buzones reales: inicio de sesión en Gmail, importación de Manuela y ejecuciones incrementales) | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` / `scripts/agente-local.ps1 login -Mailbox manuela` |
 
 ## Stack tecnológico
 
@@ -549,6 +549,13 @@ carpetas:
   (`syncStateNotFound` o `410`), o Gmail un `historyId` caducado (`404`), esa
   carpeta o ese buzón se sincroniza de nuevo desde cero. Cualquier otro error
   detiene la ejecución, como antes.
+- **Cola de revisión.** Graph y Gmail no vuelven a informar un aviso que ya
+  entregaron, así que al final de cada ejecución incremental se busca de nuevo
+  cada aviso de la cola: mismo remitente exacto y ±15 minutos alrededor de su
+  fecha, solo metadatos. El aviso pasa por el mismo proceso que uno nuevo: se
+  importa, vuelve a la cola o se omite si ya estaba procesado. La terminal
+  indica cuántos se leyeron de nuevo. Un aviso de otro buzón nunca coincide,
+  porque su identidad incluye el origen.
 - **Recorrido completo.** Con `-Start`/`-End`, con `-ReprocessEmpty` o con
   `-ReadOnly` se hace el recorrido completo de siempre. En Outlook incluye la
   comprobación de totales de cada carpeta. El modo incremental depende del
@@ -560,8 +567,11 @@ carpetas:
 
 **Estado.** Implementado y probado con Graph y Gmail simulados: primera
 sincronización, cambios, mensajes eliminados, enlaces caducados, límite de filas
-y conservación de la posición ante fallos. **No se ha validado todavía contra los
-buzones reales.**
+conservación de la posición ante fallos y reintento de la cola de revisión.
+Validado con los buzones reales el 2026-11-16: una primera sincronización (5 min,
+15 carpetas de Outlook y Gmail sin duplicar nada) y una segunda ejecución sin
+cambios (44 s, casi todo en la conciliación de extractos). Sin validar con datos
+reales: un `deltaLink` o un `historyId` caducados.
 
 ### Varios buzones y Gmail de Manuela
 
@@ -655,9 +665,12 @@ dinero, elige «No cuenta». Cada marca queda auditada como
 **Estado.** Implementado y probado con un Gmail simulado: listado por remitente,
 spam y papelera, exclusión de enviados, historial y su caducidad, validación
 MIME, identidad propia de los mensajes, lista blanca del host, permisos de solo
-lectura, día de corte, posibles duplicados y titular de lo importado. **Sin
-validar todavía con el Gmail real de Manuela**: faltan el cliente de Google, su
-inicio de sesión y el `scan -ReadOnly`.
+lectura, día de corte, posibles duplicados y titular de lo importado. Validado
+con el Gmail real de Manuela el 2026-11-16: cliente de Google en modo Testing,
+inicio de sesión, `scan -ReadOnly` (3 avisos, cotejados en Gmail web) y primera
+importación (desde el 14 de noviembre: un posible duplicado y una transferencia
+propia, ambos pendientes). **Pendiente:** cuánto dura la sesión (en Testing caduca
+a los 7 días) y si pasar la app a producción lo evita.
 
 El panel local ofrece:
 
@@ -1090,8 +1103,8 @@ el aviso no se importa ni se marca como
 procesado: se guardan solo identificador, carpeta, remitente, asunto, fecha y
 campo rechazado en la cola visible en **Decisión**, y el recorrido continúa con
 los demás avisos. El panel avisa de que faltan movimientos en los totales y no
-permite marcar ese mes como revisado. Repite el rango para reintentar los
-pendientes, o descártalos desde el panel si no traen nada que importar. Los
+permite marcar ese mes como revisado. Cualquier ejecución siguiente los
+reintenta, sea con rango o incremental, o descártalos desde el panel si no traen nada que importar. Los
 fallos de sesión, de Graph y las demás validaciones sí detienen la ejecución.
 
 Dos movimientos indistinguibles en un mismo correo detienen el escaneo sin

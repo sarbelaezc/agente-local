@@ -246,6 +246,15 @@ class Store:
             )
             self._audit(db, "extraction-pending", message_id, field)
 
+    def queued_failures(self) -> list[dict]:
+        """Notices waiting in the review queue, with the metadata needed to find them again."""
+        with self.connect() as db:
+            return [
+                dict(row) for row in db.execute(
+                    "SELECT message_id,sender,subject,received,folder FROM extraction_failures ORDER BY received",
+                )
+            ]
+
     def dismiss_failure(self, message_id: str) -> None:
         """A person reviewed a queued notice and decided it has nothing to import.
 

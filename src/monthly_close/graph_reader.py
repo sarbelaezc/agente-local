@@ -5,7 +5,7 @@ import binascii
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterator
 from urllib.parse import quote
 
@@ -322,6 +322,37 @@ class GraphSourceReader:
         if self.folders() != folders:
             raise OutlookError("El arbol de subcarpetas cambio durante el recorrido.")
         return reports
+
+    def locate(self, sender: str, received: datetime, window: timedelta) -> list[Candidate]:
+        """Authorized messages of one exact sender received around a moment, metadata only.
+
+        Used to retry a queued notice in incremental runs, where Graph no longer reports
+        it as a change. The caller compares the read identity with the queued one.
+        """
+        if not EMAIL.fullmatch(sender) or "'" in sender or sender not in self.approved_senders:
+            raise ValueError("Remitente invalido para buscar un aviso en cola.")
+        if received.tzinfo is None:
+            raise ValueError("La fecha del aviso en cola necesita zona horaria.")
+
+        def stamp(value: datetime) -> str:
+            return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        found = []
+        for message in self._pages(f"{GRAPH_ROOT}/me/messages", {
+            "$filter": (
+                f"receivedDateTime ge {stamp(received - window)} and receivedDateTime le {stamp(received + window)}"
+                f" and from/emailAddress/address eq '{sender}'"
+            ),
+            "$select": MESSAGE_FIELDS, "$top": PAGE_SIZE,
+        }):
+            if not isinstance(message.get("id"), str) or not message["id"]:
+                raise OutlookError("Falta identificador de mensaje en la busqueda.")
+            _timestamp(message.get("receivedDateTime"))
+            candidate = self._authorized(message)
+            if candidate is None or candidate.sender != sender:
+                raise OutlookError("Graph devolvio un correo de otro remitente al buscar un aviso en cola.")
+            found.append(candidate)
+        return found
 
     def candidate(self) -> Candidate:
         """Newest authorized notice among the latest messages of each folder."""

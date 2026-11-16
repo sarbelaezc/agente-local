@@ -236,6 +236,24 @@ class GmailSourceReader:
             report["initial"] = True
         return [report]
 
+    def locate(self, sender: str, received: datetime, window: timedelta) -> list[Candidate]:
+        """Authorized messages of one exact sender received around a moment, metadata only."""
+        if sender not in self.approved_senders:
+            raise ValueError("Remitente invalido para buscar un aviso en cola.")
+        if received.tzinfo is None:
+            raise ValueError("La fecha del aviso en cola necesita zona horaria.")
+        start, end = received - window, received + window
+        query = (
+            f'from:("{sender}") after:{int((start - QUERY_MARGIN).timestamp())}'
+            f" before:{int((end + QUERY_MARGIN).timestamp())}"
+        )
+        found = []
+        for stamp, message in self._candidates(list(self._ids(query)), start):
+            candidate = self._authorized(message) if stamp <= end else None
+            if candidate is not None and candidate.sender == sender:
+                found.append(candidate)
+        return found
+
     def checkpoint_key(self, candidate: Candidate) -> str:
         """Hash the list metadata of a notice; never persist message text."""
         received = self._received.get(candidate.item_id)
