@@ -1852,7 +1852,7 @@
             el("h4", "", itemText(failure.subject)),
             el("p", "", `${formatDate(failure.received)} · ${failure.sender}`),
             el("p", "", `Carpeta: ${failure.folder}`),
-            el("p", "hint", `Evidencia no literal: ${failure.field === "amount_text" ? "monto" : failure.field === "merchant" ? "comercio" : failure.field === "events" ? "el aviso indica una salida de dinero y no se extrajo" : failure.field}. Sin movimientos importados.`)
+            el("p", "hint", `Evidencia no literal: ${failure.field === "amount_text" ? "monto" : failure.field === "merchant" ? "comercio" : failure.field === "events" ? "el aviso indica una salida de dinero y no se extrajo" : failure.field === "correction" ? "la corrección cambió otros datos o eliminó movimientos" : failure.field}. Sin movimientos importados.`)
           );
           const dismiss = el("button", "button small danger", "Descartar aviso");
           dismiss.type = "button";

@@ -1084,7 +1084,9 @@ el texto del correo (ver «Evidencia literal del comercio»). Si falla la
 evidencia de comercio o monto, se registra una advertencia sin contenido
 financiero y se solicita **una sola corrección local** con el campo inválido y
 la propuesta previa; la corrección no puede eliminar movimientos ni cambiar
-otros campos. Si vuelve a fallar, el aviso no se importa ni se marca como
+otros campos. Si vuelve a fallar, o si la corrección elimina movimientos o
+cambia otros campos (campo `correction`, «la corrección cambió otros datos»),
+el aviso no se importa ni se marca como
 procesado: se guardan solo identificador, carpeta, remitente, asunto, fecha y
 campo rechazado en la cola visible en **Decisión**, y el recorrido continúa con
 los demás avisos. El panel avisa de que faltan movimientos en los totales y no

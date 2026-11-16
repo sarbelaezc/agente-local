@@ -11,7 +11,7 @@ import pytest
 
 from monthly_close import main as app
 from monthly_close.domain import Preferences, amount_minor, received_local
-from monthly_close.extraction import Mail, extract
+from monthly_close.extraction import EvidenceError, Mail, extract
 from monthly_close.main import months, scheduled_month
 from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.server import create_server
@@ -919,8 +919,10 @@ def test_evidence_correction_cannot_hide_or_change_a_movement(preferences, mail,
             updated = {"kind": "income"} if changes == "kind" else {"amount_text": "999"}
             return {"events": [{**self.event, **updated}]}
 
-    with pytest.raises(ValueError, match="cambio otros datos o elimino"):
+    # The failed correction is queued for review like any other evidence failure.
+    with pytest.raises(EvidenceError) as failure:
         extract(mail, preferences, ChangingModel())
+    assert failure.value.field == "correction"
 
 
 def test_source_code_in_email_remains_text(tmp_path, preferences, mail):
