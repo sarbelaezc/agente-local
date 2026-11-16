@@ -125,7 +125,7 @@ def test_scan_queues_invalid_evidence_continues_and_retries_without_losing_decis
                 visit(Candidate(identity, preferences.approved_senders[0], "Aviso"))
             return []
 
-    def extraction(mail, prefs, model):
+    def extraction(mail, prefs, model, own_accounts=None):
         chosen = Model(merchant="Inventado") if mail.id == "bad" and invalid[0] else Model()
         return extract(mail, prefs, chosen)
 
@@ -628,7 +628,7 @@ def test_reprocess_only_adds_to_notices_that_left_no_movement(tmp_path, preferen
     assert len(store.state()["transactions"]) == 1
 
 
-@pytest.mark.parametrize("kind", ["loan","card_payment", "rejected", "promotion", "verification"])
+@pytest.mark.parametrize("kind", ["card_payment", "rejected", "promotion", "verification"])
 def test_non_expenses_cannot_be_counted(tmp_path, preferences, mail, kind):
     store = Store(tmp_path / "test.sqlite3")
     events = extract(mail, preferences, Model(kind=kind))

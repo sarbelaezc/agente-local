@@ -20,8 +20,9 @@ import httpx
 from mail_invoices.local_model import LocalModelError, validate_local_url
 from mail_invoices.storage import data_root
 from monthly_close.model import OllamaJsonModel
-from monthly_close.domain import Preferences, received_local
-from monthly_close.extraction import EvidenceError, extract
+from monthly_close import statements as statements_module
+from monthly_close.domain import EMAIL, Preferences, received_local
+from monthly_close.extraction import EvidenceError, extract, income_category
 from monthly_close.graph_client import (
     AUTHORITIES, CACHE_NAME, CLIENT_ID, GraphClient, interactive_login, silent_token,
 )
@@ -246,7 +247,7 @@ def _walk(
                 return
             assert model is not None
             try:
-                proposals = extract(mail, preferences, model)
+                proposals = extract(mail, preferences, model, store.own_account_suffixes("santiago"))
             except EvidenceError as exc:
                 folder = " / ".join(reader.active_folder or ())
                 store.record_extraction_failure(
@@ -330,7 +331,7 @@ def run_pilot(store: Store, data_dir: Path, settings: dict, read_only: bool) -> 
         print("Piloto: aviso ya importado; se conservan las decisiones existentes.")
         return
     model = OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
-    proposals = extract(mail, preferences, model)
+    proposals = extract(mail, preferences, model, store.own_account_suffixes("santiago"))
     store.import_message(mail.id, proposals)
     for month in {event["day"][:7] for event in proposals}:
         store.coverage(month, "partial", "Piloto de un solo aviso; no representa el gasto del mes.")
@@ -401,6 +402,70 @@ def backfill_destinations(
     }
 
 
+STATEMENTS_FILE = "statements.json"
+
+
+def statement_settings(data_dir: Path) -> dict:
+    """Local statement settings: the PDF password and the exact approved senders.
+
+    The file lives in the local data folder, outside Git; its values are never printed.
+    """
+    path = data_dir / STATEMENTS_FILE
+    if not path.is_file():
+        raise ValueError(f"Falta {STATEMENTS_FILE} en la carpeta de datos local.")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    senders = raw.get("approved_senders") if isinstance(raw, dict) else None
+    if (
+        not isinstance(raw.get("password"), str) or not raw["password"]
+        or not isinstance(senders, list) or not senders
+        or any(not isinstance(item, str) or not EMAIL.fullmatch(item) for item in senders)
+    ):
+        raise ValueError(f"{STATEMENTS_FILE} necesita password y remitentes exactos aprobados.")
+    return {"password": raw["password"], "approved_senders": [item.lower() for item in senders]}
+
+
+def reconcile_statements(
+    store: Store, data_dir: Path, settings: dict, preferences: Preferences,
+    start: date, read_only: bool,
+) -> dict:
+    """Read Santiago's statements in memory, reconcile them and import what only they show.
+
+    Read-only mode reports without writing. Any statement that cannot be read exactly
+    stops the run: nothing is imported from a partial reading.
+    """
+    config = statement_settings(data_dir)
+    since = datetime.combine(start - timedelta(days=31), datetime.min.time(), ZoneInfo(preferences.timezone))
+    found: dict[str, statements_module.Statement] = {}
+    with open_source(data_dir, settings, preferences.approved_senders) as reader:
+        for sender in config["approved_senders"]:
+            for name, content in reader.statement_files(
+                sender, since, statements_module.FILE_NAME, statements_module.MAX_PDF_BYTES,
+            ):
+                match = statements_module.FILE_NAME.fullmatch(name)
+                if match["product"] not in statements_module.PRODUCTS or match["period"] < start.strftime("%Y%m"):
+                    continue
+                try:
+                    statement = statements_module.parse(
+                        match["product"], match["period"],
+                        statements_module.decrypt_text(content, config["password"]),
+                    )
+                except statements_module.StatementError as exc:
+                    raise ValueError(f"Extracto {match['product']} {match['period']}: {exc}") from exc
+                found.setdefault(statement.identity, statement)
+    report = statements_module.reconcile(list(found.values()), store.state()["transactions"], start)
+    events = [
+        statements_module.missing_event(
+            candidate, preferences.categories[-1], income_category(candidate.movement.description),
+        )
+        for candidate in report.missing
+    ]
+    imported = 0 if read_only else store.record_statements(report.checks(), events)
+    return {
+        "statements": len(found), "matched": len(report.matched), "missing": len(report.missing),
+        "imported": imported, "balances": sum(s.balance_minor is not None for s in found.values()),
+    }
+
+
 def run_member_import(store: Store, folder: Path) -> None:
     """Import Manuela's exported files and compare her monthly totals with her dashboard."""
     result = import_member(store, folder)
@@ -468,6 +533,17 @@ def run(args: argparse.Namespace) -> None:
             "Solo lectura del buzon; sin Ollama ni cambios de decisiones."
         )
         return
+    if args.command == "reconcile-statements":
+        start = date.fromisoformat(args.start) if args.start else date(now.year, 1, 1)
+        result = reconcile_statements(store, data_dir, settings, preferences, start, args.read_only)
+        print(
+            f"Extractos: {result['statements']} leidos desde {start.isoformat()}; "
+            f"{result['matched']} movimientos coinciden con los avisos, {result['missing']} faltaban; "
+            f"{result['balances']} saldos de inversiones y creditos. "
+            + ("Solo lectura: nada se importo." if args.read_only else
+               f"{result['imported']} importados como pendientes; decidelos en el panel.")
+        )
+        return
     if args.command == "check-config":
         if not preferences.approved_senders or settings.get("folder_scan_verified") is not True:
             raise ValueError("Faltan remitentes aprobados o recorrido de carpetas verificado.")
@@ -501,7 +577,7 @@ def main() -> None:
         "command",
         choices=[
             "serve", "login", "pilot", "scan", "summary", "scheduled", "check-config",
-            "import-manuela", "owner-account", "backfill-destinations",
+            "import-manuela", "owner-account", "backfill-destinations", "reconcile-statements",
         ],
     )
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
@@ -529,8 +605,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.reprocess_empty and (args.command != "scan" or args.read_only):
         parser.error("--reprocess-empty solo se permite con scan, sin --read-only.")
-    if args.read_only and args.command not in {"pilot", "scan"}:
-        parser.error("--read-only solo se permite con pilot o scan.")
+    if args.read_only and args.command not in {"pilot", "scan", "reconcile-statements"}:
+        parser.error("--read-only solo se permite con pilot, scan o reconcile-statements.")
     try:
         run(args)
     except KeyboardInterrupt:

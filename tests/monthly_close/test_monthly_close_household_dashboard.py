@@ -119,6 +119,26 @@ def test_between_members_mark_leaves_money_out_of_household_only(household):
     assert not errors
 
 
+def test_year_view_shows_income_for_each_member_and_household(household):
+    page, store, errors = household
+    store.import_message("s3", [{
+        "id": "s3", "message_id": "s3", "day": f"{MONTH}-15", "merchant": "EMPRESA SINTETICA",
+        "account": "Tarjeta A", "amount_minor": 300000, "currency": "COP", "category": "Nómina",
+        "kind": "income", "decision": "income", "reason": "Revisar.",
+    }])
+    store.import_external("manuela", "manuela", [member("m55555", 50000, "income", "income", category="Nómina")], {})
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.locator("#tab-year").click()
+    for owner, income in [("Hogar", r"3[.\s]?500,00"), ("Santiago", r"3[.\s]?000,00"), ("Manuela", r"\b500,00")]:
+        choose(page, owner)
+        metric = page.locator("#year-metrics .metric").filter(has_text="Ingresos del año").inner_text()
+        assert re.search(income, metric), (owner, metric)
+        assert page.locator("#year-income-chart rect").count() >= 1, owner
+        assert re.search(income, page.locator("#year-table").inner_text()), owner
+    assert not errors
+
+
 def test_destination_card_decides_every_pending_payment_with_audit(household):
     page, store, errors = household
     page.locator("#tab-decisions").click()

@@ -13,7 +13,9 @@ KINDS = {
 }
 INCOME_CATEGORIES = ["Nómina", "Transferencia recibida", "Consignación", "Otros ingresos"]
 INCOME_KINDS = {"income", "transfer", "unknown"}  # kinds a person may confirm as income
-NON_EXPENSES = {"loan", "card_payment", "rejected", "promotion", "verification"}
+# A loan instalment counts as spending once a person decides it (personal or family).
+NON_EXPENSES = {"card_payment", "rejected", "promotion", "verification"}
+LOAN_DECISIONS = {"personal", "family", "exclude"}
 # Household members; existing records belong to the first one.
 OWNERS = {"santiago": "Santiago", "manuela": "Manuela"}
 HOUSEHOLD = "hogar"
@@ -158,6 +160,8 @@ def received_local(value: str, timezone: str) -> datetime:
 def decision_reason(kind: str, account: str, savings: bool, preferences: Preferences) -> str:
     if kind in NON_EXPENSES:
         return "No es gasto: " + kind
+    if kind == "loan":
+        return "Cuota de credito: confirma si es gasto personal o familiar."
     if kind == "income":
         return "Dinero recibido: confirma si cuenta como ingreso o es un traslado propio."
     if account in preferences.excluded_accounts or kind == "own_transfer":
