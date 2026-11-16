@@ -22,7 +22,16 @@ RETRYABLE = {429, 500, 502, 503, 504}
 
 
 class GraphError(OutlookError):
-    """Graph failure; subclasses OutlookError so the CLI stops the same way."""
+    """Graph failure; subclasses OutlookError so the CLI stops the same way.
+
+    status and code describe the API answer (never message content), so a reader can
+    tell an expired sync state from any other failure.
+    """
+
+    def __init__(self, message: str, status: int | None = None, code: str = "") -> None:
+        super().__init__(message)
+        self.status = status
+        self.code = code
 
 
 def validate_graph_url(url: str) -> str:
@@ -44,18 +53,28 @@ def _retry_after(response) -> float:
         return 5.0
 
 
-def _describe(response) -> str:
-    """Graph error code and message; these describe the API call, never message content."""
+def _error_fields(response) -> tuple[str, str]:
+    """API error code and message; these describe the API call, never message content."""
     try:
         error = response.json().get("error", {})
-        code, text = str(error.get("code", "")), str(error.get("message", ""))
+        return str(error.get("code", "")), str(error.get("message", ""))
     except (ValueError, AttributeError):
-        code, text = "", ""
-    return f"Graph respondio {response.status_code}" + (f" ({code}: {text[:200]})" if code or text else ".")
+        return "", ""
 
 
 class GraphClient:
-    """Minimal read-only Graph client: GET only, bounded retries, host allow-list."""
+    """Minimal read-only API client: GET only, bounded retries, host allow-list.
+
+    Subclasses for another mailbox API replace the allow-list, the error type and the
+    service name; the bearer token never leaves the allow-listed host.
+    """
+
+    service = "Graph"
+    error: type[GraphError] = GraphError
+
+    @staticmethod
+    def validate(url: str) -> str:
+        return validate_graph_url(url)
 
     def __init__(
         self, token: Callable[[], str], http: httpx.Client | None = None,
@@ -70,7 +89,7 @@ class GraphClient:
         self._http.close()
 
     def _get(self, url: str, params: dict | None):
-        validate_graph_url(url)
+        self.validate(url)
         for attempt in range(self._retries + 1):
             try:
                 response = self._http.get(
@@ -81,22 +100,27 @@ class GraphClient:
                 if attempt < self._retries:
                     self._sleep(5.0 * (attempt + 1))
                     continue
-                raise GraphError("No se pudo contactar con Microsoft Graph.") from exc
+                raise self.error(f"No se pudo contactar con {self.service}.") from exc
             if response.status_code in RETRYABLE and attempt < self._retries:
                 self._sleep(_retry_after(response))
                 continue
             break
         if response.status_code != 200:
-            raise GraphError(_describe(response))
+            code, text = _error_fields(response)
+            raise self.error(
+                f"{self.service} respondio {response.status_code}"
+                + (f" ({code}: {text[:200]})" if code or text else "."),
+                response.status_code, code,
+            )
         return response
 
     def get_json(self, url: str, params: dict | None = None) -> dict:
         try:
             data = self._get(url, params).json()
         except ValueError as exc:
-            raise GraphError("Graph devolvio una respuesta que no es JSON.") from exc
+            raise self.error(f"{self.service} devolvio una respuesta que no es JSON.") from exc
         if not isinstance(data, dict):
-            raise GraphError("Graph devolvio una respuesta JSON inesperada.")
+            raise self.error(f"{self.service} devolvio una respuesta JSON inesperada.")
         return data
 
     def get_bytes(self, url: str) -> bytes:

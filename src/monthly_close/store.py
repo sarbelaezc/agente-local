@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS scan_progress (
     scope TEXT NOT NULL, item TEXT NOT NULL, status TEXT NOT NULL,
     PRIMARY KEY (scope, item)
 );
+CREATE TABLE IF NOT EXISTS mailbox_sync (
+    mailbox TEXT NOT NULL, folder TEXT NOT NULL, token TEXT NOT NULL,
+    PRIMARY KEY (mailbox, folder)
+);
 CREATE TABLE IF NOT EXISTS coverage (
     month TEXT PRIMARY KEY, status TEXT NOT NULL, note TEXT NOT NULL
 );
@@ -81,6 +85,11 @@ SPECIAL_CATEGORIES = {
     "cash_withdrawal": "Retiro en efectivo",
 }
 
+
+# A mailbox movement that may repeat one the same member already brought by file import.
+# It stays pending, and no rule decides it: a person compares both.
+DUPLICATE_NOTE = "Posible duplicado"
+NOT_DUPLICATE = f"(note IS NULL OR note NOT LIKE '{DUPLICATE_NOTE}%')"
 
 # Movements of a notice that a reprocessing run must leave alone: everything except
 # card payments the model guessed before they were read from the bank's fixed sentence.
@@ -263,8 +272,65 @@ class Store:
                 (message_id, message_id),
             ).fetchone() is not None
 
-    def import_message(self, message_id: str, events: list[dict], reprocess: bool = False) -> None:
+    def sync_state(self, mailbox: str) -> dict[str, str]:
+        """Saved incremental position of a mailbox, per folder (or Gmail history)."""
+        with self.connect() as db:
+            return {
+                row["folder"]: row["token"]
+                for row in db.execute("SELECT folder,token FROM mailbox_sync WHERE mailbox=?", (mailbox,))
+            }
+
+    def save_sync(self, mailbox: str, folder: str, token: str) -> None:
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO mailbox_sync VALUES (?,?,?)
+                ON CONFLICT(mailbox,folder) DO UPDATE SET token=excluded.token""",
+                (mailbox, folder, token),
+            )
+
+    def prune_sync(self, mailbox: str, keep: set[str]) -> None:
+        """Forget the position of folders that no longer exist."""
+        with self.connect() as db:
+            for row in db.execute("SELECT folder FROM mailbox_sync WHERE mailbox=?", (mailbox,)).fetchall():
+                if row["folder"] not in keep:
+                    db.execute("DELETE FROM mailbox_sync WHERE mailbox=? AND folder=?", (mailbox, row["folder"]))
+
+    def last_import_day(self, owner: str) -> str | None:
+        """Last day covered by the member's file import (import-manuela), if any."""
+        owner = owner_id(owner)
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT max(day) AS day FROM transactions WHERE owner=? AND message_id LIKE ?",
+                (owner, f"{owner}-import:%"),
+            ).fetchone()
+        return row["day"]
+
+    @staticmethod
+    def _mark_possible_duplicates(db: sqlite3.Connection, owner: str, events: list[dict]) -> list[dict]:
+        """Leave pending, with a note, movements matching a file-imported one of that member."""
+        marked = []
+        for event in events:
+            twin = db.execute(
+                """SELECT id FROM transactions WHERE owner=? AND day=? AND amount_minor=?
+                AND currency=? AND message_id LIKE ? LIMIT 1""",
+                (owner, event["day"], event["amount_minor"], event["currency"], f"{owner}-import:%"),
+            ).fetchone()
+            if twin is None:
+                marked.append(event)
+                continue
+            marked.append({
+                **event, "decision": None,
+                "note": f"{DUPLICATE_NOTE} del movimiento importado del {event['day']} con el mismo valor: "
+                        "si es el mismo dinero, elige No cuenta",
+            })
+            Store._audit(db, "mailbox-possible-duplicate", event["id"], twin["id"])
+        return marked
+
+    def import_message(
+        self, message_id: str, events: list[dict], reprocess: bool = False, owner: str = "santiago",
+    ) -> None:
         """Import once per notice; reprocess only adds to a notice that left no movement."""
+        owner = owner_id(owner)
         with self.connect() as db:
             if db.execute("SELECT 1 FROM processed WHERE message_id=?", (message_id,)).fetchone() and (
                 not reprocess or db.execute(KEPT, (message_id,)).fetchone()
@@ -275,14 +341,14 @@ class Store:
             ).rowcount
             if replaced:
                 self._audit(db, "reprocess-replace-card-payments", message_id, str(replaced))
-            for event in events:
+            for event in self._mark_possible_duplicates(db, owner, events):
                 db.execute(
                     """INSERT INTO transactions (
                     id,message_id,day,merchant,account,amount_minor,currency,
-                    category,kind,decision,reason,group_key,time,note) VALUES (
+                    category,kind,decision,reason,group_key,time,note,owner) VALUES (
                     :id,:message_id,:day,:merchant,:account,:amount_minor,:currency,
-                    :category,:kind,:decision,:reason,:group_key,:time,:note)""",
-                    {"group_key": None, "time": None, "note": None, **event},
+                    :category,:kind,:decision,:reason,:group_key,:time,:note,:owner)""",
+                    {"group_key": None, "time": None, "note": None, **event, "owner": owner},
                 )
                 db.execute(
                     """UPDATE coverage SET status='partial',
@@ -338,7 +404,8 @@ class Store:
         with self.connect() as db:
             pending = db.execute(
                 """SELECT id,merchant,kind FROM transactions
-                WHERE decision IS NULL AND kind IN ('purchase','income') AND id NOT LIKE 'stmt:%'""",
+                WHERE decision IS NULL AND kind IN ('purchase','income') AND id NOT LIKE 'stmt:%'
+                AND """ + NOT_DUPLICATE,
             ).fetchall()
         decided = 0
         for row in pending:
@@ -369,7 +436,7 @@ class Store:
             if not rules:
                 return 0
             pending = db.execute(
-                "SELECT * FROM transactions WHERE decision IS NULL AND id NOT LIKE 'stmt:%'",
+                "SELECT * FROM transactions WHERE decision IS NULL AND id NOT LIKE 'stmt:%' AND " + NOT_DUPLICATE,
             ).fetchall()
         decided = 0
         for row in pending:

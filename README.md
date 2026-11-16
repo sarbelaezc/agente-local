@@ -7,13 +7,14 @@ implementa.
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
-| Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); conciliación y tarea pendientes | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` |
+| Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); conciliación y tarea pendientes; [varios buzones](#varios-buzones-y-gmail-de-manuela) con Gmail de Manuela en solo lectura y [lectura incremental](#lectura-incremental) de Outlook y Gmail (implementado y probado con buzones simulados; **sin validar todavía con los buzones reales**) | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` / `scripts/agente-local.ps1 login -Mailbox manuela` |
 
 ## Stack tecnológico
 
 - **Python 3.12 o posterior**; empaquetado con `setuptools` y dependencias declaradas en `pyproject.toml`.
 - **Playwright para Python** automatiza Opera para facturas y ejecuta las pruebas gráficas del panel. El cierre mensual no controla ningún navegador.
-- **Microsoft Graph con `msal`** (solo lectura, permiso `Mail.Read`) lee el buzón del cierre mensual.
+- **Microsoft Graph con `msal`** (solo lectura, permiso `Mail.Read`) lee el buzón de Outlook del cierre mensual.
+- **API de Gmail con `google-auth-oauthlib`** (solo lectura, permiso `gmail.readonly`) lee el buzón de Gmail de Manuela, si está configurado. La librería solo gestiona el inicio de sesión y la renovación del token; las consultas usan `httpx`.
 - **Una instancia local de Ollama compartida por facturas y cierre mensual** en `127.0.0.1:11434`; `scripts/agente-local.ps1` la inicia cuando un comando la necesita y no está activa, con el almacén de modelos predeterminado de Ollama.
 - **Facturas:** `openpyxl` para Excel, `defusedxml` para XML, `pypdf` para PDF con texto, y `pypdfium2` más `Pillow` para renderizar PDF escaneados.
 - **Tkinter y SQLite** de la biblioteca estándar para interfaces y persistencia local; **pytest** para pruebas.
@@ -90,9 +91,9 @@ Sustituye a `run-monthly-close.ps1`, `import-monthly-close.ps1` y
 | Comando | Qué hace | Ollama |
 |---|---|---|
 | `serve` (predeterminado) | Panel local del cierre mensual | No |
-| `login` | Inicio de sesión manual del buzón | No |
+| `login [-Mailbox <buzón>]` | Inicio de sesión manual de un buzón (por defecto el Outlook de Santiago; `-Mailbox manuela` para su Gmail) | No |
 | `check-config` | Comprueba el paso 0 y la configuración | No |
-| `scan` / `pilot` | Recorrido o piloto de un aviso | Sí, salvo con `-ReadOnly` |
+| `scan` / `pilot` | Recorrido de todos los buzones configurados (sin fechas, [incremental](#lectura-incremental); con `-Start`/`-End`, completo) o piloto de un aviso del Outlook de Santiago | Sí, salvo con `-ReadOnly` |
 | `import` | `check-config`, `scan` y apertura del panel | Sí |
 | `summary -Month AAAA-MM [-Owner santiago\|manuela\|hogar]` | Resumen de un mes (por defecto de Santiago) | No |
 | `import-manuela [-SourceDir <carpeta>]` | Importa los movimientos de Manuela desde `.local\ImportManuela` y compara sus totales | No |
@@ -154,8 +155,10 @@ directamente desde la raíz del repositorio:
 ### Alcance y reglas
 
 Función con datos y flujo separados de facturas; comparte únicamente la
-instancia local de Ollama con facturas. No requiere conector de Gmail. Lee el
-buzón con Microsoft Graph, en solo lectura, y usa un cliente local de Ollama con
+instancia local de Ollama con facturas. No usa el conector de Gmail de Claude ni
+ningún servicio de IA externo. Lee el Outlook de Santiago con Microsoft Graph y,
+si está configurado, el Gmail de Manuela con la API de Gmail, ambos en solo
+lectura, y usa un cliente local de Ollama con
 JSON Schema propio, sin mezclar el contexto ni la persistencia de los otros
 features. No envía correos, mueve mensajes, los marca como leídos ni modifica
 libros de facturas. Solo lee adjuntos para los extractos PDF de remitentes
@@ -172,9 +175,11 @@ El panel reúne las finanzas de Santiago y de Manuela en una sola base
 (`close.sqlite3`) y distingue siempre de quién es cada movimiento.
 
 **Alcance.** Cada movimiento tiene un titular (`owner`: `santiago` o `manuela`).
-Los de Manuela entran solo por archivo con `import-manuela`; no hay conexión a su
-buzón, API ni navegador. El escáner de Graph y Ollama sigue leyendo únicamente el
-buzón de Santiago, y todo lo que importa queda como de Santiago.
+Los de Manuela hasta su último día exportado entran por archivo con
+`import-manuela`. Desde ese día, si su Gmail está configurado, el escáner lo lee
+en solo lectura con el mismo Ollama local y lo que importa queda a nombre de
+Manuela (ver [Varios buzones y Gmail de Manuela](#varios-buzones-y-gmail-de-manuela)).
+El Outlook de Santiago sigue importando a nombre de Santiago.
 
 **Migración.** Al abrir una base anterior, el agente copia `close.sqlite3` a
 `close.sqlite3.backup-<fecha UTC>` y añade las columnas `owner` (por defecto
@@ -517,6 +522,142 @@ de carpetas, `scan -ReadOnly` (2026-11-14: 15 carpetas, 8303 filas de metadatos,
 1716 de remitentes autorizados, totales coincidentes) e importaciones reales de
 2026 con Ollama. Las pruebas usan un Graph simulado: recorrido, instantánea,
 cortes por fecha, errores, cliente HTTP, autenticación y un escaneo completo.
+
+### Lectura incremental
+
+Sin `-Start` ni `-End`, `scan`, `import` y la tarea programada leen solo lo que
+cambió desde la ejecución anterior, en lugar de listar de nuevo todas las
+carpetas:
+
+- **Outlook.** Por cada carpeta del alcance se guarda el `deltaLink` de la
+  [consulta delta de Graph](https://learn.microsoft.com/en-us/graph/api/message-delta?view=graph-rest-1.0).
+  La primera sincronización lista la carpeta completa, sin filtro de fecha,
+  porque Graph limita a 5.000 mensajes una consulta delta filtrada. Los avisos
+  anteriores al inicio se descartan con los metadatos del listado, sin abrirlos.
+  Los mensajes borrados o movidos (`@removed`) se ignoran.
+- **Gmail.** Se guarda el `historyId` del buzón. Las siguientes ejecuciones
+  piden al historial solo los mensajes añadidos. El `historyId` se lee antes del
+  listado completo, así un correo que llegue mientras tanto se vuelve a ver y no
+  se pierde.
+- **Inicio.** La primera vez se lee desde el 1 de enero del año local, o desde
+  el último día importado por archivo si ese titular tiene uno. Después no hay
+  fecha de fin: se procesa todo lo nuevo, también del mes en curso.
+- **Fallos.** La posición de cada carpeta se guarda en la tabla local
+  `mailbox_sync` solo después de procesar todos sus avisos. Si algo falla, la
+  siguiente ejecución repite esos cambios, y los avisos ya importados se omiten
+  por `Message-ID`. Si Graph rechaza un `deltaLink` caducado
+  (`syncStateNotFound` o `410`), o Gmail un `historyId` caducado (`404`), esa
+  carpeta o ese buzón se sincroniza de nuevo desde cero. Cualquier otro error
+  detiene la ejecución, como antes.
+- **Recorrido completo.** Con `-Start`/`-End`, con `-ReprocessEmpty` o con
+  `-ReadOnly` se hace el recorrido completo de siempre. En Outlook incluye la
+  comprobación de totales de cada carpeta. El modo incremental depende del
+  protocolo de sincronización de Graph y Gmail y no repite esa comprobación;
+  para demostrar la cobertura de un rango, usa el recorrido completo.
+- `max_messages` limita también las filas posteriores al inicio de cada
+  sincronización. Una primera sincronización grande puede necesitar un valor
+  mayor.
+
+**Estado.** Implementado y probado con Graph y Gmail simulados: primera
+sincronización, cambios, mensajes eliminados, enlaces caducados, límite de filas
+y conservación de la posición ante fallos. **No se ha validado todavía contra los
+buzones reales.**
+
+### Varios buzones y Gmail de Manuela
+
+`runtime.json` admite una lista `mailboxes`. Sin ella, el agente lee únicamente
+el Outlook de Santiago, como antes. Ejemplo con el Gmail de Manuela:
+
+```json
+{
+  "graph_client_id": "<Application (client) ID>",
+  "folder_scan_verified": true,
+  "mailboxes": [
+    {"name": "santiago", "provider": "graph", "owner": "santiago"},
+    {"name": "manuela", "provider": "gmail", "owner": "manuela", "verified": false}
+  ]
+}
+```
+
+| Clave | Significado |
+|---|---|
+| `name` | Nombre del buzón (minúsculas); se usa en `login -Mailbox` y en el estado incremental. |
+| `provider` | `graph` (Outlook) o `gmail`. |
+| `owner` | `santiago` o `manuela`: titular de todo lo que se importa desde ese buzón. |
+| `verified` | Solo Gmail. `true` tras revisar `scan -ReadOnly`; mientras sea `false` se bloquea cualquier importación. Outlook sigue usando `folder_scan_verified`. |
+| `token_cache` | Opcional. Archivo de sesión en la carpeta de datos (por defecto `graph_token_cache.bin` y `gmail_token_<name>.json`). |
+| `client_secrets` | Opcional, solo Gmail. Cliente OAuth descargado de Google (por defecto `gmail_client_secret.json`). |
+| `origin` | Opcional. Entra en el hash de identidad de cada mensaje (por defecto `outlook.live.com` y `mail.google.com`). No lo cambies después de importar. |
+| `accounts`, `excluded_accounts` | Opcional. Alias de cuentas de ese titular para Ollama; si faltan, se usan los del paso 0. |
+
+El Outlook de Santiago (`provider` `graph`, `owner` `santiago`) es obligatorio.
+Los extractos, el piloto y `backfill-destinations` siguen leyendo solo ese buzón.
+Los remitentes autorizados son los mismos del paso 0 para todos los buzones.
+
+**Crear el cliente de Google (una sola vez, con la cuenta de Manuela o la tuya).**
+En console.cloud.google.com:
+
+1. Crea un proyecto y habilita la **Gmail API**.
+2. En la pantalla de consentimiento de OAuth elige tipo **Externo** y añade a
+   Manuela como usuaria de prueba.
+3. En Credenciales, crea un **ID de cliente de OAuth** de tipo **App de
+   escritorio** y descarga el JSON como
+   `.local\MonthlyCloseAgent\gmail_client_secret.json`. No lo subas a Git.
+
+Con la app en estado **Testing**, Google emite tokens de renovación que
+[caducan a los 7 días](https://developers.google.com/identity/protocols/oauth2#expiration),
+así que Manuela tendría que volver a iniciar sesión cada semana. Al pasarla a
+**In production** sin verificar, Google muestra la pantalla de app no verificada
+y limita la app a 100 usuarios. La documentación de Google no aclara si eso basta
+para el permiso `gmail.readonly` en uso personal: **está pendiente de comprobar**
+al configurarla.
+
+**Sesión.** Manuela inicia sesión en su navegador. El agente nunca ve su
+contraseña:
+
+```powershell
+.\scripts\agente-local.ps1 login -Mailbox manuela
+```
+
+Si Google concede cualquier permiso distinto de `gmail.readonly`, la sesión no
+se guarda. El token queda en `.local\MonthlyCloseAgent\gmail_token_manuela.json`
+(dato sensible, fuera de Git; borrarlo cierra la sesión). El token de acceso
+solo se envía a `gmail.googleapis.com/gmail/v1/users/me/`; cualquier otro
+destino detiene la ejecución. La renovación del token habla con el servidor
+OAuth de Google a través de `google-auth`. `scan` y la tarea programada nunca
+abren un navegador: si la sesión falta o venció, se detienen y piden `login`.
+
+**Validar antes de importar.** Con `verified: false`:
+
+```powershell
+.\scripts\agente-local.ps1 scan -ReadOnly -Start 2026-11-01 -End 2026-12-01
+```
+
+Para cada buzón muestra cuántos mensajes listó y cuántos son de remitentes
+autorizados. Solo lee metadatos (`From`, `Subject`, etiquetas y fecha), sin abrir
+mensajes ni usar Ollama. Revísalo y cambia `verified` a `true`.
+
+**Cómo se lee Gmail.** Se buscan los mensajes con `from:` de los remitentes
+exactos aprobados, incluidos Spam y Papelera, y se descartan los enviados y los
+borradores. El remitente del encabezado debe coincidir exactamente. El origen
+MIME (`format=raw`) pasa por las mismas validaciones que Outlook (`parse_source`)
+y por la misma extracción con Ollama local, validada con evidencia literal y con
+la misma cola de revisión. No se leen adjuntos.
+
+**Día de corte y posibles duplicados.** El Gmail de Manuela empieza en el último
+día que trae su importación por archivo, ese día incluido. Un movimiento del
+buzón con el mismo día, importe y moneda que uno importado por archivo del mismo
+titular entra **pendiente**, con la nota «Posible duplicado…». Ninguna regla por
+comercio ni por destino lo decide: lo compara una persona y, si es el mismo
+dinero, elige «No cuenta». Cada marca queda auditada como
+`mailbox-possible-duplicate`.
+
+**Estado.** Implementado y probado con un Gmail simulado: listado por remitente,
+spam y papelera, exclusión de enviados, historial y su caducidad, validación
+MIME, identidad propia de los mensajes, lista blanca del host, permisos de solo
+lectura, día de corte, posibles duplicados y titular de lo importado. **Sin
+validar todavía con el Gmail real de Manuela**: faltan el cliente de Google, su
+inicio de sesión y el `scan -ReadOnly`.
 
 El panel local ofrece:
 
@@ -876,8 +1017,10 @@ con pruebas del almacén, de los endpoints del panel y del formulario en Chromiu
    programada en su hora de cierre. Antes de leer el buzón verifican que el
    modelo exista; no lo descargan. La inferencia usa únicamente loopback, sin
    proxies ni herramientas para el modelo.
-7. Importa de enero al mes anterior con `scan` sin fechas, o indica
-   `-Start` y `-End` (fin exclusivo). Ejemplo:
+7. Importa con `scan` sin fechas: la primera vez lee desde enero y después
+   solo lo nuevo (ver [Lectura incremental](#lectura-incremental)). Para el
+   recorrido completo de un rango, indica `-Start` y `-End` (fin exclusivo).
+   Ejemplo:
 
    ```powershell
    .\scripts\agente-local.ps1 scan -Start 2026-01-01 -End 2026-11-01
@@ -898,7 +1041,8 @@ con pruebas del almacén, de los endpoints del panel y del formulario en Chromiu
    Los mensajes ya importados no se duplican por `Message-ID`, incluso si
    aparecen en otra carpeta. Si una ejecución falla, conserva lo ya importado
    como parcial; puedes repetirla sin sobrescribir decisiones. Pulsa Actualizar
-   en el panel. Para el mes vivo, incluye sus fechas explícitamente.
+   en el panel. En el recorrido completo, el mes vivo requiere sus fechas
+   explícitas; el incremental ya lo incluye.
 
 ### Importación masiva desde una terminal de Windows
 
@@ -921,8 +1065,9 @@ Desde **CMD** o **Git Bash**:
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File scripts\agente-local.ps1 import -Start 2026-01-01 -End 2026-11-01
 ```
 
-El fin es exclusivo. Sin fechas importa desde enero del año local hasta el mes
-anterior. Usa `-End 2026-11-03` para incluir el 2 de noviembre.
+El fin es exclusivo. Usa `-End 2026-11-03` para incluir el 2 de noviembre. Sin
+fechas, la importación es [incremental](#lectura-incremental): la primera vez
+desde enero del año local y después solo lo nuevo, mes en curso incluido.
 
 **Reanudación.** Las ejecuciones interrumpidas guardan un punto de reanudación
 en la tabla local `scan_progress`: huellas SHA-256 de carpeta, identificador y
@@ -968,7 +1113,8 @@ panel (existente, iniciado por el script o puerto ocupado por otra página).
 Cada mes importado se marca **parcial/sin conciliar**, aunque no haya avisos. Nunca
 se certifica completitud contando correos. Se recorren Entrada, Spam, Eliminados y
 Dinero con todos sus descendientes directamente; no se afirma cobertura de otras carpetas ni de mensajes ya borrados
-por retención. Compara los totales con
+por retención. En Gmail se buscan los remitentes aprobados en todo el buzón,
+Spam y Papelera incluidos. Compara los totales con
 extractos: el sistema no tiene una API bancaria
 ni puede saber cuánto cobró una tarjeta sin datos adicionales.
 La revisión manual del panel conserva una nota de conciliación. Movimientos

@@ -28,6 +28,8 @@ MESSAGE_FIELDS = "id,subject,from,receivedDateTime"
 PAGE_SIZE = 100
 PILOT_WINDOW = 50
 SNAPSHOT_ATTEMPTS = 3
+# A saved delta link Graph no longer accepts; the folder is synchronised again from scratch.
+SYNC_EXPIRED_CODES = {"syncStateNotFound", "syncStateInvalid", "resyncRequired"}
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,21 @@ def _timestamp(value: object) -> datetime:
     if stamp.tzinfo is None:
         raise OutlookError("La fecha de recepcion de Graph no trae zona horaria.")
     return stamp
+
+
+def _merge_delta(rows: dict[str, dict], values: object) -> None:
+    """Apply one delta page: removed messages leave, replayed ones keep their last version."""
+    if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
+        raise GraphError("Respuesta delta no reconocida.")
+    for item in values:
+        identifier = item.get("id")
+        if not isinstance(identifier, str) or not identifier:
+            raise OutlookError("Falta identificador de mensaje en la respuesta delta.")
+        if "@removed" in item:
+            rows.pop(identifier, None)
+            continue
+        _timestamp(item.get("receivedDateTime"))
+        rows[identifier] = item
 
 
 class GraphSourceReader:
@@ -221,6 +238,86 @@ class GraphSourceReader:
             report = {"folder": folder.label, "rows": rows, "authorized": authorized}
             if stopped_before_start:
                 report["stopped_before_start"] = True
+            reports.append(report)
+        if self.folders() != folders:
+            raise OutlookError("El arbol de subcarpetas cambio durante el recorrido.")
+        return reports
+
+    def _delta_rows(self, folder: Folder, link: str | None) -> tuple[list[dict], str]:
+        """One complete delta round for a folder: changed messages and the next delta link.
+
+        Without a saved link this is the initial round, which lists the whole folder.
+        No date filter is sent: Graph caps a filtered delta at 5,000 messages, so the
+        date cut happens locally on list metadata. Removed items are ignored and a
+        replayed message keeps its last version.
+        """
+        url = link or self._folder_url(folder.id, "messages/delta")
+        params: dict | None = None if link else {"$select": MESSAGE_FIELDS}
+        rows: dict[str, dict] = {}
+        while True:
+            data = self.client.get_json(url, params)
+            params = None
+            values, next_link, delta = data.get("value"), data.get("@odata.nextLink"), data.get("@odata.deltaLink")
+            _merge_delta(rows, values)
+            if isinstance(next_link, str) and delta is None:
+                url = next_link
+            elif isinstance(delta, str) and next_link is None:
+                return list(rows.values()), delta
+            else:
+                raise GraphError("Respuesta delta sin un enlace de continuacion reconocible.")
+
+    def _folder_changes(self, folder: Folder, link: str | None) -> tuple[list[dict], str, bool]:
+        """Changes since the saved link; an expired link restarts that folder from scratch."""
+        if link is None:
+            return (*self._delta_rows(folder, None), True)
+        try:
+            return (*self._delta_rows(folder, link), False)
+        except GraphError as exc:
+            if not (exc.status == 410 or exc.code in SYNC_EXPIRED_CODES):
+                raise
+        return (*self._delta_rows(folder, None), True)
+
+    def walk_changes(
+        self, state: dict[str, str], since: datetime, limit: int,
+        visit: Callable[[Candidate], bool | None], save: Callable[[str, str], None],
+    ) -> list[dict]:
+        """Visit authorized messages that arrived or changed since the saved delta links.
+
+        Each folder's new delta link is saved only after all its notices were visited,
+        so a failure repeats that folder's changes next time instead of losing them.
+        Messages received before since are not visited.
+        """
+        if since.tzinfo is None:
+            raise ValueError("La fecha inicial necesita zona horaria.")
+        if type(limit) is not int or limit < 1:
+            raise ValueError("El limite de filas debe ser positivo.")
+        folders = self.folders()
+        reports: list[dict] = []
+        examined = 0
+        for folder in folders:
+            self.active_folder = folder.path
+            link = state.get(folder.id)
+            rows, delta, initial = self._folder_changes(folder, link)
+            recent = sorted(
+                (row for row in rows if _timestamp(row["receivedDateTime"]) >= since),
+                key=lambda row: _timestamp(row["receivedDateTime"]),
+            )
+            examined += len(recent)
+            if examined > limit:
+                raise OutlookError(
+                    "Limite total de filas alcanzado; recorrido parcial, no se omiten carpetas."
+                )
+            authorized = 0
+            for message in recent:
+                candidate = self._authorized(message)
+                if candidate is None:
+                    continue
+                authorized += 1
+                visit(candidate)
+            save(folder.id, delta)
+            report = {"folder": folder.label, "rows": len(recent), "authorized": authorized, "incremental": True}
+            if initial:
+                report["initial"] = True
             reports.append(report)
         if self.folders() != folders:
             raise OutlookError("El arbol de subcarpetas cambio durante el recorrido.")

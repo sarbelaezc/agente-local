@@ -1022,9 +1022,10 @@ def test_scheduled_close_persists_self_contained_summary(tmp_path, preferences, 
 
     monkeypatch.setattr(app, "datetime", Clock)
     monkeypatch.setattr(app, "runtime", lambda path: {})
-    monkeypatch.setattr(app, "scan", lambda *args: scanned.append(args))
+    monkeypatch.setattr(app, "scan", lambda *args, **kwargs: scanned.append(args + (kwargs,)))
     app.run(Namespace(data_dir=tmp_path, command="scheduled"))
-    assert scanned[0][-2:] == (date(2028, 2, 1), date(2028, 3, 1))
+    # The closing hour reads only what changed since the previous run.
+    assert scanned[0][-3:] == (date(2028, 2, 1), date(2028, 3, 1), {"incremental": True})
     assert "Cierre 2028-02" in (tmp_path / "last-close.txt").read_text(encoding="utf-8")
 
 

@@ -9,6 +9,7 @@ import os
 import sys
 import traceback
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterator
@@ -25,10 +26,14 @@ from monthly_close import statements as statements_module
 from monthly_close.domain import EMAIL, Preferences, received_local
 from monthly_close.extraction import EvidenceError, extract, income_category
 from monthly_close.graph_client import (
-    AUTHORITIES, CACHE_NAME, CLIENT_ID, GraphClient, interactive_login, silent_token,
+    AUTHORITIES, CLIENT_ID, GraphClient, interactive_login, silent_token,
 )
 from monthly_close.destinations import assign_destinations
-from monthly_close.graph_reader import DEFAULT_ORIGIN, GraphSourceReader
+from monthly_close.graph_reader import GraphSourceReader
+from monthly_close import gmail_client
+from monthly_close.gmail_client import GmailClient
+from monthly_close.gmail_reader import GmailSourceReader
+from monthly_close.mailboxes import Mailbox, find, load_mailboxes, primary_graph
 from monthly_close.household_import import PARITY_FILE, import_member, parity_report
 from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.server import create_server
@@ -66,20 +71,42 @@ def runtime(data_dir: Path) -> dict:
         raise ValueError("max_messages debe estar entre 1 y 10000.")
     if not isinstance(raw.get("ollama_model"), str) or not raw["ollama_model"].strip():
         raise ValueError("Configura ollama_model.")
+    primary_graph(load_mailboxes(raw))  # validates the mailbox list; Santiago's Outlook is required
     return raw
 
 
 @contextmanager
-def open_source(data_dir: Path, settings: dict, approved_senders: list[str]) -> Iterator:
-    """Read-only mailbox reader over Microsoft Graph, using the saved session."""
-    client = GraphClient(silent_token(
-        settings["graph_client_id"], settings.get("graph_authority", "consumers"), data_dir / CACHE_NAME,
-    ))
+def open_source(
+    data_dir: Path, settings: dict, approved_senders: list[str], mailbox: Mailbox | None = None,
+) -> Iterator:
+    """Read-only reader of one mailbox (Santiago's Outlook by default), using its saved session."""
+    box = mailbox or primary_graph(load_mailboxes(settings))
+    if box.provider == "gmail":
+        client = GmailClient(gmail_client.silent_token(data_dir / box.token_cache))
+        reader = GmailSourceReader(client, approved_senders, box.origin)
+    else:
+        client = GraphClient(silent_token(
+            settings["graph_client_id"], settings.get("graph_authority", "consumers"), data_dir / box.token_cache,
+        ))
+        # The origin keeps message identifiers stable, so imported notices are not repeated.
+        reader = GraphSourceReader(client, approved_senders, box.origin)
     try:
-        # DEFAULT_ORIGIN keeps message identifiers stable, so imported notices are not repeated.
-        yield GraphSourceReader(client, approved_senders, DEFAULT_ORIGIN)
+        yield reader
     finally:
         client.close()
+
+
+def login(data_dir: Path, settings: dict, name: str | None) -> str:
+    """Interactive sign-in for one mailbox; the person types the password in the browser."""
+    box = find(load_mailboxes(settings), name)
+    if box.provider == "gmail":
+        assert box.client_secrets is not None
+        account = gmail_client.interactive_login(data_dir / box.client_secrets, data_dir / box.token_cache)
+        return f"Sesion de Google guardada para {account} (buzon {box.name}). Permiso: solo lectura de Gmail."
+    account = interactive_login(
+        settings["graph_client_id"], settings.get("graph_authority", "consumers"), data_dir / box.token_cache,
+    )
+    return f"Sesion de Microsoft guardada para {account}. Permiso: solo lectura de correo."
 
 
 def months(start: date, end: date) -> list[str]:
@@ -158,11 +185,26 @@ class _ClearProgress(logging.Filter):
 def scan(
     store: Store, data_dir: Path, settings: dict, preferences: Preferences,
     start: date, end: date, read_only: bool = False, reprocess_empty: bool = False,
+    incremental: bool = False,
 ) -> None:
+    """Read every configured mailbox; incremental reads only what changed since last time.
+
+    An incremental run ignores end: everything new since the saved position is read,
+    and start only bounds a mailbox's first synchronisation.
+    """
+    boxes = load_mailboxes(settings)
+    if incremental and (read_only or reprocess_empty):
+        raise ValueError("El recorrido incremental no admite solo lectura ni reprocesar avisos.")
     if not read_only and settings.get("folder_scan_verified") is not True:
         raise ValueError(
             "Recorrido de carpetas no verificado. Ejecuta scan --read-only y valida "
             "Entrada, Spam, Eliminados y Dinero con todas sus subcarpetas antes de habilitarlo."
+        )
+    unverified = [box.name for box in boxes if not box.verified]
+    if not read_only and unverified:
+        raise ValueError(
+            "Buzones sin recorrido verificado: " + ", ".join(unverified)
+            + ". Ejecuta scan --read-only, revisa el resultado y marca verified en runtime.json."
         )
     if not preferences.approved_senders:
         raise ValueError("Aprueba primero los remitentes exactos en el panel.")
@@ -178,13 +220,44 @@ def scan(
                 "Otras carpetas y avisos borrados no estan cubiertos.",
             )
     model = None if read_only else OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
+    mode = ScanMode(read_only, reprocess_empty, incremental)
+    for box in boxes:
+        box_start = mailbox_start(store, box, start)
+        if len(boxes) > 1:
+            print(f"Buzon {box.name} ({box.provider}, titular {box.owner}) desde {box_start.isoformat()}.", flush=True)
+        if box_start >= end:
+            print("Sin dias por leer en este buzon para el rango pedido.", flush=True)
+            continue
+        _scan_mailbox(store, data_dir, settings, box, preferences, box_start, end, mode, model)
+
+
+@dataclass(frozen=True)
+class ScanMode:
+    read_only: bool
+    reprocess_empty: bool
+    incremental: bool
+
+
+def mailbox_start(store: Store, box: Mailbox, start: date) -> date:
+    """A member whose movements came by file starts on the last imported day, included.
+
+    Movements of that day that match an imported one stay pending as possible duplicates.
+    """
+    last = store.last_import_day(box.owner)
+    return max(start, date.fromisoformat(last)) if last else start
+
+
+def _scan_mailbox(
+    store: Store, data_dir: Path, settings: dict, box: Mailbox, preferences: Preferences,
+    start: date, end: date, mode: ScanMode, model,
+) -> None:
     scope = hashlib.sha256(json.dumps(
         [start.isoformat(), end.isoformat(), settings, preferences.to_dict()]
         # A reprocessing run keeps its own resume points and never reuses a normal run's.
-        + (["reprocess-empty"] if reprocess_empty else []),
+        + (["reprocess-empty"] if mode.reprocess_empty else [])
+        + ([box.name] if box.name != "santiago" else []) + (["incremental"] if mode.incremental else []),
         sort_keys=True, ensure_ascii=False,
     ).encode()).hexdigest()
-    received_ids: set[str] = set()
     failed_ids: set[str] = set()
     progress = Progress(start, end)
     clear_progress = _ClearProgress(progress)
@@ -192,21 +265,23 @@ def scan(
     extraction_log.addFilter(clear_progress)
     try:
         reports = _walk(
-            store, data_dir, settings, preferences, start, end, read_only, reprocess_empty,
-            model, scope, received_ids, failed_ids, progress,
+            store, data_dir, settings, box, box.preferences(preferences), start, end,
+            mode, model, scope, failed_ids, progress,
         )
     finally:
         progress.clear()
         extraction_log.removeFilter(clear_progress)
-    _report(store, scope, reports, failed_ids, read_only)
+    _report(store, scope, reports, failed_ids, mode.read_only)
 
 
 def _walk(
-    store: Store, data_dir: Path, settings: dict, preferences: Preferences,
-    start: date, end: date, read_only: bool, reprocess_empty: bool, model,
-    scope: str, received_ids: set[str], failed_ids: set[str], progress: Progress,
+    store: Store, data_dir: Path, settings: dict, box: Mailbox, preferences: Preferences,
+    start: date, end: date, mode: ScanMode, model,
+    scope: str, failed_ids: set[str], progress: Progress,
 ) -> list[dict]:
-    with open_source(data_dir, settings, preferences.approved_senders) as reader:
+    read_only, reprocess_empty = mode.read_only, mode.reprocess_empty
+    received_ids: set[str] = set()
+    with open_source(data_dir, settings, preferences.approved_senders, box) as reader:
 
         def visit(candidate: Candidate) -> bool | None:
             if candidate.sender not in preferences.approved_senders:
@@ -234,8 +309,11 @@ def _walk(
                 getattr(reader, "active_folder", None), local_day, counted=start <= local_day < end,
             )
             if local_day < start:
+                if mode.incremental:
+                    store.scan_checkpoint(scope, checkpoint, "complete")
+                    return None
                 return False
-            if local_day >= end:
+            if local_day >= end and not mode.incremental:
                 store.scan_checkpoint(scope, checkpoint, "complete")
                 return
             if mail.id in failed_ids:
@@ -249,8 +327,11 @@ def _walk(
             assert model is not None
             try:
                 proposals = extract(
-                    mail, preferences, model, store.own_account_suffixes("santiago"),
-                    [{"suffix": c.suffix, "name": c.name} for c in credit_ledger.load_configs(data_dir)],
+                    mail, preferences, model, store.own_account_suffixes(box.owner),
+                    [
+                        {"suffix": c.suffix, "name": c.name}
+                        for c in credit_ledger.load_configs(data_dir) if c.owner == box.owner
+                    ],
                 )
             except EvidenceError as exc:
                 folder = " / ".join(reader.active_folder or ())
@@ -269,11 +350,24 @@ def _walk(
                     flush=True,
                 )
                 return
-            store.import_message(mail.id, proposals, reprocess=reprocess_empty)
+            store.import_message(mail.id, proposals, reprocess=reprocess_empty, owner=box.owner)
             received_ids.add(mail.id)
             store.scan_checkpoint(scope, checkpoint, "complete")
 
-        return reader.walk_folders(settings["max_messages"], visit)
+        since = datetime.combine(start, datetime.min.time(), ZoneInfo(preferences.timezone))
+        if not mode.incremental:
+            # Outlook folders are cut by visit (newest first); Gmail also narrows its listing.
+            extra = {"since": since} if box.provider == "gmail" else {}
+            return reader.walk_folders(settings["max_messages"], visit, **extra)
+        saved: set[str] = set()
+
+        def save(folder: str, token: str) -> None:
+            store.save_sync(box.name, folder, token)
+            saved.add(folder)
+
+        reports = reader.walk_changes(store.sync_state(box.name), since, settings["max_messages"], visit, save)
+        store.prune_sync(box.name, saved)
+        return reports
 
 
 def _report(
@@ -292,6 +386,8 @@ def _report(
             "; corte al encontrar un aviso anterior al inicio"
             if report.get("stopped_before_start") else ""
         )
+        if report.get("incremental"):
+            cutoff += "; primera sincronizacion" if report.get("initial") else "; solo cambios desde la anterior"
         print(
             f"{report['folder']}: {report['rows']} filas verificadas; "
             f"{report['authorized']} de remitentes autorizados{cutoff}."
@@ -605,10 +701,7 @@ def run(args: argparse.Namespace) -> None:
         run_pilot(store, data_dir, settings, args.read_only)
         return
     if args.command == "login":
-        account = interactive_login(
-            settings["graph_client_id"], settings.get("graph_authority", "consumers"), data_dir / CACHE_NAME,
-        )
-        print(f"Sesion de Microsoft guardada para {account}. Permiso: solo lectura de correo.")
+        print(login(data_dir, settings, getattr(args, "mailbox", None)))
         return
     if args.command == "backfill-destinations":
         result = backfill_destinations(store, data_dir, settings, preferences)
@@ -640,19 +733,24 @@ def run(args: argparse.Namespace) -> None:
         start = date.fromisoformat(closing_month + "-01")
         end = now.date() + timedelta(days=1)
         # A completed scan is idempotent and human choices survive every run.
-        scan(store, data_dir, settings, preferences, start, end)
+        scan(store, data_dir, settings, preferences, start, end, incremental=True)
         run_complements(store, data_dir, settings, preferences, start)
         summary = store.summary(closing_month)
         (data_dir / "last-close.txt").write_text(summary + "\n", encoding="utf-8")
         print(summary)
         return
+    # Without dates, a normal scan reads only what changed since the last one (delta).
+    incremental = not (args.start or args.end or args.read_only or args.reprocess_empty)
     start = date.fromisoformat(args.start) if args.start else date(now.year, 1, 1)
-    end = date.fromisoformat(args.end) if args.end else now.date().replace(day=1)
+    if args.end:
+        end = date.fromisoformat(args.end)
+    else:
+        end = now.date() + timedelta(days=1) if incremental else now.date().replace(day=1)
     if start >= end:
         raise ValueError("Usa --start y --end (fin exclusivo); el rango debe contener dias.")
     scan(
         store, data_dir, settings, preferences, start, end,
-        read_only=args.read_only, reprocess_empty=args.reprocess_empty,
+        read_only=args.read_only, reprocess_empty=args.reprocess_empty, incremental=incremental,
     )
     if not args.read_only:
         run_complements(store, data_dir, settings, preferences, start)
@@ -678,6 +776,7 @@ def main() -> None:
         help="Con summary, titular u hogar (por defecto santiago); con owner-account, titular.",
     )
     parser.add_argument("--suffix", help="Con owner-account, ultimos cuatro digitos de la cuenta.")
+    parser.add_argument("--mailbox", help="Con login, nombre del buzon de runtime.json (por defecto Outlook de Santiago).")
     parser.add_argument("--from", dest="source_category", help="Con merge-category, categoria que desaparece.")
     parser.add_argument("--to", dest="target_category", help="Con merge-category, categoria que la recibe.")
     parser.add_argument("--port", type=int, default=8766)
@@ -695,6 +794,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.reprocess_empty and (args.command != "scan" or args.read_only):
         parser.error("--reprocess-empty solo se permite con scan, sin --read-only.")
+    if args.mailbox and args.command != "login":
+        parser.error("--mailbox solo se permite con login.")
     if args.read_only and args.command not in {"pilot", "scan", "reconcile-statements"}:
         parser.error("--read-only solo se permite con pilot, scan o reconcile-statements.")
     try:
