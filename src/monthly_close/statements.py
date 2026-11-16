@@ -104,7 +104,8 @@ def _hint(description: str, outflow: bool) -> str:
         return "investment" if outflow else "investment_withdrawal"
     if re.search(r"traslado de fondo", text):
         return "investment_withdrawal"
-    if re.search(r"tarjeta|abono sucursal|pago tc|pago tarj", text):
+    # "PAGO SUC VIRT TC MASTER DOLAR": paying a card's dollar balance from savings.
+    if re.search(r"tarjeta|abono sucursal|pago tc|pago tarj|\btc\b", text):
         return "card_payment"
     if re.search(r"credito|prestamo|hipotec", text) and outflow:
         return "loan"
@@ -182,7 +183,9 @@ def parse_card(product: str, text: str, period: str) -> Statement:
         amount = _co_amount(match["amount"])
         day_text = match["day"]
         day = date(int(day_text[6:]), int(day_text[3:5]), int(day_text[:2]))
-        description = re.sub(r"^\d{4,}\s+", "", match["desc"])
+        # The bank glues a reference to the merchant ("ABONO SUCURSAL VIRTUALC24280");
+        # without it, payments to the same merchant group together.
+        description = re.sub(r"\s*[A-Z]?\d{5,}$", "", re.sub(r"^\d{4,}\s+", "", match["desc"])) or match["desc"]
         key = (day, description, amount, currency)
         if key in seen:
             continue  # the PDF repeats some rows across its three columns
@@ -244,12 +247,13 @@ def _first(lines: list[str], pattern: str) -> re.Match | None:
 def parse_consumer_credit(text: str) -> Statement:
     lines = _lines(text)
     number = _first(lines, r"obligacion\s+\S+\s*:\s*(\d{4,})")
-    cut = _first(lines, r"fecha corte extracto (\d{1,2})/(\d{1,2})/(\d{4})")
+    # Month first: the cut-off dates of consecutive statements read 1/05, 2/05, 3/05...
+    cut = _first(lines, r"fecha corte extracto (?P<month>\d{1,2})/(?P<day>\d{1,2})/(?P<year>\d{4})")
     total = _first(lines, r"^total ([\d,]*\.\s?\d{2}) ([\d,]*\.\s?\d{2})$")
     balance = _first(lines, r"saldo de capital (-?[\d,]*\.\s?\d{2})")
     if not number or not cut or not total or not balance:
         raise StatementError("Extracto de crédito con formato no reconocido.")
-    end = date(int(cut[3]), int(cut[2]), int(cut[1]))
+    end = date(int(cut["year"]), int(cut["month"]), int(cut["day"]))
     statement = Statement("CREDITO", number[1][-4:], end.replace(day=1), end, balance_minor=_us_amount(balance[1]))
     paid = _us_amount(total[1])  # "abono anterior": what was paid since the last statement
     if paid:

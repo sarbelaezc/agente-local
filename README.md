@@ -289,6 +289,29 @@ avisos, como Manuela contrastaba los suyos.
   como no había ninguno importado, los totales anteriores no cambian.
 - **Solo lectura.** `-ReadOnly` informa la conciliación sin escribir nada.
 
+**Frases fijas del banco sin Ollama.** Además del pago de tarjeta y la
+transferencia a cuenta, se leen sin el modelo tres frases más:
+
+| Frase del aviso | Resultado |
+|---|---|
+| «NOMBRE hizo un abono por $X a tu tarjeta de crédito terminada en *N» | Pago a tarjeta pendiente: «Abono de tercero» si pagó otra persona, «No cuenta» si fuiste tú; nunca ingreso |
+| «transferiste $X a la llave K desde tu cuenta *N a NOMBRE» | Transferencia a NOMBRE, con la llave y la hora; nunca ingreso |
+| «recibiste una transferencia de NOMBRE por $X» | Ingreso pendiente con el nombre de quien envía |
+
+Al modelo se le indica que «transferiste» o «pagaste» nunca es ingreso, que el
+comercio es el destinatario nombrado y no «Bancolombia», y cuáles son las
+cuentas propias registradas (`owner-account -Owner santiago`). Una transferencia a
+una cuenta propia queda como `own_transfer`.
+
+**Tasa USD sugerida.** Un movimiento USD pendiente puede llevar una tasa sugerida
+(por ejemplo, el promedio de las tasas que asignaste ese mes). Queda guardada y
+auditada como `exchange-suggested`, aparece en el campo de tasa del panel y solo se
+usa cuando una persona decide el movimiento.
+
+**Ingresos en la vista Año.** Muestra los ingresos del año, ingresos − gastos, una
+gráfica mensual de ingresos frente a gastos y las columnas Ingresos y Balance en el
+resumen por mes, para Santiago, Manuela y Hogar.
+
 **Estilo del panel.** El panel conjunto sigue el estilo del panel de Manuela:
 paleta, letra redondeada, pestañas y chips en píldora, cifras grandes, colores
 fijos por categoría y calendario con intensidad por día. Usa dos columnas en

@@ -137,3 +137,66 @@ def test_backfill_reads_notices_again_without_changing_decisions(preferences, tm
     assert rows["b"]["group_key"] is None and rows["c"]["group_key"] is None
     again = app.backfill_destinations(store, tmp_path, {"max_messages": 100}, preferences)
     assert again["updated"] == 0
+
+
+class NoModel:
+    def complete_json(self, system, user):
+        raise AssertionError("Esta frase fija no se envia a Ollama.")
+
+
+def notice(body: str) -> Mail:
+    return Mail("m-fixed", "avisos@example.test", "Alertas", RECEIVED, body)
+
+
+def test_card_abono_by_someone_else_is_a_card_payment_never_income(preferences):
+    events = extract(notice(
+        "Bancolombia: PERSONA FICTICIA hizo un abono por $482,000 a tu tarjeta de credito "
+        "terminada en **1234, el 11/04/2026 11:23."
+    ), preferences, NoModel())
+    assert [(e["kind"], e["merchant"], e["amount_minor"], e["day"], e["time"], e["decision"]) for e in events] == [
+        ("card_payment", "Abono de PERSONA FICTICIA a la tarjeta *1234", 48200000, "2026-04-11", "11:23", None),
+    ]
+
+
+def test_transfer_to_a_key_keeps_the_recipient_and_is_never_income(preferences):
+    events = extract(notice(
+        "Bancolombia: USUARIO, transferiste $69,244.00 a la llave @ficticia547 desde tu cuenta *0001 "
+        "a PERSONA DE PRUEBA el 06/05/26 a las 11:19."
+    ), preferences, NoModel())
+    event = events[0]
+    assert (event["kind"], event["merchant"], event["day"], event["time"]) == (
+        "transfer", "PERSONA DE PRUEBA", "2026-05-06", "11:19",
+    )
+    assert (event["group_key"], event["note"]) == ("bb:@ficticia547", "Bre-B a la llave @ficticia547")
+
+
+def test_received_transfer_is_income_with_its_sender(preferences):
+    events = extract(notice(
+        "Bancolombia: USUARIO, recibiste una transferencia de PERSONA FICTICIA por $17,000.00 en tu "
+        "cuenta *0001 conectada a la llave 3000000000 el 02/11/26 a las 12:26."
+    ), preferences, NoModel())
+    assert [(e["kind"], e["merchant"], e["category"], e["amount_minor"]) for e in events] == [
+        ("income", "PERSONA FICTICIA", "Transferencia recibida", 1700000),
+    ]
+
+
+def test_transfer_to_an_own_registered_account_is_an_own_transfer(preferences):
+    mail = notice("Transferiste $800,000.00 desde tu cuenta 0001 a la cuenta *3000005586 el 09/07/2026 a las 16:50.")
+    assert extract(mail, preferences, NoModel())[0]["kind"] == "transfer"
+    event = extract(mail, preferences, NoModel(), ["5586"])[0]
+    assert (event["kind"], event["group_key"]) == ("own_transfer", "tr:5586")
+
+
+def test_suggested_rate_prefills_pending_usd_without_deciding(preferences, tmp_path):
+    store = Store(tmp_path / "close.sqlite3")
+    store.configure(preferences.to_dict())
+    store.import_message("u1", [{**santiago_row("u1", 1234, kind="purchase"), "currency": "USD"}])
+    store.suggest_exchange_rate("u1", "3700", "promedio de tasas del mes")
+    row = store.state()["transactions"][0]
+    assert (row["decision"], row["exchange_rate"], row["cop_amount_minor"]) == (None, "3700", 4565800)
+    store.decide("u1", "personal", "Compras")  # the person decides; the suggested rate is used
+    assert store.state()["transactions"][0]["cop_amount_minor"] == 4565800
+    with pytest.raises(ValueError, match="pendientes"):
+        store.suggest_exchange_rate("u1", "3800", "otra")
+    with pytest.raises(ValueError):
+        store.suggest_exchange_rate("u1", "-1", "invalida")

@@ -247,7 +247,7 @@ def _walk(
                 return
             assert model is not None
             try:
-                proposals = extract(mail, preferences, model)
+                proposals = extract(mail, preferences, model, store.own_account_suffixes("santiago"))
             except EvidenceError as exc:
                 folder = " / ".join(reader.active_folder or ())
                 store.record_extraction_failure(
@@ -331,7 +331,7 @@ def run_pilot(store: Store, data_dir: Path, settings: dict, read_only: bool) -> 
         print("Piloto: aviso ya importado; se conservan las decisiones existentes.")
         return
     model = OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
-    proposals = extract(mail, preferences, model)
+    proposals = extract(mail, preferences, model, store.own_account_suffixes("santiago"))
     store.import_message(mail.id, proposals)
     for month in {event["day"][:7] for event in proposals}:
         store.coverage(month, "partial", "Piloto de un solo aviso; no representa el gasto del mes.")

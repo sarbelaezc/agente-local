@@ -66,6 +66,15 @@ No emitas eventos sin un monto explicito. Si no hay ninguno, devuelve events vac
 approved_notice_examples contiene ejemplos ficticios aprobados para interpretar
 la estructura del aviso. No son movimientos reales ni evidencia de este correo.
 
+"Transferiste", "enviaste" o "pagaste" es dinero que SALE de la cuenta: nunca es
+income, aunque el aviso nombre a una persona. Si el aviso dice a quien se envio
+("a la llave X ... a NOMBRE" o "a la cuenta *N"), merchant es ese NOMBRE o esa
+cuenta literal, no "Bancolombia". "NOMBRE hizo un abono a tu tarjeta" es
+card_payment, nunca income ni compra. "Compraste ... en COMERCIO" es purchase
+aunque el comercio se llame "INVERSIONES ..." u otra palabra financiera.
+Si la cuenta destino termina en uno de own_account_suffixes, es una cuenta propia
+del usuario: usa kind own_transfer.
+
 Comprobacion final obligatoria: un pago o abono a la deuda de una tarjeta de
 credito NO es una compra. Si identificaste card_payment, no lo incluyas en events,
 ni una ni varias veces, aunque encaje en varias categorias. Si el correo solo
@@ -91,18 +100,29 @@ class EvidenceError(ValueError):
         )
 
 
-def extract(mail: Mail, preferences: Preferences, model: JsonModel) -> list[dict]:
-    """Extract evidence-backed proposals; no model proposal is a human approval."""
+def extract(
+    mail: Mail, preferences: Preferences, model: JsonModel, own_accounts: list[str] | None = None,
+) -> list[dict]:
+    """Extract evidence-backed proposals; no model proposal is a human approval.
+
+    own_accounts are the last four digits of the person's own accounts (for example a
+    Nequi wallet), so the model can recognise a transfer between them.
+    """
     if mail.sender.lower() not in preferences.approved_senders:
         raise ValueError("Remitente no autorizado. No se envia contenido a Ollama.")
     received = received_local(mail.received, preferences.timezone)
     body = clean_text(mail.body, 40000)
     source = mail.subject + "\n" + body
-    fixed = _card_payments(mail, preferences, source) or _account_transfers(mail, preferences, source)
+    fixed = (
+        _card_payments(mail, preferences, source) or _account_transfers(mail, preferences, source)
+        or _card_abonos(mail, preferences, source) or _key_transfers(mail, preferences, source)
+        or _received_transfers(mail, preferences, source)
+    )
     if fixed:
-        return assign_destinations(fixed, source)
+        return _mark_own_transfers(assign_destinations(fixed, source), own_accounts)
     context = {
         "accounts": preferences.accounts,
+        "own_account_suffixes": sorted(own_accounts or []),
         "excluded_accounts": preferences.excluded_accounts,
         "categories": preferences.categories,
         "income_categories": INCOME_CATEGORIES,
@@ -147,7 +167,7 @@ def extract(mail: Mail, preferences: Preferences, model: JsonModel) -> list[dict
                 # The notice says money left the account but the model returned nothing:
                 # never drop it silently, a person reviews it.
                 raise EvidenceError("events")
-            return assign_destinations(proposals, source)
+            return _mark_own_transfers(assign_destinations(proposals, source), own_accounts)
         except EvidenceError as exc:
             if exc.field == "events":
                 raise
@@ -257,6 +277,114 @@ def _account_transfers(mail: Mail, preferences: Preferences, source: str) -> lis
             "reason": "Transferencia a otra cuenta leida del aviso, sin Ollama. "
             "Confirma si es gasto, familiar o no cuenta.",
         }
+    return list(proposals.values())
+
+
+def _mark_own_transfers(events: list[dict], own_accounts: list[str] | None) -> list[dict]:
+    """A transfer to one of the person's own accounts is money moved, not spent."""
+    own = set(own_accounts or [])
+    for event in events:
+        key = event.get("group_key") or ""
+        if event["kind"] == "transfer" and key.startswith("tr:") and key[3:] in own:
+            event["kind"] = "own_transfer"
+            event["reason"] = "Transferencia a una cuenta tuya registrada: confirma que no cuenta."
+    return events
+
+
+def _notice_day(text: str) -> str:
+    """'06/05/26', '06/05/2026' or '2026/05/06' as an ISO date."""
+    if re.fullmatch(r"\d{4}/\d{2}/\d{2}", text):
+        return datetime.strptime(text, "%Y/%m/%d").date().isoformat()
+    return datetime.strptime(text, "%d/%m/%y" if len(text) == 8 else "%d/%m/%Y").date().isoformat()
+
+
+def _fixed_event(mail: Mail, preferences: Preferences, source: str, merchant: str, amount: str,
+                 day: str, kind: str, category: str, reason: str,
+                 time: str | None = None, note: str | None = None) -> tuple[str, dict]:
+    merchant = clean_text(merchant, 150)
+    minor = amount_minor(amount)
+    currency = notice_currency(source, preferences.currency)
+    identity = json.dumps([day, merchant, "Desconocida", minor, currency], ensure_ascii=False)
+    identifier = hashlib.sha256((mail.id + "\n" + identity).encode()).hexdigest()
+    return identifier, {
+        "id": identifier, "message_id": mail.id, "day": day, "merchant": merchant,
+        "account": "Desconocida", "amount_minor": minor, "currency": currency,
+        "category": category, "kind": kind, "decision": None, "reason": reason,
+        "time": time, "note": note,
+    }
+
+
+AMOUNT_TEXT = r"(?P<amount>\$\s?\d[\d.,]*\d|\$\s?\d)"
+CARD_ABONO = re.compile(
+    r"(?:Bancolombia:\s*)(?P<payer>[^:\n$]{3,80}?)\s+hizo un abono por\s+" + AMOUNT_TEXT
+    + r"\s+a tu tarjeta de cr[eé]dito terminada en\s+\*+(?P<card>\d{4}),?\s+el\s+(?P<day>\d{2}/\d{2}/\d{4})(?:\s+(?P<time>\d{2}:\d{2}))?",
+    re.IGNORECASE,
+)
+
+
+def _card_abonos(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """Someone paying the person's card: "NOMBRE hizo un abono por $X a tu tarjeta...".
+
+    It is never income nor a purchase. A person decides whether it was a third party
+    («Abono de tercero») or their own payment («No cuenta»).
+    """
+    proposals = dict(
+        _fixed_event(
+            mail, preferences, source, f"Abono de {match['payer'].strip()} a la tarjeta *{match['card']}",
+            match["amount"], _notice_day(match["day"]), "card_payment", CARD_PAYMENT_CATEGORY,
+            f"{match['payer'].strip()} abono a tu tarjeta *{match['card']}, leido del aviso sin Ollama. "
+            "Si lo pago otra persona, elige Abono de tercero; si lo pagaste tu, No cuenta.",
+            time=match["time"],
+        )
+        for match in CARD_ABONO.finditer(source)
+    )
+    return list(proposals.values())
+
+
+KEY_TRANSFER = re.compile(
+    r"transferiste\s+" + AMOUNT_TEXT + r"\s+a la llave\s+(?P<key>\S+)\s+desde tu cuenta\s+\*?\d{4}\s+a\s+"
+    r"(?P<name>[^\n]{2,80}?)\s+el\s+(?P<day>\d{2}/\d{2}/\d{2,4})(?:\s+a las\s+(?P<time>\d{2}:\d{2}))?",
+    re.IGNORECASE,
+)
+
+
+def _key_transfers(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """Money sent to a Bre-B key: "transferiste $X a la llave K desde tu cuenta *N a NOMBRE".
+
+    Money leaves the account, so it is never income; the recipient's name is kept.
+    """
+    proposals = dict(
+        _fixed_event(
+            mail, preferences, source, match["name"].strip(), match["amount"],
+            _notice_day(match["day"]), "transfer", preferences.categories[-1],
+            f"Transferencia a {match['name'].strip()} (llave {match['key']}), leida del aviso sin Ollama. "
+            "Confirma si es gasto personal, familiar o no cuenta.",
+            time=match["time"], note=f"Bre-B a la llave {match['key']}",
+        )
+        for match in KEY_TRANSFER.finditer(source)
+    )
+    return list(proposals.values())
+
+
+RECEIVED_TRANSFER = re.compile(
+    r"recibiste una transferencia de\s+(?P<name>[^\n$]{2,80}?)\s+por\s+" + AMOUNT_TEXT
+    + r"\s+en tu cuenta\s+\*?\d{4}[^\n]{0,80}?\s+el\s+(?P<day>\d{2}/\d{2}/\d{2,4})(?:\s+a las\s+(?P<time>\d{2}:\d{2}))?",
+    re.IGNORECASE,
+)
+
+
+def _received_transfers(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """Money received: "recibiste una transferencia de NOMBRE por $X en tu cuenta *N"."""
+    proposals = dict(
+        _fixed_event(
+            mail, preferences, source, match["name"].strip(), match["amount"],
+            _notice_day(match["day"]), "income", INCOME_CATEGORIES[1],
+            f"Transferencia recibida de {match['name'].strip()}, leida del aviso sin Ollama. "
+            "Confirma si es ingreso o un traslado entre tus cuentas.",
+            time=match["time"],
+        )
+        for match in RECEIVED_TRANSFER.finditer(source)
+    )
     return list(proposals.values())
 
 

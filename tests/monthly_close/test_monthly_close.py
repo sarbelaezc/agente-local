@@ -125,7 +125,7 @@ def test_scan_queues_invalid_evidence_continues_and_retries_without_losing_decis
                 visit(Candidate(identity, preferences.approved_senders[0], "Aviso"))
             return []
 
-    def extraction(mail, prefs, model):
+    def extraction(mail, prefs, model, own_accounts=None):
         chosen = Model(merchant="Inventado") if mail.id == "bad" and invalid[0] else Model()
         return extract(mail, prefs, chosen)
 

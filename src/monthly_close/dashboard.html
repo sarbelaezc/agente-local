@@ -386,6 +386,10 @@
           </div>
           <div class="metrics" id="year-metrics"></div>
           <article class="card">
+            <div class="card-header"><div><h3>Ingresos y gastos</h3><p>Ingresos confirmados frente al gasto decidido de cada mes.</p></div></div>
+            <div id="year-income-chart" class="chart-wrap"></div>
+          </article>
+          <article class="card">
             <div class="card-header"><div><h3>Totales mensuales por categoría</h3><p>Las columnas apiladas representan las categorías decididas.</p></div>
               <div id="year-category-legend" class="legend"></div>
             </div>
@@ -1393,12 +1397,13 @@
 
       function renderYear() {
         const items = transactions().filter(tx => monthOf(tx).startsWith(`${state.year}-`));
-        const buckets = Array.from({ length: 12 }, (_, index) => ({ month: `${state.year}-${String(index + 1).padStart(2, "0")}`, personal: [], family: [], investments: [], cash: [], pending: [], third: [], categories: new Map() }));
+        const buckets = Array.from({ length: 12 }, (_, index) => ({ month: `${state.year}-${String(index + 1).padStart(2, "0")}`, personal: [], family: [], investments: [], cash: [], pending: [], third: [], incomes: [], categories: new Map() }));
         items.forEach(tx => {
           const index = Number(tx.day.slice(5, 7)) - 1;
           if (index < 0 || index > 11) return;
           if (tx.decision == null) buckets[index].pending.push(tx);
           else if (tx.decision === "third_party_payment") { if (!hiddenInView(tx)) buckets[index].third.push(tx); }
+          else if (tx.decision === "income") { if (!hiddenInView(tx)) buckets[index].incomes.push(tx); }
           else if (["investment", "investment_withdrawal"].includes(tx.decision)) buckets[index].investments.push(tx);
           else if (counted([tx]).length) {
             if (tx.category === "Retiro en efectivo") buckets[index].cash.push(tx);
@@ -1419,8 +1424,13 @@
           categoryTotals.set(category, (categoryTotals.get(category) || 0) + tx.amount_minor);
         });
         const leadingCategory = Array.from(categoryTotals).sort((a, b) => b[1] - a[1])[0];
+        const yearIncome = buckets.reduce((total, bucket) => total + sum(bucket.incomes), 0);
+        const yearSpend = completedTotals.reduce((a, b) => a + b, 0);
+        const incomeMonths = buckets.filter(bucket => bucket.incomes.length).length;
         const yearMetrics = $("#year-metrics");
         yearMetrics.replaceChildren(
+          makeMetric("Ingresos del año", formatMoney(yearIncome), incomeMonths ? `Promedio ${formatMoney(Math.round(yearIncome / incomeMonths))} en ${incomeMonths} meses con ingresos confirmados` : "Sin ingresos confirmados"),
+          makeMetric("Ingresos − gastos", formatMoney(yearIncome - yearSpend), `${yearIncome - yearSpend >= 0 ? "A favor" : "En contra"} · acumulado del año`),
           makeMetric("Promedio mensual", formatMoney(average), `${available.length} meses con importaciones`),
           makeMetric("Mes más alto", highest ? formatMoney(bucketTotal(highest)) : "—", highest ? monthLabel(highest.month) : "Sin datos"),
           makeMetric("Categoría principal", leadingCategory ? leadingCategory[0] : "—", leadingCategory ? formatMoney(leadingCategory[1]) : "Sin decisiones"),
@@ -1429,6 +1439,7 @@
           makeMetric("Retiros de inversión", formatMoney(sum(items.filter(tx => tx.decision === "investment_withdrawal"))), "Fuera de gastos"),
           makeMetric("Retiro en efectivo", formatMoney(sum(counted(items).filter(tx => tx.category === "Retiro en efectivo"))), "Incluido en gastos")
         );
+        renderYearIncomeChart(buckets, bucketTotal);
         renderYearChart(buckets);
         renderYearTable(buckets);
         const categoryHost = $("#year-categories");
@@ -1439,6 +1450,57 @@
           row.append(el("span", "legend-label", name), el("strong", "", formatMoney(total)));
           categoryHost.append(row);
         });
+      }
+
+      // Income next to spending for each month, as in Manuela's yearly view.
+      function renderYearIncomeChart(buckets, spendOf) {
+        const host = $("#year-income-chart");
+        host.replaceChildren();
+        const max = Math.max(0, ...buckets.map(bucket => Math.max(sum(bucket.incomes), spendOf(bucket))));
+        if (!max) { host.append(el("div", "empty-state", "Sin ingresos ni gastos decididos este año.")); return; }
+        const width = 760, height = 230, left = 70, right = 12, top = 14, bottom = 34;
+        const chartWidth = width - left - right, chartHeight = height - top - bottom;
+        const svg = svgEl("svg", { id: "year-income-chart-svg", viewBox: `0 0 ${width} ${height}`, class: "chart", role: "img", "aria-label": "Barras mensuales de ingresos y gastos" });
+        const title = svgEl("title"); title.textContent = `Ingresos y gastos de ${state.year}`; svg.append(title);
+        for (let tick = 0; tick <= 2; tick++) {
+          const y = top + chartHeight * tick / 2;
+          svg.append(svgEl("line", { x1: left, y1: y, x2: width - right, y2: y, class: "chart-grid" }));
+          const label = axisAmount(Math.round(max * (2 - tick) / 2));
+          label.setAttribute("x", String(left - 8));
+          label.setAttribute("y", String(y + 4));
+          label.setAttribute("text-anchor", "end");
+          svg.append(label);
+        }
+        const band = chartWidth / 12;
+        const colors = [cssColor("--s6"), cssColor("--s2")];
+        buckets.forEach((bucket, index) => {
+          const barWidth = band * .34;
+          [[sum(bucket.incomes), "Ingresos"], [Math.max(0, spendOf(bucket)), "Gastos"]].forEach(([amount, name], position) => {
+            const barHeight = chartHeight * amount / max;
+            if (!barHeight) return;
+            const rect = svgEl("rect", {
+              x: left + band * index + band * .12 + position * (barWidth + 2), y: top + chartHeight - barHeight,
+              width: barWidth, height: barHeight, fill: colors[position]
+            });
+            const tip = svgEl("title");
+            tip.textContent = `${monthLabel(bucket.month)} · ${name}: ${formatMoney(amount)}`;
+            rect.append(tip);
+            svg.append(rect);
+          });
+          const label = svgEl("text", { x: left + band * index + band / 2, y: height - 12, "text-anchor": "middle", class: "axis-label" });
+          label.textContent = monthNames[index].slice(0, 3);
+          svg.append(label);
+        });
+        host.append(svg);
+        const legend = el("div", "split-legend");
+        [["Ingresos", colors[0]], ["Gastos", colors[1]]].forEach(([name, color]) => {
+          const item = el("span");
+          const swatch = el("span", "swatch");
+          swatch.style.backgroundColor = color;
+          item.append(swatch, el("span", "", name));
+          legend.append(item);
+        });
+        host.append(legend);
       }
 
       function renderYearChart(buckets) {
@@ -1507,8 +1569,8 @@
         const table = document.createElement("table");
         const head = document.createElement("thead");
         const header = document.createElement("tr");
-        ["Mes", "Personal", "Familiar", "Abonos de terceros", "Inversiones", "Retiro en efectivo", "Pendiente", "Cobertura"].forEach((label, index) => {
-          const th = el("th", index > 0 && index < 7 ? "numeric" : "", label);
+        ["Mes", "Personal", "Familiar", "Abonos de terceros", "Ingresos", "Balance", "Inversiones", "Retiro en efectivo", "Pendiente", "Cobertura"].forEach((label, index) => {
+          const th = el("th", index > 0 && index < 9 ? "numeric" : "", label);
           header.append(th);
         });
         head.append(header);
@@ -1528,6 +1590,8 @@
             el("td", "numeric", formatMoney(sum(bucket.personal))),
             el("td", "numeric", formatMoney(sum(bucket.family))),
             el("td", "numeric", bucket.third.length ? `−${formatMoney(sum(bucket.third))}` : formatMoney(0)),
+            el("td", "numeric", formatMoney(sum(bucket.incomes))),
+            el("td", "numeric", formatMoney(sum(bucket.incomes) - sum(bucket.personal) - sum(bucket.family) + sum(bucket.third))),
             el("td", "numeric", formatMoney(netInvestments(bucket.investments))),
             el("td", "numeric", formatMoney(sum(bucket.cash))),
             el("td", "numeric", formatMoney(sum(bucket.pending))),
