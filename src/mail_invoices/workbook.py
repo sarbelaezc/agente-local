@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import tempfile
 from copy import copy
@@ -13,6 +14,9 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
+
+
+BACKUPS_TO_KEEP = 5
 
 
 class WorkbookError(ValueError):
@@ -166,6 +170,25 @@ class InvoiceWorkbook:
         finally:
             workbook.close()
 
+    def _prune_backups(self) -> None:
+        """Keep only the newest backups of this workbook; each one holds every earlier write.
+
+        Runs after the workbook was replaced and verified. Only files named like this
+        workbook's backups are touched. A copy that cannot be deleted is left in place:
+        an extra backup is harmless, and the write itself already succeeded.
+        """
+        pattern = re.compile(rf"{re.escape(self.path.stem)}-\d{{8}}-\d{{6}}-\d{{6}}\.xlsx")
+        backups = sorted(
+            (path for path in self.backup_dir.iterdir() if path.is_file() and pattern.fullmatch(path.name)),
+            key=lambda path: path.name,
+            reverse=True,
+        )
+        for old in backups[BACKUPS_TO_KEEP:]:
+            try:
+                old.unlink()
+            except OSError:
+                continue
+
     def record(
         self, invoices: list[ReviewedInvoice], *, restore_amount_format: bool = False,
     ) -> list[RecordResult]:
@@ -288,6 +311,7 @@ class InvoiceWorkbook:
                 raise WorkbookError("Backup verification failed; workbook was not overwritten")
             os.replace(temporary, self.path)
             temporary = None
+            self._prune_backups()
             return results
         finally:
             workbook.close()
