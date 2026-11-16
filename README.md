@@ -537,6 +537,22 @@ El panel local ofrece:
   de cada una, total en el centro y colores distintos y consistentes entre
   vistas), acumulado, días de la semana, medios de pago y comercios. Las tarjetas
   de ingresos y de pagos por tarjeta se ocultan si el mes no tiene datos.
+  **Interacción, como en el panel de Manuela:**
+  - Las porciones de la dona, las barras del año, los días del calendario, el
+    acumulado (día por día) y las filas de los rankings muestran su valor en un
+    globo al instante: con el mouse, al tocar en el celular o al llegar con el
+    teclado.
+  - Tocar un día con gasto abre debajo del calendario sus movimientos contados
+    (comercio, categoría, personal o familiar); tocarlo otra vez lo cierra, y se
+    cierra solo al cambiar de mes, titular o moneda.
+  - Días de la semana, cuentas de pago, ingresos, pagos por tarjeta y comercios se
+    muestran como barras proporcionales.
+  - «Comercios frecuentes» agrupa las variantes de un mismo comercio (por ejemplo,
+    `UBER RIDES` y `UBER *TRIP` como «Uber»; Éxito, Rappi, Netflix, Amazon,
+    Crepes & Waffles, PriceSmart, y Wompi, Bold o Mercado Pago con su comercio).
+    Es solo una forma de mostrarlos: lo guardado conserva el texto del aviso.
+  - Las cifras **Ingresos** y **Gasto del mes** despliegan «Ver los ingresos» y
+    «Ver los abonos de terceros» con fecha, descripción, categoría y valor.
   **Detalle por categoría** separa gastos e inversiones, ingresos («confirmado»)
   y pagos de tarjeta («pagado»), e indica cuántos movimientos faltan por decidir.
 - Borrar una regla o descartar un aviso de la cola pide confirmación.
