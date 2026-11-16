@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Iterator
 
 from monthly_close.domain import (
-    INCOME_CATEGORIES, INCOME_KINDS, NON_EXPENSES, Preferences, clean_text,
+    COUNTERPART_KINDS, DECISIONS, HOUSEHOLD, INCOME_CATEGORIES, INCOME_KINDS, NON_EXPENSES,
+    OWNERS, Preferences, clean_text, owner_id,
 )
 
 SCHEMA = """
@@ -42,7 +43,34 @@ CREATE TABLE IF NOT EXISTS merchant_rules (
     id INTEGER PRIMARY KEY, pattern TEXT NOT NULL UNIQUE, category TEXT NOT NULL,
     decision TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS group_rules (
+    owner TEXT NOT NULL, group_key TEXT NOT NULL, decision TEXT,
+    between_owners INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (owner, group_key)
+);
+CREATE TABLE IF NOT EXISTS owner_accounts (suffix TEXT PRIMARY KEY, owner TEXT NOT NULL);
 """
+
+# Household columns added to databases created before owners existed. The defaults keep
+# every existing movement as Santiago's, with its amount and decision untouched.
+HOUSEHOLD_COLUMNS = {
+    "owner": "TEXT NOT NULL DEFAULT 'santiago'",
+    "group_key": "TEXT",
+    "time": "TEXT",
+    "note": "TEXT",
+    "account_label": "TEXT",
+    "category_uncertain": "INTEGER NOT NULL DEFAULT 0",
+    "between_owners": "INTEGER NOT NULL DEFAULT 0",
+}
+STATE_COLUMNS = (
+    "id,day,merchant,account,amount_minor,currency,category,kind,decision,reason,"
+    "exchange_rate,cop_amount_minor,owner,group_key,time,note,account_label,"
+    "category_uncertain,between_owners"
+)
+SPECIAL_CATEGORIES = {
+    "investment": "Inversiones",
+    "investment_withdrawal": "Retiros de inversión",
+    "cash_withdrawal": "Retiro en efectivo",
+}
 
 
 # Movements of a notice that a reprocessing run must leave alone: everything except
@@ -58,6 +86,26 @@ def merchant_words(text: str) -> str:
     return " " + " ".join(re.findall(r"[^\W_]+", text.upper())) + " "
 
 
+def group_of(row: sqlite3.Row | dict) -> str:
+    """Destination a movement belongs to: its imported key, else its merchant's words."""
+    return row["group_key"] or "com:" + merchant_words(row["merchant"]).strip()
+
+
+def counterpart_owner(row: sqlite3.Row | dict, accounts: dict[str, str]) -> str | None:
+    """Other household member whose account (by its last digits) the movement names."""
+    if row["kind"] not in COUNTERPART_KINDS:
+        return None
+    numbers = re.findall(r"\*\s*(\d{4,})", row["merchant"])
+    key = row["group_key"] or ""
+    if key.startswith("tr:") and key[3:].isdigit():
+        numbers.append(key[3:])
+    for number in numbers:
+        for suffix, owner in accounts.items():
+            if owner != row["owner"] and number.endswith(suffix):
+                return owner
+    return None
+
+
 class Store:
     """Persist minimal extracted facts and human decisions, never message bodies."""
 
@@ -65,12 +113,35 @@ class Store:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
-            db.executescript(SCHEMA)
             columns = {row["name"] for row in db.execute("PRAGMA table_info(transactions)")}
+            backup = None
+            if columns and not set(HOUSEHOLD_COLUMNS) <= columns:
+                backup = self._backup(db)
+            db.executescript(SCHEMA)
+            if not columns:
+                columns = {row["name"] for row in db.execute("PRAGMA table_info(transactions)")}
             if "exchange_rate" not in columns:
                 db.execute("ALTER TABLE transactions ADD COLUMN exchange_rate TEXT")
             if "cop_amount_minor" not in columns:
                 db.execute("ALTER TABLE transactions ADD COLUMN cop_amount_minor INTEGER")
+            for name, definition in HOUSEHOLD_COLUMNS.items():
+                if name not in columns:
+                    db.execute(f"ALTER TABLE transactions ADD COLUMN {name} {definition}")
+            if backup is not None:
+                self._audit(db, "migrate-household", self.path.name, backup.name)
+
+    def _backup(self, db: sqlite3.Connection) -> Path:
+        """Copy the database next to it before a schema change; never overwrite a copy."""
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        target = self.path.with_name(f"{self.path.name}.backup-{stamp}")
+        if target.exists():
+            raise ValueError("Ya existe una copia con ese nombre; no se migra.")
+        copy = sqlite3.connect(target)
+        try:
+            db.backup(copy)
+        finally:
+            copy.close()
+        return target
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -205,6 +276,7 @@ class Store:
                 )
             db.execute("INSERT OR IGNORE INTO processed VALUES (?)", (message_id,))
             db.execute("DELETE FROM extraction_failures WHERE message_id=?", (message_id,))
+            self._flag_between_owners(db, [event["id"] for event in events])
             self._audit(db, "import", message_id, str(len(events)))
         self.apply_rules()
 
@@ -242,9 +314,10 @@ class Store:
 
     def apply_rules(self) -> int:
         """Decide pending purchases that match a rule; anything doubtful stays pending."""
+        decided = self._apply_group_rules()
         rules = self.rules()
         if not rules:
-            return 0
+            return decided
         with self.connect() as db:
             pending = db.execute(
                 """SELECT id,merchant,kind FROM transactions
@@ -269,121 +342,394 @@ class Store:
             decided += 1
         return decided
 
+    def _apply_group_rules(self) -> int:
+        """Decide pending movements whose destination has a remembered decision."""
+        with self.connect() as db:
+            rules = {
+                (row["owner"], row["group_key"]): row["decision"]
+                for row in db.execute("SELECT * FROM group_rules WHERE decision IS NOT NULL")
+            }
+            if not rules:
+                return 0
+            pending = db.execute("SELECT * FROM transactions WHERE decision IS NULL").fetchall()
+        decided = 0
+        for row in pending:
+            group = group_of(row)
+            decision = rules.get((row["owner"], group))
+            if decision is None:
+                continue
+            try:
+                with self.connect() as db:
+                    self._decide(
+                        db, row["id"], decision, None,
+                        audit=("decision-group-rule", f"{decision}: {group}"),
+                    )
+            except ValueError:
+                continue  # e.g. USD without a rate: a person decides.
+            decided += 1
+        return decided
+
     def decide(
         self, event_id: str, decision: str, category: str | None = None, *,
         currency: str | None = None, exchange_rate: str | None = None, rule: str | None = None,
+        audit: tuple[str, str] | None = None,
     ) -> None:
-        """Record a decision (by the user, or by one of their rules) and an optional USD/COP rate."""
-        if decision not in {
-            "personal", "family", "exclude", "investment", "investment_withdrawal", "cash_withdrawal",
-            "income",
-        }:
-            raise ValueError("Decision no reconocida.")
+        """Record a decision (by the user, or by one of their rules) and an optional USD/COP rate.
+
+        A person deciding one movement also confirms its category; audit names a
+        non-interactive origin such as an approved import, which confirms nothing.
+        """
         with self.connect() as db:
-            row = db.execute("SELECT * FROM transactions WHERE id=?", (event_id,)).fetchone()
-            if row is None:
-                raise ValueError("Movimiento inexistente.")
-            if row["kind"] in NON_EXPENSES and decision != "exclude":
-                raise ValueError("Prestamos y pagos de tarjeta no cuentan como gasto ni ingreso.")
-            if row["kind"] == "income" and decision not in {"income", "exclude"}:
-                raise ValueError("El dinero recibido no es un gasto: Ingreso o No cuenta.")
-            if decision == "income":
-                if row["kind"] not in INCOME_KINDS:
-                    raise ValueError("Este movimiento no puede contarse como ingreso.")
-                if category not in INCOME_CATEGORIES:
-                    category = (
-                        row["category"] if row["category"] in INCOME_CATEGORIES
-                        else INCOME_CATEGORIES[-1]
-                    )
-            settings = db.execute("SELECT value FROM settings WHERE id=1").fetchone()
-            preferences = Preferences.parse(json.loads(settings["value"])) if settings else None
-            if row["kind"] == "investment" and decision not in {
-                "investment", "investment_withdrawal", "cash_withdrawal", "exclude",
-            }:
-                raise ValueError("Un aporte de inversion no cuenta como gasto personal ni familiar.")
-            special_categories = {
-                "investment": "Inversiones",
-                "investment_withdrawal": "Retiros de inversión",
-                "cash_withdrawal": "Retiro en efectivo",
-            }
-            if decision in special_categories:
-                if preferences and row["account"] in preferences.excluded_accounts:
-                    raise ValueError("Una cuenta excluida no se suma a inversiones propias.")
-                category = special_categories[decision]
-            if decision in {"personal", "cash_withdrawal"} and (
-                row["kind"] == "own_transfer"
-                or (preferences and row["account"] in preferences.excluded_accounts)
-            ):
-                raise ValueError("Transferencias propias o a cuentas excluidas: Familiar o No cuenta.")
-            if category is not None and category != row["category"] and (
-                not preferences or (
-                    category not in preferences.categories
-                    and not (
-                        decision in {"personal", "family", "exclude"}
-                        and category == "Retiro en efectivo"
-                    )
-                    and not (decision in {"income", "exclude"} and category in INCOME_CATEGORIES)
-                    and not (
-                        decision in {*special_categories, "exclude"}
-                        and category in special_categories.values()
-                    )
-                )
-            ):
-                raise ValueError("Categoria no autorizada.")
-            if (
-                decision in {"personal", "family"}
-                and (category or row["category"]) in {"Inversiones", "Retiros de inversión"}
-            ):
-                raise ValueError("Selecciona una categoria de gasto o la decision Inversion.")
-            currency = row["currency"] if currency is None else currency
-            if currency != row["currency"] and (
-                not preferences or preferences.currency != "COP"
-                or currency not in {"COP", "USD"} or row["currency"] not in {"COP", "USD"}
-            ):
-                raise ValueError("Solo se permite corregir COP/USD en un cierre configurado en COP.")
-            rate, converted = None, None
-            if currency == "USD" and preferences and preferences.currency == "COP":
-                if exchange_rate is None:
-                    exchange_rate = row["exchange_rate"]
-                if exchange_rate not in (None, ""):
-                    if not isinstance(exchange_rate, str) or not re.fullmatch(
-                        r"\d{1,8}(?:[.,]\d{1,6})?", exchange_rate,
-                    ):
-                        raise ValueError("Tasa invalida: ingresa COP por USD, con hasta seis decimales.")
-                    value = Decimal(exchange_rate.replace(",", "."))
-                    if value <= 0:
-                        raise ValueError("La tasa COP por USD debe ser positiva.")
-                    converted = int(
-                        (Decimal(row["amount_minor"]) * value).quantize(
-                            Decimal("1"), rounding=ROUND_HALF_UP,
-                        ),
-                    )
-                    if not 0 < converted <= 9007199254740991:
-                        raise ValueError("Importe convertido fuera del rango permitido.")
-                    rate = format(value, "f")
-                elif decision != "exclude":
-                    raise ValueError("Ingresa la tasa estimada COP por USD para la fecha del movimiento.")
-            elif exchange_rate not in (None, ""):
-                raise ValueError("La tasa solo aplica a movimientos USD en un cierre en COP.")
-            db.execute(
-                """UPDATE transactions SET decision=?,category=?,currency=?,
-                exchange_rate=?,cop_amount_minor=? WHERE id=?""",
-                (decision, category or row["category"], currency, rate, converted, event_id),
+            self._decide(
+                db, event_id, decision, category, currency=currency,
+                exchange_rate=exchange_rate, rule=rule, audit=audit,
             )
-            if rule is None:
-                self._audit(db, "decision-local-user", event_id, decision)
-            else:
-                db.execute(
-                    "UPDATE transactions SET reason=? WHERE id=?",
-                    (f"Decidido por tu regla «{rule}». Puedes cambiarlo aqui.", event_id),
+            if rule is None and audit is None:
+                db.execute("UPDATE transactions SET category_uncertain=0 WHERE id=?", (event_id,))
+
+    def _decide(
+        self, db: sqlite3.Connection, event_id: str, decision: str, category: str | None = None, *,
+        currency: str | None = None, exchange_rate: str | None = None, rule: str | None = None,
+        audit: tuple[str, str] | None = None,
+    ) -> None:
+        if decision not in DECISIONS:
+            raise ValueError("Decision no reconocida.")
+        row = db.execute("SELECT * FROM transactions WHERE id=?", (event_id,)).fetchone()
+        if row is None:
+            raise ValueError("Movimiento inexistente.")
+        if decision == "third_party_payment" and row["kind"] != "card_payment":
+            raise ValueError("Solo un abono recibido en una tarjeta puede ser abono de tercero.")
+        if row["kind"] in NON_EXPENSES and decision not in {"exclude", "third_party_payment"}:
+            raise ValueError("Prestamos y pagos de tarjeta no cuentan como gasto ni ingreso.")
+        if row["kind"] == "income" and decision not in {"income", "exclude"}:
+            raise ValueError("El dinero recibido no es un gasto: Ingreso o No cuenta.")
+        if decision == "income":
+            if row["kind"] not in INCOME_KINDS:
+                raise ValueError("Este movimiento no puede contarse como ingreso.")
+            if category not in INCOME_CATEGORIES:
+                category = (
+                    row["category"] if row["category"] in INCOME_CATEGORIES
+                    else INCOME_CATEGORIES[-1]
                 )
-                self._audit(db, "decision-rule", event_id, f"{decision}: {rule}")
-            if currency != row["currency"] or rate != row["exchange_rate"]:
-                self._audit(db, "exchange-local-user", event_id, json.dumps({
-                    "previous_currency": row["currency"], "currency": currency,
-                    "previous_exchange_rate": row["exchange_rate"],
-                    "exchange_rate": rate, "cop_amount_minor": converted,
-                }))
+        settings = db.execute("SELECT value FROM settings WHERE id=1").fetchone()
+        preferences = Preferences.parse(json.loads(settings["value"])) if settings else None
+        if row["kind"] == "investment" and decision not in {
+            "investment", "investment_withdrawal", "cash_withdrawal", "exclude",
+        }:
+            raise ValueError("Un aporte de inversion no cuenta como gasto personal ni familiar.")
+        special_categories = SPECIAL_CATEGORIES
+        if decision in special_categories:
+            if preferences and row["account"] in preferences.excluded_accounts:
+                raise ValueError("Una cuenta excluida no se suma a inversiones propias.")
+            category = special_categories[decision]
+        if decision in {"personal", "cash_withdrawal"} and (
+            row["kind"] == "own_transfer"
+            or (preferences and row["account"] in preferences.excluded_accounts)
+        ):
+            raise ValueError("Transferencias propias o a cuentas excluidas: Familiar o No cuenta.")
+        if category is not None and category != row["category"] and (
+            not preferences or (
+                category not in preferences.categories
+                and not (
+                    decision in {"personal", "family", "exclude"}
+                    and category == "Retiro en efectivo"
+                )
+                and not (decision in {"income", "exclude"} and category in INCOME_CATEGORIES)
+                and not (
+                    decision in {*special_categories, "exclude"}
+                    and category in special_categories.values()
+                )
+            )
+        ):
+            raise ValueError("Categoria no autorizada.")
+        if (
+            decision in {"personal", "family"}
+            and (category or row["category"]) in {"Inversiones", "Retiros de inversión"}
+        ):
+            raise ValueError("Selecciona una categoria de gasto o la decision Inversion.")
+        currency = row["currency"] if currency is None else currency
+        if currency != row["currency"] and (
+            not preferences or preferences.currency != "COP"
+            or currency not in {"COP", "USD"} or row["currency"] not in {"COP", "USD"}
+        ):
+            raise ValueError("Solo se permite corregir COP/USD en un cierre configurado en COP.")
+        rate, converted = None, None
+        if currency == "USD" and preferences and preferences.currency == "COP":
+            if exchange_rate is None:
+                exchange_rate = row["exchange_rate"]
+            if exchange_rate not in (None, ""):
+                if not isinstance(exchange_rate, str) or not re.fullmatch(
+                    r"\d{1,8}(?:[.,]\d{1,6})?", exchange_rate,
+                ):
+                    raise ValueError("Tasa invalida: ingresa COP por USD, con hasta seis decimales.")
+                value = Decimal(exchange_rate.replace(",", "."))
+                if value <= 0:
+                    raise ValueError("La tasa COP por USD debe ser positiva.")
+                converted = int(
+                    (Decimal(row["amount_minor"]) * value).quantize(
+                        Decimal("1"), rounding=ROUND_HALF_UP,
+                    ),
+                )
+                if not 0 < converted <= 9007199254740991:
+                    raise ValueError("Importe convertido fuera del rango permitido.")
+                rate = format(value, "f")
+            elif decision != "exclude":
+                raise ValueError("Ingresa la tasa estimada COP por USD para la fecha del movimiento.")
+        elif exchange_rate not in (None, ""):
+            raise ValueError("La tasa solo aplica a movimientos USD en un cierre en COP.")
+        db.execute(
+            """UPDATE transactions SET decision=?,category=?,currency=?,
+            exchange_rate=?,cop_amount_minor=? WHERE id=?""",
+            (decision, category or row["category"], currency, rate, converted, event_id),
+        )
+        if audit is not None:
+            self._audit(db, audit[0], event_id, audit[1])
+        elif rule is None:
+            self._audit(db, "decision-local-user", event_id, decision)
+        else:
+            db.execute(
+                "UPDATE transactions SET reason=? WHERE id=?",
+                (f"Decidido por tu regla «{rule}». Puedes cambiarlo aqui.", event_id),
+            )
+            self._audit(db, "decision-rule", event_id, f"{decision}: {rule}")
+        if currency != row["currency"] or rate != row["exchange_rate"]:
+            self._audit(db, "exchange-local-user", event_id, json.dumps({
+                "previous_currency": row["currency"], "currency": currency,
+                "previous_exchange_rate": row["exchange_rate"],
+                "exchange_rate": rate, "cop_amount_minor": converted,
+            }))
+
+    @staticmethod
+    def _group_rows(
+        db: sqlite3.Connection, owner: str, group: str, pending_only: bool,
+    ) -> list[sqlite3.Row]:
+        rows = db.execute(
+            "SELECT * FROM transactions WHERE owner=?" + (" AND decision IS NULL" if pending_only else ""),
+            (owner,),
+        ).fetchall()
+        return [row for row in rows if group_of(row) == group]
+
+    def decide_group(
+        self, owner: str, group: str, decision: str, *,
+        pending_only: bool = True, remember: bool = False,
+    ) -> int:
+        """Apply one person's decision to every movement to a destination, all or nothing.
+
+        Each movement passes the same validation as a single decision and gets its own
+        audit row. remember also decides later movements to the same destination.
+        """
+        owner = owner_id(owner)
+        group = clean_text(group, 200)
+        with self.connect() as db:
+            rows = self._group_rows(db, owner, group, pending_only)
+            if not rows:
+                raise ValueError("Destino sin movimientos por decidir.")
+            for row in rows:
+                self._decide(
+                    db, row["id"], decision, None,
+                    audit=("decision-group-local-user", f"{decision}: {group}"),
+                )
+            if remember:
+                db.execute(
+                    """INSERT INTO group_rules(owner,group_key,decision) VALUES (?,?,?)
+                    ON CONFLICT(owner,group_key) DO UPDATE SET decision=excluded.decision""",
+                    (owner, group, decision),
+                )
+                self._audit(db, "group-rule-local-user", f"{owner}/{group}", decision)
+        return len(rows)
+
+    def mark_between_owners(
+        self, owner: str, group: str, value: bool, *, remember: bool = False,
+    ) -> int:
+        """Mark a destination as money moving between household members.
+
+        Such movements keep their decision in each member's own view and are left out of
+        the household view, so the same money is not counted twice.
+        """
+        owner = owner_id(owner)
+        group = clean_text(group, 200)
+        if type(value) is not bool:
+            raise ValueError("Marca entre titulares invalida.")
+        with self.connect() as db:
+            rows = self._group_rows(db, owner, group, pending_only=False)
+            if not rows:
+                raise ValueError("Destino sin movimientos.")
+            for row in rows:
+                db.execute(
+                    "UPDATE transactions SET between_owners=? WHERE id=?", (int(value), row["id"]),
+                )
+                self._audit(db, "between-owners-local-user", row["id"], str(int(value)))
+            if remember:
+                db.execute(
+                    """INSERT INTO group_rules(owner,group_key,between_owners) VALUES (?,?,?)
+                    ON CONFLICT(owner,group_key) DO UPDATE SET between_owners=excluded.between_owners""",
+                    (owner, group, int(value)),
+                )
+                db.execute(
+                    """DELETE FROM group_rules WHERE owner=? AND group_key=?
+                    AND decision IS NULL AND between_owners=0""", (owner, group),
+                )
+                self._audit(db, "group-rule-between-local-user", f"{owner}/{group}", str(int(value)))
+        return len(rows)
+
+    def delete_group_rule(self, owner: str, group: str) -> None:
+        """Forget a destination rule; movements it already decided keep their decision."""
+        with self.connect() as db:
+            if db.execute(
+                "DELETE FROM group_rules WHERE owner=? AND group_key=?", (owner_id(owner), group),
+            ).rowcount != 1:
+                raise ValueError("Regla de destino inexistente.")
+            self._audit(db, "group-rule-delete-local-user", f"{owner}/{group}", "deleted")
+
+    def set_owner_account(self, owner: str, suffix: str) -> int:
+        """Register the last four digits of a member's account to recognise transfers between members."""
+        owner = owner_id(owner)
+        if not isinstance(suffix, str) or not re.fullmatch(r"\d{4}", suffix):
+            raise ValueError("Indica solo los ultimos cuatro digitos de la cuenta.")
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO owner_accounts VALUES (?,?)
+                ON CONFLICT(suffix) DO UPDATE SET owner=excluded.owner""", (suffix, owner),
+            )
+            self._audit(db, "owner-account-local-user", "*" + suffix, owner)
+            return self._flag_between_owners(db, None)
+
+    def _flag_between_owners(self, db: sqlite3.Connection, ids: list[str] | None) -> int:
+        """Mark movements naming another member's account, or a remembered destination.
+
+        Runs on newly imported movements (or all of them when an account is added); it
+        never clears a mark, so a person's choice is only changed by that person.
+        """
+        accounts = {row["suffix"]: row["owner"] for row in db.execute("SELECT * FROM owner_accounts")}
+        remembered = {
+            (row["owner"], row["group_key"])
+            for row in db.execute("SELECT owner,group_key FROM group_rules WHERE between_owners=1")
+        }
+        if not accounts and not remembered:
+            return 0
+        rows = db.execute("SELECT * FROM transactions WHERE between_owners=0").fetchall()
+        if ids is not None:
+            wanted = set(ids)
+            rows = [row for row in rows if row["id"] in wanted]
+        flagged = 0
+        for row in rows:
+            if (row["owner"], group_of(row)) in remembered:
+                reason = "group-rule"
+            elif counterpart_owner(row, accounts):
+                reason = "account"
+            else:
+                continue
+            db.execute("UPDATE transactions SET between_owners=1 WHERE id=?", (row["id"],))
+            self._audit(db, "between-owners-" + reason, row["id"], "1")
+            flagged += 1
+        return flagged
+
+    def import_external(
+        self, owner: str, source: str, events: list[dict], group_rules: dict[str, str],
+    ) -> dict[str, int]:
+        """Import movements another member approved elsewhere, in one transaction.
+
+        Existing ids are skipped, so repeating the import changes nothing. Each movement
+        is decided through the same validation as the panel and audited one by one;
+        destination decisions become remembered rules unless a person already set one.
+        No mailbox notice is involved, so processed and coverage stay untouched.
+        """
+        owner = owner_id(owner)
+        if not re.fullmatch(r"[a-z][a-z-]{2,30}", source):
+            raise ValueError("Origen de importacion invalido.")
+        with self.connect() as db:
+            existing = {row["id"] for row in db.execute("SELECT id FROM transactions WHERE owner=?", (owner,))}
+            new = [event for event in events if event["id"] not in existing]
+            for event in new:
+                if event["owner"] != owner:
+                    raise ValueError("Movimiento de otro titular en la importacion.")
+                db.execute(
+                    """INSERT INTO transactions (
+                    id,message_id,day,merchant,account,amount_minor,currency,category,kind,
+                    decision,reason,owner,group_key,time,note,account_label,category_uncertain)
+                    VALUES (:id,:message_id,:day,:merchant,:account,:amount_minor,:currency,
+                    :category,:kind,NULL,:reason,:owner,:group_key,:time,:note,:account_label,
+                    :category_uncertain)""", event,
+                )
+            for group, decision in group_rules.items():
+                if decision not in DECISIONS:
+                    raise ValueError("Decision de destino no reconocida.")
+                if db.execute(
+                    "INSERT OR IGNORE INTO group_rules(owner,group_key,decision) VALUES (?,?,?)",
+                    (owner, group, decision),
+                ).rowcount:
+                    self._audit(db, f"group-rule-{source}", f"{owner}/{group}", decision)
+            rules = {
+                row["group_key"]: row["decision"] for row in db.execute(
+                    "SELECT * FROM group_rules WHERE owner=? AND decision IS NOT NULL", (owner,),
+                )
+            }
+            decided = by_group = 0
+            for event in new:
+                if event["group_key"]:
+                    decision = rules.get(event["group_key"])
+                    if decision is None:
+                        continue
+                    self._decide(
+                        db, event["id"], decision, None,
+                        audit=("decision-group-rule", f"{decision}: {event['group_key']}"),
+                    )
+                    by_group += 1
+                else:
+                    self._decide(
+                        db, event["id"], event["decision"], None,
+                        audit=(f"decision-{source}", f"{event['decision']}: aprobado en su panel"),
+                    )
+                    decided += 1
+            flagged = self._flag_between_owners(db, [event["id"] for event in new])
+            self._audit(db, f"import-{source}", owner, str(len(new)))
+        return {
+            "imported": len(new), "skipped": len(events) - len(new), "approved": decided,
+            "by_destination": by_group, "pending": len(new) - decided - by_group,
+            "between_owners": flagged,
+        }
+
+    def monthly_totals(self, owner: str) -> dict[str, dict[str, int]]:
+        """Decided totals per month in the reporting currency (COP for converted USD).
+
+        personal includes cash withdrawals; net is personal + family minus third-party
+        payments to a card. The household view leaves out money between members.
+        """
+        owner = owner_id(owner, allow_household=True)
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT * FROM transactions"
+                + ("" if owner == HOUSEHOLD else " WHERE owner=?"),
+                () if owner == HOUSEHOLD else (owner,),
+            ).fetchall()
+        totals: dict[str, dict[str, int]] = {}
+        for row in rows:
+            if owner == HOUSEHOLD and row["between_owners"]:
+                continue
+            amount = row["amount_minor"]
+            if row["currency"] == "USD" and row["cop_amount_minor"] is not None:
+                amount = row["cop_amount_minor"]
+            elif row["currency"] != "COP":
+                continue
+            month = totals.setdefault(row["day"][:7], dict.fromkeys(
+                ("personal", "family", "cash", "income", "third_party", "net", "pending"), 0,
+            ))
+            decision = row["decision"]
+            if decision in {"personal", "cash_withdrawal"}:
+                month["personal"] += amount
+            if decision == "cash_withdrawal":
+                month["cash"] += amount
+            if decision == "family":
+                month["family"] += amount
+            if decision == "income":
+                month["income"] += amount
+            if decision == "third_party_payment":
+                month["third_party"] += amount
+            if decision is None:
+                month["pending"] += amount
+        for month in totals.values():
+            month["net"] = month["personal"] + month["family"] - month["third_party"]
+        return totals
 
     def coverage(self, month: str, status: str, note: str) -> None:
         if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
@@ -415,11 +761,16 @@ class Store:
                 "categories": config["categories"] if config else [],
                 "income_categories": INCOME_CATEGORIES,
                 "transactions": [
-                    dict(row) for row in db.execute(
-                        """SELECT id,day,merchant,account,amount_minor,currency,
-                        category,kind,decision,reason,exchange_rate,cop_amount_minor
-                        FROM transactions ORDER BY day,id"""
+                    {**dict(row), "group": group_of(row)} for row in db.execute(
+                        f"SELECT {STATE_COLUMNS} FROM transactions ORDER BY day,id"
                     )
+                ],
+                "owners": [{"id": key, "label": label} for key, label in OWNERS.items()],
+                "owner_accounts": [
+                    dict(row) for row in db.execute("SELECT * FROM owner_accounts ORDER BY owner,suffix")
+                ],
+                "group_rules": [
+                    dict(row) for row in db.execute("SELECT * FROM group_rules ORDER BY owner,group_key")
                 ],
                 "coverage": [dict(row) for row in db.execute("SELECT * FROM coverage ORDER BY month")],
                 "rules": [
@@ -432,8 +783,13 @@ class Store:
                 ],
             }
 
-    def summary(self, month: str) -> str:
-        rows = [row for row in self.state()["transactions"] if row["day"].startswith(month)]
+    def summary(self, month: str, owner: str = "santiago") -> str:
+        """Plain-text close of one member, or of the household without money between members."""
+        owner = owner_id(owner, allow_household=True)
+        rows = [
+            row for row in self.state()["transactions"] if row["day"].startswith(month)
+            and (row["owner"] == owner or (owner == HOUSEHOLD and not row["between_owners"]))
+        ]
         rows = [
             {**row, "currency": "COP", "amount_minor": row["cop_amount_minor"]}
             if row["currency"] == "USD" and row["cop_amount_minor"] is not None else row
@@ -459,14 +815,22 @@ class Store:
                 if row["decision"] in {"personal", "family", "cash_withdrawal"}
                 and row["category"] == "Retiro en efectivo"
             )
+            third = sum(
+                row["amount_minor"] for row in selected if row["decision"] == "third_party_payment"
+            )
+            # Third-party payments to a card reduce spending; without them the line is unchanged.
+            paid_back = (
+                f"abonos de terceros {Decimal(third) / 100:.2f} (restan del gasto); "
+                f"gasto neto {Decimal(personal + family - third) / 100:.2f}; " if third else ""
+            )
             parts.append(
                 f"{currency}: personal {Decimal(personal) / 100:.2f}; "
-                f"familiar {Decimal(family) / 100:.2f}; "
+                f"familiar {Decimal(family) / 100:.2f}; " + paid_back +
                 f"inversiones {Decimal(investment - withdrawals) / 100:.2f} (fuera de gastos); "
                 f"retiros de inversion {Decimal(withdrawals) / 100:.2f}; "
                 f"retiro en efectivo {Decimal(cash) / 100:.2f} (incluido en gastos); "
                 f"ingresos {Decimal(income) / 100:.2f}; "
-                f"balance {Decimal(income - personal - family) / 100:.2f} (ingresos - gastos)"
+                f"balance {Decimal(income - personal - family + third) / 100:.2f} (ingresos - gastos)"
             )
         pending = sum(row["decision"] is None for row in rows)
         unresolved = sum(

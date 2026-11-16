@@ -181,7 +181,7 @@ def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
     page.locator("#tab-year").click()
     assert re.search(r"\b53[.\s]?334,74", page.locator("#year-metrics").inner_text())
     page.locator("#tab-decisions").click()
-    page.locator("#decision-history summary").click()
+    page.locator("#decision-history > summary").click()
     history = page.locator("#history-list .decision-card").filter(has_text="AMAZON MKTPLACE")
     assert "12,34" in history.inner_text()
     assert re.search(r"51[.\s]?834,17", history.inner_text())
@@ -290,7 +290,7 @@ def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(d
     assert page.locator("#year-select").input_value() == month[:4]
 
     params = page.evaluate("Object.fromEntries(new URLSearchParams(location.search))")
-    assert params == {"tab": "year", "month": month, "year": month[:4], "currency": "COP"}
+    assert params == {"tab": "year", "month": month, "year": month[:4], "currency": "COP", "owner": "hogar"}
     page.locator("#tab-decisions").click()
     assert page.evaluate("new URLSearchParams(location.search).get('tab')") == "decisions"
     assert not errors
@@ -303,6 +303,7 @@ def test_decision_lists_only_render_fifty_cards_at_a_time(dashboard):
         event_id = f"pending-{index}"
         store.import_message(event_id, [{
             **original, "id": event_id, "message_id": event_id, "decision": None,
+            "merchant": f"Tienda {index}",  # one destination per movement
         }])
 
     page.reload()
@@ -310,7 +311,7 @@ def test_decision_lists_only_render_fifty_cards_at_a_time(dashboard):
     page.locator("#tab-decisions").click()
     pending = page.locator("#pending-list .decision-card")
     assert pending.count() == 50
-    page.get_by_role("button", name="Mostrar 2 movimientos pendientes más").click()
+    page.get_by_role("button", name="Mostrar 2 destinos pendientes más").click()
     assert pending.count() == 52
     assert not errors
 
@@ -475,7 +476,9 @@ def test_withdrawal_buttons_persist_and_apply_correct_expense_totals(
     assert page.locator("#history-list .decision-card").filter(
         has=page.locator('select[name=category] option:checked').filter(has_text=category),
     ).locator('button[aria-pressed="true"]').filter(has_text=label).count() == 1
-    page.locator("#decision-history summary").click()
+    page.locator("#decision-history > summary").click()
+    # The three movements share a merchant, so they form one destination card.
+    page.locator("#history-list .group-card details > summary").click()
     with page.expect_response(
         lambda response: response.url.endswith("/api/decision") and response.request.method == "POST"
     ) as excluded:

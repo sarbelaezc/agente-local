@@ -26,6 +26,7 @@ from monthly_close.graph_client import (
     AUTHORITIES, CACHE_NAME, CLIENT_ID, GraphClient, interactive_login, silent_token,
 )
 from monthly_close.graph_reader import DEFAULT_ORIGIN, GraphSourceReader
+from monthly_close.household_import import PARITY_FILE, import_member, parity_report
 from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.server import create_server
 from monthly_close.store import Store
@@ -338,6 +339,24 @@ def run_pilot(store: Store, data_dir: Path, settings: dict, read_only: bool) -> 
     )
 
 
+def run_member_import(store: Store, folder: Path) -> None:
+    """Import Manuela's exported files and compare her monthly totals with her dashboard."""
+    result = import_member(store, folder)
+    print(
+        f"Importacion de Manuela: {result['imported']} nuevos, {result['skipped']} ya importados; "
+        f"{result['approved']} aprobados en su panel, {result['by_destination']} decididos por destino, "
+        f"{result['pending']} pendientes; {result['between_owners']} entre titulares."
+    )
+    parity = folder / PARITY_FILE
+    if not parity.is_file():
+        print("Sin archivo de paridad: no se compararon totales.")
+        return
+    matched, lines = parity_report(store, parity)
+    print("\n".join(lines))
+    if not matched:
+        raise ValueError("Los totales importados no coinciden con el panel de Manuela; revisa antes de usarlos.")
+
+
 def run(args: argparse.Namespace) -> None:
     data_dir = args.data_dir.expanduser().resolve()
     store = Store(data_dir / "close.sqlite3")
@@ -352,7 +371,16 @@ def run(args: argparse.Namespace) -> None:
     if args.command == "summary":
         month = args.month or datetime.now().strftime("%Y-%m")
         datetime.strptime(month, "%Y-%m")
-        print(store.summary(month))
+        print(store.summary(month, args.owner or "santiago"))
+        return
+    if args.command == "import-manuela":
+        run_member_import(store, args.source_dir.expanduser().resolve())
+        return
+    if args.command == "owner-account":
+        if not args.owner or not args.suffix:
+            raise ValueError("Usa --owner y --suffix con los ultimos cuatro digitos.")
+        flagged = store.set_owner_account(args.owner, args.suffix)
+        print(f"Cuenta *{args.suffix} asignada a {args.owner}. Movimientos marcados entre titulares: {flagged}.")
         return
     preferences = store.preferences()
     now = datetime.now(ZoneInfo(preferences.timezone))
@@ -400,9 +428,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Cierre mensual local: buzon de Outlook por Microsoft Graph + Ollama.")
     parser.add_argument(
         "command",
-        choices=["serve", "login", "pilot", "scan", "summary", "scheduled", "check-config"],
+        choices=[
+            "serve", "login", "pilot", "scan", "summary", "scheduled", "check-config",
+            "import-manuela", "owner-account",
+        ],
     )
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
+    parser.add_argument(
+        "--source-dir", type=Path, default=data_root() / "ImportManuela",
+        help="Con import-manuela, carpeta local con los archivos exportados de Manuela.",
+    )
+    parser.add_argument(
+        "--owner", choices=["santiago", "manuela", "hogar"],
+        help="Con summary, titular u hogar (por defecto santiago); con owner-account, titular.",
+    )
+    parser.add_argument("--suffix", help="Con owner-account, ultimos cuatro digitos de la cuenta.")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--start", help="YYYY-MM-DD")
     parser.add_argument("--end", help="YYYY-MM-DD, exclusivo")
