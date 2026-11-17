@@ -5,8 +5,6 @@ import pytest
 from openpyxl import Workbook
 
 from mail_invoices.classification import classification_ready
-from mail_invoices.outlook_folders import folder_paths
-from mail_invoices.outlook_folders import read_history
 from mail_invoices.workbook import InvoiceWorkbook
 
 
@@ -25,35 +23,6 @@ from mail_invoices.workbook import InvoiceWorkbook
 )
 def test_only_fully_registered_messages_without_errors_are_ready(statuses, errors, ready):
     assert classification_ready(statuses, errors) is ready
-
-
-def test_folder_tree_preserves_paths_and_ignores_favorites():
-    rows = [
-        {"id": "favoritesRoot", "level": "1", "title": "Favoritos", "name": "favoritos"},
-        {"id": "", "level": "2", "title": "Exito", "name": "exito"},
-        {"id": "primaryMailboxRoot_test", "level": "1", "title": "Mailbox", "name": "mailbox"},
-        {"id": "", "level": "2", "title": "Bandeja de entrada : Elementos 50", "name": "bandeja de entrada"},
-        {"id": "", "level": "2", "title": "Compras : Elementos 0", "name": "compras"},
-        {"id": "", "level": "3", "title": "Exito : Elementos 10", "name": "exito"},
-        {"id": "", "level": "2", "title": "Viajes", "name": "viajes"},
-        {"id": "", "level": "3", "title": "Exito", "name": "exito"},
-        {"id": "", "level": "1", "title": "", "name": "ir a grupos"},
-    ]
-    assert [f.path for f in folder_paths(rows)] == ["Compras", "Compras/Exito", "Viajes", "Viajes/Exito"]
-
-
-def test_missing_mailbox_is_rejected():
-    with pytest.raises(LookupError, match="missing"):
-        folder_paths([])
-
-
-def test_no_authorized_history_does_not_read_page():
-    assert read_history(None, []) == []
-
-
-def test_invalid_history_limit_is_rejected():
-    with pytest.raises(ValueError, match="limit"):
-        read_history(None, [], limit=6)
 
 
 @pytest.mark.parametrize(

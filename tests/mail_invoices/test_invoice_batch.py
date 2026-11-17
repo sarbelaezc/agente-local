@@ -82,9 +82,9 @@ def test_invalid_approval_batch_is_atomic(stores):
 
 
 def test_scope_changes_when_workbook_or_profile_changes(tmp_path):
-    settings = MailSettings(tmp_path / "opera", tmp_path / "profile", tmp_path / "book", tmp_path, "Hoja1", 3)
+    settings = MailSettings("11111111-2222-3333-4444-555555555555", tmp_path / "book", tmp_path, "Hoja1", 3)
     assert batch_scope(settings) != batch_scope(replace(settings, workbook=tmp_path / "other"))
-    assert batch_scope(settings) != batch_scope(replace(settings, profile_dir=tmp_path / "other"))
+    assert batch_scope(settings) != batch_scope(replace(settings, graph_client_id="99999999-2222-3333-4444-555555555555"))
 
 
 def test_lock_prevents_concurrent_execution_and_releases_after_exception(tmp_path):
@@ -396,39 +396,36 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
     stores, monkeypatch, tmp_path, resume,
 ):
     journal, workbook, _ = stores
-    settings = MailSettings(tmp_path / "opera", tmp_path, workbook.path, tmp_path / "backups", "Hoja1", 20)
-    settings.executable.write_bytes(b"")
+    settings = MailSettings("11111111-2222-3333-4444-555555555555", workbook.path, tmp_path / "backups", "Hoja1", 20)
     journal = BatchStateStore(journal.path, batch_scope(settings))
     journal.save([approved(f"TEST-{index}") for index in range(1, 5)])
     monkeypatch.setattr(batch_workflow, "batch_state_path", lambda: journal.path)
     monkeypatch.setattr(batch_workflow, "decisions_path", lambda: tmp_path / "decisions.sqlite3")
     scanned = []
-    page = SimpleNamespace(wait_for_selector=lambda *a, **kw: None)
+    mailbox = SimpleNamespace()
 
-    def simulate(config, days, history, use_model, *, include_review_items, attachment_dir, page):
+    def simulate(config, days, history, use_model, *, include_review_items, attachment_dir, mailbox):
         assert config.batch_limit == 2 and include_review_items
         assert attachment_dir.is_dir()
-        assert page is shared_page
+        assert mailbox is shared_mailbox
         scanned.append(True)
         return {"folders": ["Salud"], "messages": []}
 
-    shared_page = page
+    shared_mailbox = mailbox
     monkeypatch.setattr(batch_workflow, "simulate_classification", simulate)
     mock_folders(monkeypatch)
     closed, launched = [], []
-    context = SimpleNamespace(close=lambda: closed.append(True))
 
     class Session:
         def __enter__(self):
-            return SimpleNamespace(chromium=SimpleNamespace(
-                launch_persistent_context=lambda *a, **kw: launched.append(True) or context,
-            ))
+            launched.append(True)
+            return mailbox
 
         def __exit__(self, *args):
+            closed.append(True)
             return False
 
-    monkeypatch.setattr(batch_workflow, "sync_playwright", Session)
-    monkeypatch.setattr(batch_workflow, "outlook_page", lambda ctx: page)
+    monkeypatch.setattr(batch_workflow, "open_mailbox", lambda config: Session())
 
     review_dirs = []
 
@@ -444,7 +441,8 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
     monkeypatch.setattr(batch_workflow, "BatchReviewWindow", Review)
     executed = []
 
-    def execute(message, journal, store, decisions, page):
+    def execute(message, journal, store, decisions, session):
+        assert session is mailbox
         executed.append(message.conversation)
         message.state = "moved"
         journal.save([message])
@@ -463,8 +461,7 @@ def test_batch_cancellation_or_failure_stops_other_durable_approvals(
     stores, monkeypatch, tmp_path, cancel,
 ):
     journal, workbook, _ = stores
-    settings = MailSettings(tmp_path / "opera", tmp_path, workbook.path, tmp_path, "Hoja1", 3)
-    settings.executable.write_bytes(b"")
+    settings = MailSettings("11111111-2222-3333-4444-555555555555", workbook.path, tmp_path, "Hoja1", 3)
     journal = BatchStateStore(journal.path, batch_scope(settings))
     journal.save([approved("TEST-1"), approved("TEST-2")])
     original = workbook.path.read_bytes()
@@ -472,16 +469,13 @@ def test_batch_cancellation_or_failure_stops_other_durable_approvals(
     monkeypatch.setattr(batch_workflow, "decisions_path", lambda: tmp_path / "decisions.sqlite3")
     mock_folders(monkeypatch)
     closed, attempted = [], []
-    page = SimpleNamespace(wait_for_selector=lambda *a, **kw: None)
-    context = SimpleNamespace(close=lambda: closed.append(True))
 
     class Session:
         def __enter__(self):
-            return SimpleNamespace(chromium=SimpleNamespace(
-                launch_persistent_context=lambda *a, **kw: context,
-            ))
+            return SimpleNamespace()
 
         def __exit__(self, *args):
+            closed.append(True)
             return False
 
     class Review:
@@ -491,11 +485,10 @@ def test_batch_cancellation_or_failure_stops_other_durable_approvals(
         def run(self):
             return not cancel
 
-    monkeypatch.setattr(batch_workflow, "sync_playwright", Session)
-    monkeypatch.setattr(batch_workflow, "outlook_page", lambda ctx: page)
+    monkeypatch.setattr(batch_workflow, "open_mailbox", lambda config: Session())
     monkeypatch.setattr(batch_workflow, "BatchReviewWindow", Review)
 
-    def execute(message, journal, store, decisions, page):
+    def execute(message, journal, store, decisions, session):
         attempted.append(message.conversation)
         message.last_error = "Synthetic failure"
         journal.save([message])
@@ -513,7 +506,7 @@ def test_batch_cancellation_or_failure_stops_other_durable_approvals(
 def test_cli_routes_batch_modes(monkeypatch, tmp_path, flag):
     from mail_invoices import main
 
-    settings = MailSettings(tmp_path / "opera", tmp_path, tmp_path / "book", tmp_path, "Hoja1", 20)
+    settings = MailSettings("11111111-2222-3333-4444-555555555555", tmp_path / "book", tmp_path, "Hoja1", 20)
     monkeypatch.setattr(main, "load_settings", lambda path: settings)
     monkeypatch.setattr("sys.argv", ["mail-invoices", flag, "--batch-size", "2", "--days", "7", "--no-model"])
     calls = []

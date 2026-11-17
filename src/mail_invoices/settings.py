@@ -11,6 +11,8 @@ from mail_invoices.local_model import validate_local_url
 from mail_invoices.storage import REPO_ROOT
 
 DEFAULT_TESSERACT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+CLIENT_ID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+AUTHORITIES = {"consumers", "common"}
 
 
 def _path(value: str) -> Path:
@@ -24,12 +26,15 @@ def _path(value: str) -> Path:
 
 @dataclass(frozen=True)
 class MailSettings:
-    executable: Path
-    profile_dir: Path
+    """Invoice settings. graph_client_id is the invoice app's own Azure registration
+    (Mail.ReadWrite); the monthly close keeps its read-only app."""
+
+    graph_client_id: str
     workbook: Path
     backup_dir: Path
     sheet: str
     batch_limit: int
+    graph_authority: str = "consumers"
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:7b"
     tesseract_executable: Path = Path(DEFAULT_TESSERACT)
@@ -72,10 +77,19 @@ def load_settings(path: Path) -> MailSettings:
     if not isinstance(ocr, dict) or not isinstance(rules, dict):
         raise ValueError("ollama, ocr and folder_rules must be mappings")
     tessdata = ocr.get("tessdata_dir")
+    client_id = str(raw.get("graph_client_id") or "").strip()
+    if not CLIENT_ID.fullmatch(client_id):
+        raise ValueError(
+            "Configure invoices.graph_client_id with the Application (client) ID of the invoice "
+            "app in Azure; the Opera reader was retired and opera_executable/profile_dir are ignored"
+        )
+    authority = str(raw.get("graph_authority", "consumers"))
+    if authority not in AUTHORITIES:
+        raise ValueError("invoices.graph_authority must be consumers or common")
     return MailSettings(
-        _path(raw["opera_executable"]), _path(raw["profile_dir"]),
-        _path(raw["workbook"]), _path(raw["backup_dir"]),
+        client_id, _path(raw["workbook"]), _path(raw["backup_dir"]),
         str(raw.get("sheet", "Hoja1")), limit,
+        graph_authority=authority,
         ollama_url=ollama_url,
         ollama_model=str(ollama.get("model", "qwen2.5:7b")),
         tesseract_executable=_path(str(ocr.get("tesseract_executable", DEFAULT_TESSERACT))),

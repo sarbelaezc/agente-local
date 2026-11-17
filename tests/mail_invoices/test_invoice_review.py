@@ -145,8 +145,7 @@ def test_company_suggestions_use_only_unanimous_history(tmp_path):
 def test_approver_is_loaded_from_config(tmp_path):
     config = tmp_path / "config.yaml"
     config.write_text(
-        "opera_executable: opera.exe\n"
-        "profile_dir: profile\n"
+        "graph_client_id: 11111111-2222-3333-4444-555555555555\n"
         "workbook: book.xlsx\n"
         "backup_dir: backups\n"
         "approver: '  Santiago   Arbelaez '\n",
@@ -166,8 +165,7 @@ def review_window(tmp_path):
     workbook.save(path)
     workbook.close()
     settings = MailSettings(
-        executable=tmp_path / "opera.exe",
-        profile_dir=tmp_path / "profile",
+        graph_client_id="11111111-2222-3333-4444-555555555555",
         workbook=path,
         backup_dir=tmp_path / "backups",
         sheet="Hoja1",
