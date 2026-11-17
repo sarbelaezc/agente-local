@@ -596,10 +596,30 @@ def reconcile_statements(
         for candidate in report.missing
     ]
     imported = 0 if read_only else store.record_statements(report.checks(), events)
+    reclassified = 0 if read_only else store.reclassify_statement_movements(
+        _statement_kinds(report, preferences),
+    )
     return {
         "statements": len(found), "matched": len(report.matched), "missing": len(report.missing),
         "imported": imported, "balances": sum(s.balance_minor is not None for s in found.values()),
+        "reclassified": reclassified,
     }
+
+
+def _statement_kinds(report, preferences: Preferences) -> dict[str, str]:
+    """Kind each statement line would get today, for the movements it imported itself.
+
+    A movement imported from a statement matches its own line on the next run, so it
+    is never imported again; this lets an improved reader correct it while pending.
+    """
+    kinds = {}
+    for candidate, row_id in report.matched:
+        event = statements_module.missing_event(
+            candidate, preferences.categories[-1], income_category(candidate.movement.description),
+        )
+        if event["id"] == row_id:
+            kinds[row_id] = event["kind"]
+    return kinds
 
 
 def import_credit_ledgers(store: Store, data_dir: Path, preferences: Preferences) -> list[str]:
@@ -752,7 +772,8 @@ def run(args: argparse.Namespace) -> None:
             f"{result['matched']} movimientos coinciden con los avisos, {result['missing']} faltaban; "
             f"{result['balances']} saldos de inversiones y creditos. "
             + ("Solo lectura: nada se importo." if args.read_only else
-               f"{result['imported']} importados como pendientes; decidelos en el panel.")
+               f"{result['imported']} importados como pendientes; decidelos en el panel."
+               + (f" {result['reclassified']} pendientes reclasificados." if result["reclassified"] else ""))
         )
         return
     if args.command == "check-config":

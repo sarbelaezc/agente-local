@@ -295,6 +295,14 @@ avisos, como Manuela contrastaba los suyos.
 - **Cuotas de crédito.** Cuentan como gasto cuando se deciden Personal o Familiar.
   Solo admiten Personal, Familiar o No cuenta. Antes un préstamo nunca contaba;
   como no había ninguno importado, los totales anteriores no cambian.
+- **Recargas de tarjetas prepagadas.** «RECARGA DE TARJETA CIVICA» (el pase del
+  metro de Medellín) y otras recargas de tarjeta entran como **compra**, no como
+  pago a tarjeta de crédito, así que se pueden decidir como gasto personal o
+  familiar con su categoría (por ejemplo, Transporte).
+- **Reclasificación de pendientes.** Si el lector mejora, al conciliar de nuevo se
+  corrige el tipo de los movimientos que un extracto importó y que siguen
+  **pendientes**, auditado como `statement-reclassify` con el tipo anterior. Los ya
+  decididos no se tocan.
 - **Solo lectura.** `-ReadOnly` informa la conciliación sin escribir nada.
 
 **Extractos de Protección.** `reconcile-statements` (y cada `scan` o `import`)

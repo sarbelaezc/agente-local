@@ -254,7 +254,7 @@ def test_reconcile_command_reports_read_only_then_imports(store, tmp_path, prefe
         "Extracto_1_202601_CONSOLIDADO_0003.pdf": "no se lee",
     }
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=True)
-    assert result == {"statements": 2, "matched": 0, "missing": 5, "imported": 0, "balances": 1}
+    assert result == {"statements": 2, "matched": 0, "missing": 5, "imported": 0, "balances": 1, "reclassified": 0}
     assert store.state()["transactions"] == [] and store.state()["statement_checks"] == []
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
     assert result["imported"] == 5
@@ -517,7 +517,7 @@ def test_reconcile_stores_protection_figures_without_importing_movements(store, 
         "0A81F6F5_PensionVoluntaria_202512.pdf": VOLUNTARY_PREVIOUS,  # before the start: skipped
     }
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
-    assert result == {"statements": 2, "matched": 0, "missing": 0, "imported": 0, "balances": 2}
+    assert result == {"statements": 2, "matched": 0, "missing": 0, "imported": 0, "balances": 2, "reclassified": 0}
     assert store.state()["transactions"] == []
     checks = {check["product"]: check for check in store.state()["statement_checks"]}
     assert checks["PROTECCION_VOLUNTARIA"]["contributions_minor"] == 50_000_000
@@ -543,3 +543,55 @@ def test_a_protection_statement_mail_is_never_sent_to_ollama(preferences):
         "2026-03-05T23:00:51+00:00", "Adjuntamos tu extracto. Saldo $ 1.234.567",
     )
     assert extract(mail, own, NoModel()) == []
+
+
+# ---------------------------------------------------------------- prepaid card top-ups
+
+SAVINGS_TOPUP = """Extracto de cuenta
+DESDE: 2026/01/01 HASTA: 2026/03/31
+CUENTA DE AHORROS
+NÚMERO 12345670001
+FECHA DESCRIPCIÓN SUCURSAL DCTO. VALOR SALDO
+23/01 RECARGA DE TARJETA CIVICA -18,430.00 981,570.00
+24/01 RECARGA DE TARJETA CIVICA -18,430.00 963,140.00
+25/01 PAGO SUC VIRT TC MASTER DOLAR -50,000.00 913,140.00
+"""
+
+
+@pytest.mark.parametrize("description,hint", [
+    ("RECARGA DE TARJETA CIVICA", "purchase"),
+    ("Recarga Tarjeta Civica", "purchase"),
+    ("PAGO SUC VIRT TC MASTER DOLAR", "card_payment"),
+    ("ABONO SUCURSAL VIRTUAL TARJETA", "card_payment"),
+])
+def test_a_prepaid_card_top_up_is_a_purchase_not_a_credit_card_payment(description, hint):
+    assert st._hint(description, outflow=True) == hint
+
+
+def test_reconcile_corrects_pending_movements_it_imported_with_an_old_kind(store, tmp_path, preferences, monkeypatch):
+    savings = st.parse("CTA_AHORROS", "202601", SAVINGS_TOPUP)
+    report = st.reconcile([savings], [], date(2026, 1, 1))
+    events = [st.missing_event(c, "Otros gastos", "Otros ingresos") for c in report.missing]
+    assert [event["kind"] for event in events] == ["purchase", "purchase", "card_payment"]
+    # As the previous reader stored them: both top-ups as card payments, one already decided.
+    store.record_statements(report.checks(), [
+        {**event, "kind": "card_payment"} if "CIVICA" in event["merchant"] else event for event in events
+    ])
+    decided = events[1]["id"]
+    store.decide(decided, "exclude")
+
+    texts = {"Extracto_1_202601_CTA_AHORROS_0001.pdf": SAVINGS_TOPUP}
+    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=True)
+    assert result["reclassified"] == 0  # read-only writes nothing
+    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
+    assert (result["imported"], result["reclassified"]) == (0, 1)
+
+    kinds = {row["id"]: (row["kind"], row["decision"]) for row in store.state()["transactions"]}
+    assert kinds[events[0]["id"]] == ("purchase", None)
+    assert kinds[decided] == ("card_payment", "exclude")  # a person's decision stands
+    assert kinds[events[2]["id"]] == ("card_payment", None)
+    with store.connect() as db:
+        audit = db.execute("SELECT target, value FROM audit WHERE action='statement-reclassify'").fetchall()
+    assert [tuple(row) for row in audit] == [(events[0]["id"], "card_payment -> purchase")]
+    # Repeating it changes nothing.
+    assert run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)["reclassified"] == 0

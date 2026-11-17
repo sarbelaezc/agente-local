@@ -972,6 +972,26 @@ class Store:
         # No rule decides them: what only a statement shows is always confirmed by a person.
         return len(inserted)
 
+    def reclassify_statement_movements(self, kinds: dict[str, str]) -> int:
+        """Correct the kind of statement movements still pending, after the reader improved.
+
+        Decided movements are never touched: a person's decision stands. Each change is
+        audited with its previous kind.
+        """
+        changed = 0
+        with self.connect() as db:
+            for event_id, kind in kinds.items():
+                row = db.execute(
+                    "SELECT kind FROM transactions WHERE id=? AND id LIKE 'stmt:%' AND decision IS NULL",
+                    (event_id,),
+                ).fetchone()
+                if row is None or row["kind"] == kind:
+                    continue
+                db.execute("UPDATE transactions SET kind=? WHERE id=?", (kind, event_id))
+                self._audit(db, "statement-reclassify", event_id, f"{row['kind']} -> {kind}")
+                changed += 1
+        return changed
+
     def set_destinations(self, destinations: dict[str, str]) -> int:
         """Record destinations read again from the original notices.
 
