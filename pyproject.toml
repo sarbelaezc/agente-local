@@ -33,6 +33,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 monthly_close = ["dashboard.html"]
+mail_invoices = ["review.html"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

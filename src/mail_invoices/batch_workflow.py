@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from mail_invoices.assist import to_json
-from mail_invoices.batch_review_ui import BatchReviewWindow
+from mail_invoices.batch_review import (
+    LegacyDecisionRequired, approve_batch, batch_result, batch_view, refresh_view,
+)
 from mail_invoices.batch_state import (
     BatchMessage, BatchStateStore, batch_lock, batch_scope, batch_state_path,
 )
@@ -16,8 +18,44 @@ from mail_invoices.folders import ConfirmedExample
 from mail_invoices.graph_mailbox import (
     MailboxError, discover_folders, move_registered_message, open_mailbox, verify_destination,
 )
+from mail_invoices.review_server import ReviewPanel
 from mail_invoices.settings import MailSettings
 from mail_invoices.workbook import InvoiceWorkbook, WorkbookError
+
+
+class BatchReviewPanel:
+    """Web review of a batch: run() returns True only after a valid approval was saved."""
+
+    def __init__(
+        self, messages: list[BatchMessage], folders: list[str], settings: MailSettings,
+        journal: BatchStateStore, attachment_dir: Path | None,
+    ) -> None:
+        workbook = InvoiceWorkbook(settings.workbook, settings.backup_dir, settings.sheet)
+        view, pdfs = batch_view(messages, folders, settings, attachment_dir, workbook)
+
+        def approve(raw: dict) -> dict:
+            try:
+                approve_batch(messages, folders, journal, workbook, raw)
+            except LegacyDecisionRequired as error:
+                error.payload = {"legacy": [asdict(question) for question in error.questions]}
+                raise
+            except (OSError, sqlite3.Error) as error:
+                raise ValueError(f"No se guardó la aprobación: {error}") from error
+            return {"finish": True}
+
+        self.panel = ReviewPanel(lambda: refresh_view(view, messages), {"/api/approve": approve}, pdfs)
+
+    def run(self) -> bool:
+        approved = self.panel.run()
+        if not approved:
+            self.panel.stop()
+        return approved
+
+    def executing(self) -> None:
+        self.panel.executing()
+
+    def finish(self, result: dict) -> None:
+        self.panel.finish(result)
 
 
 def _active_messages(messages: list[BatchMessage], limit: int) -> list[BatchMessage]:
@@ -151,10 +189,11 @@ def _process_invoice_batch(
                 print(to_json({"messages": [], "message": "No hay correos pendientes"}))
                 return 1 if missing_identity else 0
             folders = [folder.path for folder in discover_folders(mailbox)]
-            window = BatchReviewWindow(active, folders, settings, journal, attachment_dir)
+            window = BatchReviewPanel(active, folders, settings, journal, attachment_dir)
             if not window.run():
                 print(to_json({"executed": False, "message": "Lote cerrado sin ejecutar"}))
                 return 1
+            window.executing()
             decisions = ClassificationDecisionStore(decisions_path())
             workbook = InvoiceWorkbook(settings.workbook, settings.backup_dir, settings.sheet)
             failed = False
@@ -165,6 +204,7 @@ def _process_invoice_batch(
                     failed = True
                     # Stop the batch on failures; remaining durable approvals can be resumed.
                     break
+            window.finish(batch_result(active, failed))
         print(to_json({
             "messages": [
                 {"conversation": message.conversation, "state": message.state,

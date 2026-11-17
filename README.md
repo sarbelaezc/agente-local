@@ -18,7 +18,7 @@ implementa.
 - **API de Gmail con `google-auth-oauthlib`** (solo lectura, permiso `gmail.readonly`) lee el buzón de Gmail de Manuela, si está configurado. La librería solo gestiona el inicio de sesión y la renovación del token; las consultas usan `httpx`.
 - **Una instancia local de Ollama compartida por facturas y cierre mensual** en `127.0.0.1:11434`; `scripts/agente-local.ps1` la inicia cuando un comando la necesita y no está activa, con el almacén de modelos predeterminado de Ollama.
 - **Facturas:** `openpyxl` para Excel, `defusedxml` para XML, `pypdf` para PDF con texto, y `pypdfium2` más `Pillow` para renderizar PDF escaneados.
-- **Tkinter y SQLite** de la biblioteca estándar para interfaces y persistencia local; **pytest** para pruebas.
+- **Paneles web locales** en `127.0.0.1` (cierre mensual y revisión de facturas) y **SQLite** de la biblioteca estándar para la persistencia local; **pytest** para pruebas.
 - **Tesseract OCR** es una instalación externa opcional, necesaria solo para PDF escaneados. Ollama también se instala aparte.
 
 ## Reproducir en otro equipo Windows
@@ -1380,27 +1380,53 @@ para probar otra feature).
 
 - `main.py`: argumentos y selección del modo de ejecución.
 - `workflow.py`: modos de solo lectura y extracción compartida de adjuntos.
-- `review.py`: datos y reglas de revisión, sin depender de Tkinter.
-- `review_ui.py`: ventana, selección y aprobación humana.
+- `review.py`: conversión y validación de los campos revisados.
+- `batch_review.py`: lo que muestra el panel y las reglas de aprobación (correo completo, carpeta existente, aprobador, duplicados históricos), sin interfaz.
+- `review_server.py` y `review.html`: panel web local de revisión y aprobación.
 - `graph_mailbox.py`: buzón por Microsoft Graph (carpetas, candidatos, adjuntos, mover y verificar) y su sesión.
 - `documents.py`, `ocr.py`, `assist.py` y `local_model.py`: extracción y asistencia local.
 - `workbook.py`: validación, duplicados, respaldo y escritura verificada del Excel.
 - `settings.py`: lectura de la sección de facturas de la configuración unificada.
 - `classification_decisions.py`: decisiones confirmadas y extractos de contexto en SQLite local.
-- `batch_state.py`, `batch_review_ui.py` y `batch_workflow.py`: estados persistentes,
-  revisión conjunta y ejecución recuperable de lotes pequeños.
+- `batch_state.py` y `batch_workflow.py`: estados persistentes y ejecución
+  recuperable de lotes pequeños.
 
-Los controles de aprobación se prueban sin abrir ventanas. Una prueba gráfica
-separada construye Tkinter y acciona los botones en un proceso aislado con un
-libro sintético; no requiere correo ni Excel real. Las pruebas de la CLI verifican
-sus argumentos y las del flujo conservan los errores informados.
+Las reglas de aprobación se prueban sin navegador; el servidor del panel, con
+peticiones HTTP locales, y la página, en Chromium con Playwright y un libro
+sintético. No requieren correo ni Excel real. Las pruebas de la CLI verifican sus
+argumentos y las del flujo conservan los errores informados.
 
-Pytest usa captura `sys` de stdout y stderr. En este entorno Windows, la captura
-`fd` reproduce fallos intermitentes al inicializar Tcl/Tk después de leer un XLSX,
-incluso fuera del código del agente. No fuerce `--capture=fd` para estas pruebas
-gráficas. Una regresión repite la lectura de XLSX y la apertura de Tkinter en el
-mismo proceso. Este ajuste corrige el modo de ejecución de las pruebas, no modifica
-la instalación de Python ni incorpora reintentos que oculten errores de la aplicación.
+### Panel de revisión de facturas
+
+La revisión del lote y la simulación de clasificación se hacen en un panel web
+local, con el mismo estilo que el del cierre mensual y temas claro y oscuro.
+Reemplaza las ventanas Tkinter. Cada ejecución lo abre en el navegador
+predeterminado en `http://127.0.0.1:<puerto libre>/` y lo cierra al terminar.
+
+- **Seguridad.** Solo escucha en `127.0.0.1`, exige Host y Origin exactos y un
+  token CSRF nuevo en cada ejecución, y no carga recursos externos. Los PDF se
+  sirven por un token del lote, nunca por ruta, y se abren en el visor del
+  navegador. Todo texto que viene de un correo se muestra como texto, nunca como
+  HTML.
+- **Aprobación.** Cada correo es una tarjeta con su estado, sus avisos, la
+  carpeta destino y sus facturas editables (empresa, razón social, fecha, valor,
+  número y moneda). La casilla de cada correo empieza vacía y aprueba todas sus
+  facturas; un correo con errores de extracción se muestra en solo lectura. La
+  barra inferior resume qué se va a aprobar y en qué carpetas, y su botón cambia
+  según la selección («Aprobar y ejecutar 2 correos»).
+- **Validación.** Cada campo se valida al salir de él. Al aprobar, un resumen de
+  errores enlaza a cada campo y recibe el foco. El servidor vuelve a validar todo
+  con las mismas reglas de antes y guarda todas las aprobaciones juntas antes de
+  escribir Excel o mover correos; si algo falla, no guarda ninguna.
+- **Duplicados históricos.** Si una factura coincide con una fila del Excel sin
+  número, el panel pide decidir para cada una: asociar el número a esa fila o
+  agregarla como nueva. Sin esa decisión no se aprueba nada.
+- **Ejecución.** Tras aprobar, el panel muestra el avance de cada correo
+  (registrado, archivado o con error) y el resultado final. Cerrar la pestaña con
+  cambios sin aprobar, o mientras se ejecuta el lote, pide confirmación.
+- **Cerrar sin aprobar.** «Cerrar sin ejecutar», o cerrar la pestaña (el panel
+  deja de responder en 90 segundos), termina la revisión sin escribir Excel ni
+  mover correos. Si el panel no se abre en 10 minutos, tampoco se ejecuta nada.
 
 Se preparó un módulo de facturas, con extracción
 local de XML UBL, ZIP y PDF con texto. La lectura de XML sigue siendo la fuente
@@ -1491,7 +1517,7 @@ los adjuntos se eliminan al terminar cada ejecución.
 Solo se borra el subdirectorio temporal creado por esa ejecución; otros archivos
 de `attachments_dir` y las fuentes de `--analyze-file` no se modifican.
 Los errores y las facturas pendientes bloquean la aptitud para un movimiento
-posterior. La ventana muestra el estado de cada factura, el destino propuesto
+posterior. El panel muestra el estado de cada factura, el destino propuesto
 y el motivo; puede cambiar la carpeta o dejarla vacía. **Cerrar la simulación
 no mueve correos**. El informe se imprime en JSON sin los extractos de contexto.
 Una sugerencia de Ollama no es una aprobación.
@@ -1499,10 +1525,10 @@ Una sugerencia de Ollama no es una aprobación.
 #### Guardar correcciones y reutilizarlas
 
 1. Elija la carpeta correcta en cada desplegable.
-2. Marque **«Confirmo esta carpeta como ejemplo para futuras sugerencias»**
+2. Marque **«Guardar esta carpeta como ejemplo para futuras sugerencias»**
    solo en los correos que haya revisado; las casillas empiezan desmarcadas.
 3. Verifique **«Confirmado por»**, precargado con `invoices.approver`.
-4. Pulse **«Guardar decisiones confirmadas»**. Guardar no mueve correos ni
+4. Pulse **«Guardar ejemplos confirmados»**. Guardar no mueve correos ni
    registra facturas; el destino puede confirmarse aunque siga pendiente en Excel.
    Una selección sin carpeta o sin nombre de confirmador se rechaza.
 
@@ -1522,7 +1548,7 @@ ya no existen. Las decisiones de otros correos se conservan; volver a confirmar
 el mismo contexto sustituye su carpeta anterior. Son ejemplos para el contexto,
 no entrenamiento de pesos ni reglas automáticas por remitente. Las sugerencias
 siguen requiriendo revisión humana; `--no-model` no usa estos ejemplos para decidir.
-Cerrar la ventana sin guardar no confirma nada. Los errores de almacenamiento
+Cerrar el panel sin guardar no confirma nada. Los errores de almacenamiento
 se muestran y no se notifican como éxito.
 
 El historial de correos archivados no se lee por defecto. Autorice carpetas
@@ -1547,15 +1573,15 @@ supervisado y la aprobación explícita de su destino.
 Prepara hasta 3 correos por defecto (entre 1 y 5 con `--batch-size`, independiente
 de `invoices.batch_limit`, que solo usa `--classify-invoices`). Cada ejecución abre
 una sola sesión de Graph y la reutiliza para clasificar, revisar y archivar;
-`--resume-invoice-batch` sin pendientes termina sin conectarse al buzón. La ventana muestra las facturas
+`--resume-invoice-batch` sin pendientes termina sin conectarse al buzón. El panel muestra las facturas
 editables, la carpeta sugerida y los errores de cada correo. La selección es por
 correo, empieza desmarcada e incluye TODAS sus facturas; un adjunto con errores
 bloquea la selección. Puede usar «Seleccionar correos aptos» y desmarcar después.
 Revise cada destino: una carpeta propuesta por Ollama no es una autorización.
-La ventana permite desplazarse con la rueda del mouse. Cada factura ofrece
-«Abrir factura (PDF)» cuando existe un PDF directo o un único PDF asociado en el
-ZIP; el botón queda deshabilitado si no hay una asociación inequívoca. Los PDFs
-se abren desde el directorio temporal del lote, que se elimina al cerrar.
+Cada factura ofrece «Ver PDF» cuando existe un PDF directo o un único PDF
+asociado en el ZIP; no aparece si no hay una asociación inequívoca. El PDF se
+abre en otra pestaña desde el directorio temporal del lote, que se elimina al
+cerrar.
 Los campos rechazados por Ollama se muestran como advertencias editables. Corrija
 los valores con el PDF y revise TODAS las facturas del correo; solo se puede
 aprobar el correo completo y todos sus campos deben validar. Los errores de
@@ -1568,9 +1594,9 @@ filas con la misma razón social usan la misma empresa; si no hay una coincidenc
 histórica inequívoca, usa la razón social del documento. Verifique la sugerencia.
 El campo «Aprobado por» se precarga con `approver` y sigue siendo editable.
 
-**«Aprobar y ejecutar lote»** guarda las aprobaciones y autoriza, para cada correo
+**«Aprobar y ejecutar»** guarda las aprobaciones y autoriza, para cada correo
 seleccionado, registro en Excel con respaldo, guardado local de la carpeta como
-ejemplo y movimiento al destino elegido, sin otra ventana de aprobación.
+ejemplo y movimiento al destino elegido, sin otra confirmación.
 Los posibles duplicados históricos conservan sus confirmaciones. Si falta un
 campo, carpeta o confirmador, no se guarda la aprobación del lote. Cerrar sin
 ejecutar conserva los pendientes, pero no escribe Excel ni mueve correos.
@@ -1592,7 +1618,7 @@ Para retomar sin descargar ni clasificar de nuevo:
 .\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --resume-invoice-batch --batch-size 3
 ```
 
-La ventana muestra los pendientes y las aprobaciones previas. Pulsar ejecutar
+El panel muestra los pendientes y las aprobaciones previas. Pulsar ejecutar
 retoma estas últimas sin volver a pedir sus datos o carpeta. Un estado `approved`
 registra de forma idempotente y verifica Excel; `registered` verifica el libro
 y continúa solo el archivo. Antes de pedir a Graph que mueva el correo se guarda `moving`. Si el
@@ -1603,7 +1629,7 @@ de nuevo. Un conflicto de registro bloquea el archivo. Si el Excel está abierto
 al ejecutar, el correo conserva su estado `approved` con el error y se reintenta
 tras cerrar el libro; no pasa a `blocked` ni exige volver a aprobarlo.
 Los correos `blocked` muestran campos editables precargados con la última revisión.
-Corrija el conflicto en Excel o los datos de la ventana y seleccione explícitamente
+Corrija el conflicto en Excel o los datos del panel y seleccione explícitamente
 el correo para volver a aprobarlo. Cerrar no altera su estado ni su autorización.
 Una nueva aprobación revalida todos los campos y el registro antes de mover;
 no modifica silenciosamente filas existentes. Los movimientos `moving` siguen

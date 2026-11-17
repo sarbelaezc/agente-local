@@ -20,7 +20,6 @@ def classify_invoices(
 ) -> int:
     """Simulate classification, review destinations, and print the read-only report."""
     from mail_invoices.classification import simulate_classification
-    from mail_invoices.classification_ui import review_classification
     from mail_invoices.classification_decisions import ClassificationDecisionStore, decisions_path
 
     report = simulate_classification(
@@ -31,6 +30,31 @@ def classify_invoices(
         message.pop("classification_context", None)
     print(to_json(report))
     return 1 if any(item["errors"] for item in report["messages"]) else 0
+
+
+def review_classification(report: dict, store, approver: str) -> None:
+    """Web review of a classification run: saves only confirmed examples, never moves mail."""
+    import sqlite3
+
+    from mail_invoices.batch_review import classification_view, record_reviewed_folders, save_classification
+    from mail_invoices.review_server import ReviewPanel
+
+    def save(raw: dict) -> dict:
+        try:
+            return {"saved": save_classification(report, store, raw)}
+        except (OSError, sqlite3.Error) as error:
+            raise ValueError(f"No se guardaron las decisiones: {error}") from error
+
+    def close(raw: dict) -> dict:
+        record_reviewed_folders(report, raw.get("folders", {}))
+        return {}
+
+    panel = ReviewPanel(
+        lambda: classification_view(report, store.path, approver),
+        {"/api/save-decisions": save, "/api/close": close},
+    )
+    panel.run()
+    panel.stop()
 
 
 def login(settings: MailSettings) -> int:

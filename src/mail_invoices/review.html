@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)">
+  <title>Facturas · Panel local</title>
+  <style>
+    /* Same visual language as the monthly close dashboard: warm paper, ink, rounded cards. */
+    :root {
+      color-scheme: light;
+      --bg: #f6f5f2; --surf: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --mut: #6f6e69;
+      --line: #e6e5e0; --soft: #efeeea;
+      --acc: #2a78d6; --good: #1a7f4b; --warn: #8a5200; --bad: #b42318;
+      --good-soft: color-mix(in srgb, var(--good) 13%, var(--surf));
+      --warn-soft: color-mix(in srgb, #eda100 18%, var(--surf));
+      --bad-soft: color-mix(in srgb, var(--bad) 11%, var(--surf));
+      --acc-soft: color-mix(in srgb, var(--acc) 13%, var(--surf));
+      --bar-h: 132px;
+      font: 15px/1.45 ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg); color: var(--ink);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --bg: #121211; --surf: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --mut: #a3a29a;
+        --line: #2b2b29; --soft: #242422;
+        --acc: #3987e5; --good: #4cc38a; --warn: #e0a13a; --bad: #ff8f84;
+      }
+    }
+    * { box-sizing: border-box; }
+    /* The approval bar is fixed: focused fields never hide behind it. */
+    html { scroll-padding-bottom: calc(var(--bar-h) + 16px); scroll-padding-top: 16px; }
+    body { margin: 0; min-width: 320px; background: var(--bg); color: var(--ink); }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    :where(button, a, input, select, label) { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+    :where(button, a, input, select):focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
+    [hidden] { display: none !important; }
+    .skip-link { position: absolute; top: 8px; left: 8px; z-index: 20; transform: translateY(-160%); padding: 10px 14px; border-radius: 12px; background: var(--surf); }
+    .skip-link:focus-visible { transform: none; }
+    @media (prefers-reduced-motion: no-preference) { .pill, .card { transition: background-color .2s, border-color .2s; } }
+
+    .shell { max-width: 1040px; margin: 0 auto; padding: 18px 14px calc(var(--bar-h) + 32px); }
+    header.top { margin-bottom: 14px; }
+    h1 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.2px; }
+    h1, h2, h3 { text-wrap: balance; }
+    .lede { margin: 4px 0 0; max-width: 72ch; color: var(--ink2); }
+    .meta { margin: 6px 0 0; color: var(--mut); font-size: 13px; overflow-wrap: anywhere; }
+
+    .alert { margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; background: var(--soft); }
+    .alert.bad { background: var(--bad-soft); }
+    .alert.warn { background: var(--warn-soft); }
+    .alert.good { background: var(--good-soft); }
+    .alert h2 { margin: 0 0 6px; font-size: 15px; }
+    .alert ul { margin: 0; padding-left: 20px; }
+    .alert a { color: inherit; font-weight: 600; }
+
+    .card { margin: 0 0 12px; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surf); }
+    .card.chosen { border-color: var(--ink); }
+    .card-head { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; }
+    .card-head > div { min-width: 0; }
+    /* The whole square around the checkbox is its hit target (44 px). */
+    .choose-hit { display: grid; place-items: center; width: 44px; height: 44px; margin: -11px 0 0 -11px; border-radius: 12px; cursor: pointer; }
+    .choose-hit:hover { background: var(--soft); }
+    .card-head h2 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+    .sender { margin: 2px 0 0; color: var(--ink2); font-size: 13.5px; overflow-wrap: anywhere; }
+    .choose { width: 22px; height: 22px; margin: 1px 0 0; accent-color: var(--ink); }
+    .pill { display: inline-flex; align-items: center; min-height: 26px; padding: 3px 10px; border-radius: 999px; background: var(--soft); font-size: 13px; font-weight: 600; white-space: nowrap; }
+    .pill[data-tone="good"] { background: var(--good-soft); color: var(--good); }
+    .pill[data-tone="warn"] { background: var(--warn-soft); color: var(--warn); }
+    .pill[data-tone="bad"] { background: var(--bad-soft); color: var(--bad); }
+    .pill[data-tone="acc"] { background: var(--acc-soft); color: var(--acc); }
+    .notes { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13.5px; }
+    .notes li { padding: 6px 10px; border-radius: 10px; background: var(--soft); }
+    .notes .bad { background: var(--bad-soft); }
+    .notes .warn { background: var(--warn-soft); }
+
+    .field { display: grid; gap: 4px; min-width: 0; align-content: start; }
+    .field label, .field .label { font-weight: 600; font-size: 13.5px; }
+    .field input, .field select {
+      width: 100%; min-height: 44px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px;
+      background-color: var(--bg); color: var(--ink);
+    }
+    .field input[aria-invalid="true"], .field select[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-soft); }
+    .field .error { color: var(--bad); font-size: 13px; }
+    .field .hint { color: var(--mut); font-size: 12.5px; }
+    .folder-row { margin-top: 12px; max-width: 520px; }
+
+    .invoice { margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--soft); }
+    .invoice-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .invoice-head h3 { margin: 0; font-size: 14.5px; overflow-wrap: anywhere; }
+    .invoice-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    @media (max-width: 760px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } .card-head { grid-template-columns: auto 1fr; } .card-head .pill { grid-column: 2; justify-self: start; } }
+    .readonly dd { margin: 0 0 6px; overflow-wrap: anywhere; }
+    .readonly dt { color: var(--mut); font-size: 12.5px; }
+    .readonly { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 12px; margin: 0; }
+    .numeric { font-variant-numeric: tabular-nums; }
+
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 9px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surf); font-weight: 600; text-decoration: none; color: var(--ink); }
+    .button:hover { border-color: var(--ink2); }
+    .button.primary { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+    .button[disabled], .button[aria-disabled="true"] { cursor: not-allowed; opacity: .5; }
+    .button.small { min-height: 38px; padding: 7px 11px; font-size: 13.5px; }
+
+    .legacy { border: 2px solid var(--warn); }
+    .legacy fieldset { margin: 10px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+    .legacy legend { padding: 0 4px; font-weight: 600; }
+    .choice { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+    .choice input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--ink); }
+
+    /* The one bold element: a fixed bar that always says what approving will do. */
+    .bar { position: fixed; inset: auto 0 0 0; z-index: 10; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surf) 94%, transparent); backdrop-filter: blur(8px); }
+    .bar-inner { max-width: 1040px; margin: 0 auto; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: 1fr auto; gap: 10px 16px; align-items: end; }
+    .summary { margin: 0; font-weight: 600; }
+    .summary-detail { margin: 2px 0 0; color: var(--ink2); font-size: 13.5px; overflow-wrap: anywhere; }
+    .bar .field { max-width: 260px; }
+    .bar-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+    @media (max-width: 760px) {
+      .bar-inner { grid-template-columns: 1fr; gap: 8px; padding-top: 10px; }
+      .summary-detail { display: none; }
+      .bar .field { max-width: none; grid-template-columns: auto 1fr; align-items: center; column-gap: 10px; }
+      .bar .field .error { grid-column: 1 / -1; }
+      .bar-actions { grid-column: 1; grid-row: auto; display: grid; grid-template-columns: 1fr 1fr; }
+      .bar-actions .button { min-height: 44px; padding: 8px 10px; font-size: 13.5px; }
+      .bar-actions .primary { grid-column: 1 / -1; order: 3; font-size: 15px; }
+    }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#approve">Ir a la aprobación</a>
+  <main class="shell" id="main">
+    <header class="top">
+      <h1 id="title">Facturas por revisar</h1>
+      <p class="lede" id="lede">Cargando el lote…</p>
+      <p class="meta" id="meta"></p>
+    </header>
+    <div id="status" role="status" aria-live="polite"></div>
+    <div id="problems" class="alert bad" role="alert" tabindex="-1" hidden aria-labelledby="problems-title">
+      <h2 id="problems-title">Revisa esto antes de aprobar</h2>
+      <ul id="problems-list"></ul>
+    </div>
+    <section id="legacy" class="card legacy" hidden aria-labelledby="legacy-title" tabindex="-1">
+      <h2 id="legacy-title">Posibles facturas ya registradas</h2>
+      <p class="lede">Estas facturas coinciden con una fila del Excel que no tiene número. Decide cada una y vuelve a aprobar.</p>
+      <div id="legacy-list"></div>
+    </section>
+    <div id="cards"></div>
+  </main>
+
+  <div class="bar" id="bar">
+    <div class="bar-inner">
+      <div>
+        <p class="summary" id="summary">Ningún correo seleccionado</p>
+        <p class="summary-detail" id="summary-detail"></p>
+      </div>
+      <div class="field" id="approver-field">
+        <label for="approver" id="approver-label">Aprobado por</label>
+        <input id="approver" name="approver" autocomplete="name" maxlength="100" aria-describedby="approver-error">
+        <span class="error" id="approver-error"></span>
+      </div>
+      <div class="bar-actions">
+        <button type="button" class="button" id="select-ready">Seleccionar correos aptos</button>
+        <button type="button" class="button" id="close">Cerrar sin ejecutar</button>
+        <button type="button" class="button primary" id="approve">Aprobar y ejecutar</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+    const FIELDS = [
+      ["company", "Empresa", "text"], ["legal_name", "Razón social", "text"], ["issued", "Fecha", "date"],
+      ["amount", "Valor", "text"], ["number", "Número de factura", "text"], ["currency", "Moneda", "text"],
+    ];
+    const METHOD = { xml: "Datos del XML", pdf_text: "Texto del PDF", ocr: "OCR del PDF" };
+    const TONE = { pending: "", approved: "acc", registered: "acc", moving: "warn", moved: "good", blocked: "bad" };
+    const state = { view: null, csrf: "", legacy: {}, phase: "review", timer: null, busy: false };
+
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined && text !== null) node.textContent = text;
+      return node;
+    }
+    function plural(count, one, many) { return `${count} ${count === 1 ? one : many}`; }
+    function announce(text) { const box = $("status"); box.replaceChildren(el("p", "alert", text)); }
+
+    async function api(path, body) {
+      const response = await fetch(path, body === undefined ? {} : {
+        method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": state.csrf },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => ({ error: "Respuesta no válida del panel." }));
+      if (!response.ok) { const error = new Error(data.error || "No se pudo completar la acción."); error.data = data; throw error; }
+      return data;
+    }
+
+    // ---------------------------------------------------------------- rendering
+
+    function folderSelect(id, folders, value, allowEmpty) {
+      const select = el("select");
+      select.id = id;
+      const first = el("option", "", allowEmpty ? "Sin carpeta" : "Elige una carpeta…");
+      first.value = "";
+      select.append(first);
+      for (const folder of folders) { const option = el("option", "", folder); option.value = folder; select.append(option); }
+      select.value = folders.includes(value) ? value : "";
+      return select;
+    }
+
+    function field(id, label, input, hint) {
+      const box = el("div", "field");
+      const caption = el("label", "", label);
+      caption.htmlFor = id;
+      input.id = id;
+      const error = el("span", "error");
+      error.id = `${id}-error`;
+      input.setAttribute("aria-describedby", hint ? `${id}-hint ${id}-error` : `${id}-error`);
+      box.append(caption, input);
+      if (hint) { const help = el("span", "hint", hint); help.id = `${id}-hint`; box.append(help); }
+      box.append(error);
+      return box;
+    }
+
+    function notes(items) {
+      const list = el("ul", "notes");
+      for (const [text, tone] of items) if (text) list.append(el("li", tone, text));
+      return list.childElementCount ? list : null;
+    }
+
+    function invoiceBlock(message, invoice, index, editable) {
+      const box = el("section", "invoice");
+      box.setAttribute("aria-label", `Factura ${index + 1} de ${message.invoices.length}`);
+      const head = el("div", "invoice-head");
+      head.append(el("h3", "", `Factura ${index + 1}: ${invoice.values.number || "sin número"}`));
+      const tags = el("div", "invoice-tags");
+      tags.append(el("span", "pill", METHOD[invoice.method] || invoice.method));
+      if (invoice.requires_review) { const pill = el("span", "pill", "Revisar contra el PDF"); pill.dataset.tone = "warn"; tags.append(pill); }
+      if (invoice.pdf) {
+        const link = el("a", "button small", "Ver PDF");
+        link.href = `/api/pdf/${invoice.pdf}`;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.setAttribute("aria-label", `Ver el PDF de la factura ${index + 1} en otra pestaña`);
+        tags.append(link);
+      }
+      head.append(tags);
+      box.append(head);
+      const warnings = [];
+      if (invoice.rejected_fields.length) warnings.push([`Ollama propuso valores sin respaldo en el documento para: ${invoice.rejected_fields.join(", ")}. Complétalos con el PDF.`, "warn"]);
+      if (invoice.model_error) warnings.push([`Ollama no respondió: ${invoice.model_error}`, "warn"]);
+      const extra = notes(warnings);
+      if (extra) box.append(extra);
+      if (!editable) {
+        const list = el("dl", "readonly");
+        for (const [key, label] of FIELDS) { list.append(el("dt", "", label), el("dd", key === "amount" ? "numeric" : "", invoice.values[key] || "—")); }
+        box.append(list);
+        return box;
+      }
+      const grid = el("div", "grid");
+      for (const [key, label, type] of FIELDS) {
+        const input = el("input");
+        input.type = type;
+        input.value = invoice.values[key] || "";
+        input.dataset.key = key;
+        input.name = key;
+        input.autocomplete = "off";
+        if (["number", "amount", "currency"].includes(key)) input.spellcheck = false;
+        input.required = true;
+        if (key === "amount") { input.inputMode = "decimal"; input.classList.add("numeric"); }
+        if (key === "currency") { input.maxLength = 3; input.autocapitalize = "characters"; }
+        let hint = "";
+        if (key === "company" && invoice.company_hint === "history") hint = "Sugerida por el historial del Excel; verifícala.";
+        if (key === "company" && invoice.company_hint === "legal_name") hint = "Sin historial: se usa la razón social.";
+        input.addEventListener("blur", () => checkField(input));
+        grid.append(field(`f-${message.id}-${index}-${key}`.replace(/[^\w-]/g, "_"), label, input, hint));
+      }
+      box.append(grid);
+      return box;
+    }
+
+    function batchCard(message) {
+      const card = el("article", "card");
+      card.dataset.id = message.id;
+      card.setAttribute("aria-labelledby", `t-${message.id}`.replace(/[^\w-]/g, "_"));
+      const head = el("div", "card-head");
+      const editable = message.editable && message.selectable && state.phase === "review";
+      const choose = el("input", "choose");
+      choose.type = "checkbox";
+      choose.disabled = !editable;
+      // A message with extraction errors stays locked whatever the phase does to other controls.
+      if (choose.disabled) choose.dataset.locked = "true";
+      choose.setAttribute("aria-label", `Aprobar «${message.subject}» con sus ${plural(message.invoices.length, "factura", "facturas")}`);
+      choose.addEventListener("change", () => { card.classList.toggle("chosen", choose.checked); updateSummary(); });
+      if (!message.editable) choose.hidden = true;
+      const hit = el("label", "choose-hit");
+      hit.append(choose);
+      if (choose.hidden) hit.hidden = true;
+      const titles = el("div");
+      const title = el("h2", "", message.subject);
+      title.id = card.getAttribute("aria-labelledby");
+      const sender = el("p", "sender", message.sender);
+      sender.translate = false;
+      titles.append(title, sender);
+      const pill = el("span", "pill", message.state_text);
+      pill.dataset.tone = TONE[message.state] || "";
+      pill.dataset.role = "state";
+      head.append(hit, titles, pill);
+      card.append(head);
+      const items = [];
+      if (message.state === "blocked") items.push(["Corrige el conflicto en Excel o en los datos. Seleccionarlo y ejecutar pide una nueva aprobación.", "warn"]);
+      for (const error of message.errors) items.push([error, "bad"]);
+      for (const warning of message.warnings) items.push([warning, "warn"]);
+      if (message.last_error) items.push([`Último error: ${message.last_error}`, "bad"]);
+      if (message.editable && !message.selectable) items.push(["No se puede aprobar mientras tenga errores de extracción. Revísalo en Outlook.", "bad"]);
+      if (message.reason) items.push([`Carpeta sugerida: ${message.reason}`, ""]);
+      const list = notes(items);
+      if (list) { list.dataset.role = "notes"; card.append(list); }
+      if (editable) {
+        const select = folderSelect(`d-${message.id}`.replace(/[^\w-]/g, "_"), state.view.folders, message.folder, false);
+        select.addEventListener("blur", () => checkField(select));
+        const box = field(select.id, "Carpeta destino", select);
+        box.classList.add("folder-row");
+        card.append(box);
+      } else if (message.folder) {
+        card.append(el("p", "sender", `Destino aprobado: ${message.folder}${message.approver ? ` · aprobado por ${message.approver}` : ""}`));
+      }
+      message.invoices.forEach((invoice, index) => card.append(invoiceBlock(message, invoice, index, editable)));
+      return card;
+    }
+
+    function classificationCard(message) {
+      const card = el("article", "card");
+      card.dataset.id = message.id;
+      const head = el("div", "card-head");
+      head.append(el("span"));
+      const titles = el("div");
+      titles.append(el("h2", "", message.subject), el("p", "sender", message.sender));
+      const pill = el("span", "pill", message.eligible ? "Lista para archivar" : "Bloqueada: pendientes o errores");
+      pill.dataset.tone = message.eligible ? "good" : "warn";
+      head.append(titles, pill);
+      card.append(head);
+      const items = message.invoices.map((invoice) => [`${invoice.number || "Sin número"}: ${invoice.status}`, ""]);
+      for (const error of message.errors) items.push([error, "bad"]);
+      if (message.reason) items.push([`Propuesta (${message.source || "sin fuente"}): ${message.reason}`, ""]);
+      const list = notes(items);
+      if (list) card.append(list);
+      const select = folderSelect(`c-${message.id}`, state.view.folders, message.folder, true);
+      const box = field(select.id, "Carpeta", select);
+      box.classList.add("folder-row");
+      card.append(box);
+      const choice = el("label", "choice");
+      const keep = el("input");
+      keep.type = "checkbox";
+      keep.className = "keep";
+      keep.disabled = !message.confirmable;
+      if (keep.disabled) keep.dataset.locked = "true";
+      choice.append(keep, el("span", "", message.confirmable ? "Guardar esta carpeta como ejemplo para futuras sugerencias" : "Sin contexto suficiente para guardarlo como ejemplo"));
+      card.append(choice);
+      return card;
+    }
+
+    function render() {
+      const view = state.view;
+      const batch = view.mode === "batch";
+      document.title = batch ? "Facturas por aprobar · Panel local" : "Simulación de clasificación · Panel local";
+      $("title").textContent = batch ? "Facturas por aprobar" : "Simulación de clasificación";
+      $("lede").textContent = batch
+        ? "Revisa los datos de cada factura y la carpeta de cada correo. Solo se registran y archivan los correos que selecciones; las casillas empiezan vacías."
+        : "Revisa la carpeta propuesta para cada correo. Esta simulación no mueve correos ni registra facturas.";
+      $("meta").textContent = batch
+        ? `Excel: ${view.workbook} · se hace una copia de seguridad antes de escribir.`
+        : (view.decisions_path ? `Ejemplos guardados en ${view.decisions_path}` : "");
+      $("approver-label").textContent = batch ? "Aprobado por" : "Confirmado por";
+      $("approver").value = view.approver || "";
+      $("select-ready").hidden = !batch;
+      $("close").textContent = batch ? "Cerrar sin ejecutar" : "Cerrar simulación";
+      const cards = $("cards");
+      cards.replaceChildren();
+      if (view.suggestion_error) cards.append(el("p", "alert warn", `No se pudo leer el historial del Excel para sugerir la empresa: ${view.suggestion_error}`));
+      if (!view.messages.length) cards.append(el("p", "alert", batch ? "No hay correos de facturas por revisar." : "No hay correos candidatos en el rango."));
+      for (const message of view.messages) cards.append(batch ? batchCard(message) : classificationCard(message));
+      updateSummary();
+      applyPhase();
+    }
+
+    // ---------------------------------------------------------------- selection and validation
+
+    function chosenCards() { return [...document.querySelectorAll(".card[data-id]")].filter((card) => card.querySelector(".choose:checked")); }
+    function executableCount() { return state.view.messages.filter((m) => ["approved", "registered", "moving"].includes(m.state)).length; }
+
+    function updateSummary() {
+      if (state.view.mode !== "batch") {
+        const keep = document.querySelectorAll(".keep:checked").length;
+        $("summary").textContent = keep ? `${plural(keep, "carpeta marcada", "carpetas marcadas")} como ejemplo` : "Ninguna carpeta marcada como ejemplo";
+        $("summary-detail").textContent = "Guardar no mueve correos ni registra facturas.";
+        $("approve").textContent = "Guardar ejemplos confirmados";
+        return;
+      }
+      const cards = chosenCards();
+      const ids = new Set(cards.map((card) => card.dataset.id));
+      const messages = state.view.messages.filter((m) => ids.has(m.id));
+      const invoices = messages.reduce((total, m) => total + m.invoices.length, 0);
+      const pending = executableCount();
+      const folders = [...new Set(cards.map((card) => card.querySelector("select").value).filter(Boolean))];
+      $("summary").textContent = messages.length
+        ? `${plural(messages.length, "correo", "correos")} y ${plural(invoices, "factura", "facturas")} seleccionados`
+        : "Ningún correo seleccionado";
+      const parts = [];
+      if (folders.length) parts.push(`Se archivarán en: ${folders.join(", ")}`);
+      if (pending) parts.push(`${plural(pending, "aprobación anterior", "aprobaciones anteriores")} se retomará${pending === 1 ? "" : "n"}`);
+      $("summary-detail").textContent = parts.join(". ") || "Selecciona un correo para registrar sus facturas y archivarlo.";
+      const total = messages.length;
+      $("approve").textContent = total ? `Aprobar y ejecutar ${plural(total, "correo", "correos")}` : (pending ? "Ejecutar aprobaciones anteriores" : "Aprobar y ejecutar");
+    }
+
+    function setError(input, message) {
+      const error = $(`${input.id}-error`);
+      if (error) error.textContent = message;
+      if (message) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
+      return message ? { id: input.id, message } : null;
+    }
+
+    function checkField(input) {
+      const value = input.value.trim();
+      const key = input.dataset.key;
+      if (!value) return setError(input, input.tagName === "SELECT" ? "Elige una carpeta existente." : "Completa este dato.");
+      if (key === "issued" && !/^\d{4}-\d{2}-\d{2}$/.test(value)) return setError(input, "Usa una fecha válida.");
+      if (key === "amount" && !/\d/.test(value)) return setError(input, "Escribe el valor de la factura.");
+      if (key === "currency" && !/^[A-Za-z]{3}$/.test(value)) return setError(input, "Usa el código de 3 letras, por ejemplo COP.");
+      return setError(input, "");
+    }
+
+    function showProblems(problems) {
+      const list = $("problems-list");
+      list.replaceChildren();
+      for (const problem of problems) {
+        const item = el("li");
+        if (problem.id) { const link = el("a", "", problem.message); link.href = `#${problem.id}`; item.append(link); }
+        else item.textContent = problem.message;
+        list.append(item);
+      }
+      $("problems").hidden = !problems.length;
+      if (problems.length) $("problems").focus();
+    }
+
+    function collectBatch() {
+      const problems = [];
+      const approver = $("approver");
+      const messages = [];
+      for (const card of chosenCards()) {
+        const select = card.querySelector("select");
+        const problem = checkField(select);
+        if (problem) problems.push({ ...problem, message: `${card.querySelector("h2").textContent}: ${problem.message}` });
+        const invoices = [...card.querySelectorAll(".invoice")].map((box) => {
+          const values = {};
+          for (const input of box.querySelectorAll("input[data-key]")) {
+            const issue = checkField(input);
+            if (issue) problems.push({ ...issue, message: `${input.labels[0].textContent}: ${issue.message}` });
+            values[input.dataset.key] = input.value.trim();
+          }
+          return values;
+        });
+        messages.push({ id: card.dataset.id, folder: select.value, invoices });
+      }
+      if (messages.length && !approver.value.trim()) problems.unshift(setError(approver, "Escribe quién aprueba el lote."));
+      else setError(approver, "");
+      if (!messages.length && !executableCount()) problems.unshift({ message: "Selecciona al menos un correo apto para aprobar." });
+      return { problems, payload: { approver: approver.value.trim(), messages, legacy: state.legacy } };
+    }
+
+    function showLegacy(questions) {
+      const list = $("legacy-list");
+      list.replaceChildren();
+      for (const question of questions) {
+        const box = el("fieldset");
+        box.append(el("legend", "", `Factura ${question.number} de ${question.legal_name}: coincide con la fila ${question.row}`));
+        for (const [value, text] of [["link", `Es la misma: asociar el número a la fila ${question.row}`], ["new", "Es una factura nueva: agregarla al Excel"]]) {
+          const choice = el("label", "choice");
+          const radio = el("input");
+          radio.type = "radio";
+          radio.name = `legacy-${question.key}`;
+          radio.value = value;
+          radio.checked = state.legacy[question.key] === value;
+          radio.addEventListener("change", () => { state.legacy[question.key] = value; });
+          choice.append(radio, el("span", "", text));
+          box.append(choice);
+        }
+        list.append(box);
+      }
+      $("legacy").hidden = !questions.length;
+      if (questions.length) $("legacy").focus();
+    }
+
+    // ---------------------------------------------------------------- actions
+
+    async function approve() {
+      if (state.busy || state.phase !== "review") return;
+      if (state.view.mode !== "batch") return saveExamples();
+      const { problems, payload } = collectBatch();
+      if (problems.length) { showProblems(problems); return; }
+      showProblems([]);
+      state.busy = true;
+      const label = $("approve").textContent;
+      $("approve").textContent = "Aprobando…";
+      $("approve").setAttribute("aria-disabled", "true");
+      try {
+        await api("/api/approve", payload);
+        announce("Aprobación guardada. Registrando en Excel y archivando los correos…");
+        state.phase = "executing";
+        applyPhase();
+        schedule(1500);
+      } catch (error) {
+        if (error.data && error.data.legacy) { showLegacy(error.data.legacy); announce("Decide los posibles duplicados y vuelve a aprobar."); }
+        else showProblems([{ message: error.message }]);
+      } finally {
+        state.busy = false;
+        $("approve").textContent = label;
+        $("approve").removeAttribute("aria-disabled");
+      }
+    }
+
+    async function saveExamples() {
+      const confirmed = [...document.querySelectorAll(".card[data-id]")]
+        .filter((card) => card.querySelector(".keep:checked"))
+        .map((card) => ({ id: card.dataset.id, folder: card.querySelector("select").value }));
+      const problems = [];
+      if (!confirmed.length) problems.push({ message: "Marca al menos una carpeta como ejemplo." });
+      if (confirmed.some((item) => !item.folder)) problems.push({ message: "Cada ejemplo necesita una carpeta." });
+      if (!$("approver").value.trim()) problems.push(setError($("approver"), "Escribe quién confirma los ejemplos."));
+      if (problems.length) { showProblems(problems); return; }
+      showProblems([]);
+      try {
+        const result = await api("/api/save-decisions", { approver: $("approver").value.trim(), confirmed });
+        for (const box of document.querySelectorAll(".keep:checked")) box.checked = false;
+        updateSummary();
+        announce(`${plural(result.saved, "ejemplo guardado", "ejemplos guardados")}. No se movió ningún correo.`);
+      } catch (error) { showProblems([{ message: error.message }]); }
+    }
+
+    async function closePanel() {
+      const folders = {};
+      for (const card of document.querySelectorAll(".card[data-id]")) { const select = card.querySelector("select"); if (select) folders[card.dataset.id] = select.value; }
+      try { await api("/api/close", { folders }); } catch (error) { /* the server may already be gone */ }
+      clearTimeout(state.timer);
+      state.phase = "closed";
+      applyPhase();
+      $("cards").replaceChildren(el("p", "alert", state.view.mode === "batch" && state.view.result && state.view.result.messages
+        ? "Panel cerrado. Puedes cerrar esta pestaña."
+        : "Panel cerrado sin ejecutar nada. Puedes cerrar esta pestaña."));
+    }
+
+    function applyPhase() {
+      const review = state.phase === "review";
+      for (const control of document.querySelectorAll("#cards input, #cards select, #legacy input, #approver")) control.disabled = !review || control.dataset.locked === "true";
+      $("approve").hidden = !review;
+      $("select-ready").hidden = !review || state.view.mode !== "batch";
+      $("approver-field").hidden = !review;
+      if (state.phase === "executing") { $("summary").textContent = "Ejecutando el lote"; $("summary-detail").textContent = "Registrando en Excel y archivando. No cierres esta pestaña."; $("close").hidden = true; }
+      if (state.phase === "done") {
+        $("close").hidden = false;
+        $("close").textContent = "Cerrar panel";
+        const result = state.view.result || {};
+        $("summary").textContent = result.summary || "Lote terminado";
+        $("summary-detail").textContent = result.failed ? "El lote se detuvo en el primer error; las demás aprobaciones se retoman en la próxima ejecución." : "";
+        announce(result.summary || "Lote terminado.");
+      }
+      if (state.phase === "closed") {
+        $("bar").hidden = true;
+        if (state.view.result && state.view.result.message) announce(state.view.result.message);
+      }
+    }
+
+    // ---------------------------------------------------------------- polling
+
+    function updateStates(view) {
+      for (const message of view.messages) {
+        const card = document.querySelector(`.card[data-id="${CSS.escape(message.id)}"]`);
+        const pill = card && card.querySelector('[data-role="state"]');
+        if (pill) { pill.textContent = message.state_text; pill.dataset.tone = TONE[message.state] || ""; }
+      }
+    }
+
+    async function poll() {
+      try {
+        const view = await api("/api/view");
+        state.csrf = view.csrf;
+        state.view = { ...state.view, messages: view.messages, result: view.result };
+        if (view.phase !== state.phase) { state.phase = view.phase; applyPhase(); }
+        updateStates(view);
+      } catch (error) { if (state.phase === "executing") announce("Se perdió la conexión con el panel; revisa la terminal."); }
+      if (state.phase === "review") schedule(15000);
+      else if (state.phase === "executing") schedule(1500);
+    }
+    function schedule(delay) { clearTimeout(state.timer); state.timer = setTimeout(poll, delay); }
+
+    async function start() {
+      try {
+        const view = await api("/api/view");
+        state.view = view;
+        state.csrf = view.csrf;
+        state.phase = view.phase;
+        render();
+        schedule(15000);
+      } catch (error) {
+        $("lede").textContent = `No se pudo cargar el lote: ${error.message}`;
+      }
+    }
+
+    $("approve").addEventListener("click", approve);
+    $("close").addEventListener("click", closePanel);
+    $("select-ready").addEventListener("click", () => {
+      for (const card of document.querySelectorAll(".card[data-id]")) {
+        const box = card.querySelector(".choose");
+        if (box && !box.disabled && !box.hidden) { box.checked = true; card.classList.add("chosen"); }
+      }
+      updateSummary();
+    });
+    $("cards").addEventListener("change", (event) => {
+      state.dirty = true;
+      if (event.target.matches("select, .keep")) updateSummary();
+    });
+    // Leaving now would drop unapproved edits, or interrupt a batch that is writing Excel.
+    window.addEventListener("beforeunload", (event) => {
+      if (state.phase === "executing" || (state.phase === "review" && state.dirty)) event.preventDefault();
+    });
+    new ResizeObserver(() => document.documentElement.style.setProperty("--bar-h", `${$("bar").offsetHeight}px`)).observe($("bar"));
+    start();
+  </script>
+</body>
+</html>
