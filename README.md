@@ -1435,7 +1435,11 @@ se trata como la representación gráfica de un XML (estructura DIAN) y no se
 analiza ni pasa por OCR u Ollama solo si se empareja de forma uno a uno e
 inequívoca con ese XML: mismo nombre de archivo sin extensión, o el número de
 factura del XML como palabra del nombre del PDF. Así un PDF ilegible no bloquea
-la factura XML válida. Cualquier PDF sin pareja inequívoca se sigue analizando,
+la factura XML válida. La misma regla se aplica cuando el XML y el PDF llegan
+sueltos en el correo, sin ZIP: se lee primero cada XML y el PDF que es su
+representación gráfica no se analiza; un PDF sin pareja inequívoca se analiza
+como siempre. En los 25 correos procesados hasta noviembre de 2026 todas las
+facturas llegaron en ZIP. Cualquier PDF sin pareja inequívoca se sigue analizando,
 aunque el ZIP traiga tantos PDF como XML. Si un archivo del ZIP falla y otro es
 válido, se conservan las facturas válidas y el fallo se informa con la ruta de
 ese archivo (`adjunto.zip:archivo.pdf`). Ese error sigue bloqueando el correo en

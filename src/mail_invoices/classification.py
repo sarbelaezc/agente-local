@@ -5,7 +5,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from mail_invoices.documents import MAX_FILE_BYTES, InvoiceCandidate
+from mail_invoices.documents import MAX_FILE_BYTES, InvoiceCandidate, rendered_xml
 from mail_invoices.folders import IncomingMessage, bounded_context, suggest_folder
 from mail_invoices.classification_decisions import ClassificationDecisionStore, decisions_path
 from mail_invoices.graph_mailbox import (
@@ -101,12 +101,23 @@ def _classify(
             if not paths:
                 result["errors"].append("No supported attachments downloaded")
             items = []
-            for path in paths:
+            # XML first: a loose PDF paired one-to-one with an XML is its graphic
+            # rendering, exactly as inside a ZIP, so it is not read, OCR'd or sent to Ollama.
+            xmls: list[tuple[str, set[str]]] = []
+            claimed: set[int] = set()
+            for path in sorted(paths, key=lambda item: item.suffix.lower() != ".xml"):
+                if path.suffix.lower() == ".pdf":
+                    pair = rendered_xml(path.name, xmls)
+                    if pair is not None and pair not in claimed:
+                        claimed.add(pair)
+                        continue
                 if path.stat().st_size > MAX_FILE_BYTES:
                     result["errors"].append(f"{path.name}: larger than 10 MB")
                     path.unlink()
                     continue
                 extracted, issues = _extract_file(path, ocr, model)
+                if path.suffix.lower() == ".xml":
+                    xmls.append((path.stem.lower(), {c.number.lower() for c, _, _ in extracted if c.number}))
                 result["errors"].extend(f"{i['source']}: {i['error']}" for i in issues)
                 for candidate, rejected, error in extracted:
                     # Include archive name in identity, without merging different ZIPs.

@@ -223,7 +223,7 @@ def _zip_member(
         return []
 
 
-def _rendered_xml(pdf_name: str, xmls: list[tuple[str, set[str]]]) -> int | None:
+def rendered_xml(pdf_name: str, xmls: list[tuple[str, set[str]]]) -> int | None:
     """Return the only XML with this PDF's path stem or whose invoice number names it."""
     path = PurePosixPath(pdf_name.replace("\\", "/"))
     key = str(path.with_suffix("")).lower()
@@ -283,7 +283,7 @@ def parse_document(
                 xmls.append((key, {c.number.lower() for c in parsed if c.number}))
             claimed: set[int] = set()
             for entry in [entry for suffix, entry in documents if suffix == ".pdf"]:
-                pair = _rendered_xml(entry.filename, xmls)
+                pair = rendered_xml(entry.filename, xmls)
                 # A PDF paired one-to-one with an XML is its DIAN graphic rendering; XML wins.
                 if pair is not None and pair not in claimed:
                     claimed.add(pair)
