@@ -1442,7 +1442,13 @@ la factura XML válida. La misma regla se aplica cuando el XML y el PDF llegan
 sueltos en el correo, sin ZIP: se lee primero cada XML y el PDF que es su
 representación gráfica no se analiza; un PDF sin pareja inequívoca se analiza
 como siempre. En los 25 correos procesados hasta noviembre de 2026 todas las
-facturas llegaron en ZIP. Cualquier PDF sin pareja inequívoca se sigue analizando,
+facturas llegaron en ZIP. Solo un XML que produjo una factura puede convertir a
+su PDF en «representación gráfica»: algunos proveedores (por ejemplo, vía
+GoSocket) envían un contenedor `AttachedDocument` de la DIAN que solo trae la
+respuesta de validación, sin la factura incrustada. Ese contenedor no es una
+factura y se omite sin bloquear el correo; la factura se lee del PDF que lo
+acompaña y queda marcada para revisar contra el PDF. Un contenedor sin ningún
+otro documento sigue siendo un error. Cualquier PDF sin pareja inequívoca se sigue analizando,
 aunque el ZIP traiga tantos PDF como XML. Si un archivo del ZIP falla y otro es
 válido, se conservan las facturas válidas y el fallo se informa con la ruta de
 ese archivo (`adjunto.zip:archivo.pdf`). Ese error sigue bloqueando el correo en
@@ -1777,6 +1783,13 @@ mismo `Application (client) ID` de `graph_client_id` en
 `.local\MonthlyCloseAgent\runtime.json` y, opcionalmente,
 `graph_authority: consumers` (por defecto) o `common`. Las claves
 `opera_executable` y `profile_dir` se ignoran y puedes borrarlas.
+
+**Remitentes excluidos.** `invoices.excluded_senders` es una lista de direcciones
+exactas o `@dominio` cuyos correos nunca son facturas para registrar; por ejemplo,
+recibos extranjeros en USD, que el Excel no admite porque solo guarda valores en
+COP. Esos correos no se clasifican ni se descargan, y un pendiente ya guardado de
+un remitente excluido deja de mostrarse en el panel (lo ya aprobado termina su
+ejecución). Se archivan a mano.
 
 **Inicio de sesión** (no lee ni mueve mensajes):
 

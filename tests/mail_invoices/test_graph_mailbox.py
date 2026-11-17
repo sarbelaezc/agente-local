@@ -631,3 +631,14 @@ def test_loose_xml_and_pdf_are_paired_like_inside_a_zip(graph, tmp_path, monkeyp
     # A paired PDF that could not be read never blocks its valid XML.
     if names == ["FE-1.xml", "Representacion grafica FE-1.pdf"]:
         assert report["messages"][0]["errors"] == []
+
+
+def test_excluded_senders_are_not_classified(graph, tmp_path, monkeypatch):
+    from mail_invoices import classification
+    from mail_invoices.settings import MailSettings
+
+    monkeypatch.setenv("AGENTE_LOCAL_DATA", str(tmp_path / "data"))
+    settings = MailSettings(CLIENT_ID, tmp_path / "book.xlsx", tmp_path, "Hoja1", 5, attachments_dir=tmp_path / "tmp",
+                            tesseract_executable=tmp_path / "missing.exe", excluded_senders=("@proveedor.example",))
+    report = classification.simulate_classification(settings, 30, [], False, mailbox=gm.GraphMailbox(graph))
+    assert report["messages"] == [] and not any("/me/messages/m1" in url for _, url in graph.requests)

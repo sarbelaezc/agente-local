@@ -41,6 +41,9 @@ class MailSettings:
     tessdata_dir: Path | None = None
     ocr_languages: str = "spa+eng"
     folder_rules: dict[str, str] = field(default_factory=dict)
+    # Exact addresses or "@domain" whose mail is never an invoice to register, such as
+    # foreign receipts in another currency; they are filed by hand.
+    excluded_senders: tuple[str, ...] = ()
     attachments_dir: Path = Path("tmp")
     approver: str = ""
 
@@ -56,6 +59,23 @@ def _ollama_settings(
         raise ValueError("ollama, ocr and folder_rules must be mappings")
     url = validate_local_url(str(ollama.get("url", "http://127.0.0.1:11434")))
     return ollama, url
+
+
+SENDER_RULE = re.compile(r"(?:[^@\s]+)?@[^@\s]+\.[^@\s]+")
+
+
+def _excluded_senders(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(isinstance(item, str) and SENDER_RULE.fullmatch(item.strip()) for item in value):
+        raise ValueError("invoices.excluded_senders must be a list of exact addresses or @domain entries")
+    return tuple(dict.fromkeys(item.strip().lower() for item in value))
+
+
+def is_excluded_sender(sender: str, rules: tuple[str, ...]) -> bool:
+    """Exact address, or "@domain" for the sender's domain (not its subdomains)."""
+    address = sender.strip().lower()
+    return address in rules or ("@" + address.rpartition("@")[2]) in rules
 
 
 def load_settings(path: Path) -> MailSettings:
@@ -98,4 +118,5 @@ def load_settings(path: Path) -> MailSettings:
         folder_rules={str(key): str(value) for key, value in rules.items()},
         attachments_dir=_path(str(raw.get("attachments_dir", "tmp"))),
         approver=" ".join(str(raw.get("approver") or "").split())[:100],
+        excluded_senders=_excluded_senders(raw.get("excluded_senders")),
     )

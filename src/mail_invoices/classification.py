@@ -12,7 +12,7 @@ from mail_invoices.graph_mailbox import (
     MailboxError, discover_folders, filter_candidates, open_mailbox, read_history, scan_candidates,
 )
 from mail_invoices.local_model import LocalModelError, OllamaJsonModel
-from mail_invoices.settings import MailSettings
+from mail_invoices.settings import MailSettings, is_excluded_sender
 from mail_invoices.workbook import InvoiceWorkbook
 
 
@@ -81,6 +81,7 @@ def _classify(
     messages = scan_candidates(mailbox, days, date.today())
     if candidate_text is not None:
         messages = filter_candidates(messages, candidate_text)
+    messages = [message for message in messages if not is_excluded_sender(message.sender, settings.excluded_senders)]
     messages = messages[:settings.batch_limit]
     for index, message in enumerate(messages, 1):
         result = {
@@ -116,7 +117,8 @@ def _classify(
                     path.unlink()
                     continue
                 extracted, issues = _extract_file(path, ocr, model)
-                if path.suffix.lower() == ".xml":
+                # Only an XML that yielded an invoice can make its PDF a mere rendering.
+                if path.suffix.lower() == ".xml" and extracted:
                     xmls.append((path.stem.lower(), {c.number.lower() for c, _, _ in extracted if c.number}))
                 result["errors"].extend(f"{i['source']}: {i['error']}" for i in issues)
                 for candidate, rejected, error in extracted:

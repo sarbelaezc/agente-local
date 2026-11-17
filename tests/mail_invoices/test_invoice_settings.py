@@ -95,3 +95,19 @@ def test_the_invoice_authority_is_validated(tmp_path):
     assert load_settings(_write(tmp_path, "common.yaml", {**INVOICES, "graph_authority": "common"})).graph_authority == "common"
     with pytest.raises(ValueError, match="graph_authority"):
         load_settings(_write(tmp_path, "org.yaml", {**INVOICES, "graph_authority": "organizations"}))
+
+
+def test_excluded_senders_accept_addresses_and_domains(tmp_path):
+    from mail_invoices.settings import is_excluded_sender
+
+    data = {**INVOICES, "excluded_senders": ["Invoice+Statements@mail.anthropic.com", "@tienda.example"]}
+    rules = load_settings(_write(tmp_path, "settings.yaml", {"invoices": data})).excluded_senders
+    assert rules == ("invoice+statements@mail.anthropic.com", "@tienda.example")
+    assert is_excluded_sender("INVOICE+statements@mail.anthropic.com", rules)
+    assert is_excluded_sender("ventas@tienda.example", rules)
+    assert not is_excluded_sender("ventas@sub.tienda.example", rules)
+    assert not is_excluded_sender("facturas@proveedor.example", rules)
+    assert load_settings(_write(tmp_path, "none.yaml", {"invoices": INVOICES})).excluded_senders == ()
+    for bad in (["no-es-correo"], "a@b.example"):
+        with pytest.raises(ValueError, match="excluded_senders"):
+            load_settings(_write(tmp_path, "bad.yaml", {"invoices": {**INVOICES, "excluded_senders": bad}}))

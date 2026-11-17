@@ -5,6 +5,8 @@ invoices:
   # Application (client) ID of the invoice app in Azure (Mail.ReadWrite, personal accounts).
   graph_client_id: "00000000-0000-0000-0000-000000000000"
   graph_authority: consumers
+  # Exact addresses or @domain whose mail is never an invoice to register.
+  excluded_senders: []
   workbook: "C:\\Documents\\Resumen_Facturas.xlsx"
   backup_dir: ".local\\MailInvoiceAgent\\Backups"
   sheet: Hoja1
