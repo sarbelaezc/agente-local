@@ -76,6 +76,7 @@
     .decision-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 6px; }
     .decision-actions .button { min-height: 42px; padding: 11px 6px; border-radius: 12px; background: var(--soft); font-size: 13.5px; }
     .decision-actions .button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+    .decision-actions.between-actions { margin-top: 12px; }
 
     /* Messages */
     .alert { padding: 9px 12px; border: 0; border-radius: 10px; background: var(--soft); font-size: 13.5px; line-height: 1.45; }
@@ -1986,7 +1987,7 @@
           if (entry.rows[0].group_key) card.insertBefore(el("p", "hint", `Destino: ${groupTitle(entry)}`), card.children[1]);
           const toggle = betweenToggle(entry);
           if (toggle) {
-            const extra = el("div", "decision-actions");
+            const extra = el("div", "decision-actions between-actions");
             extra.append(toggle);
             card.append(extra);
           }
