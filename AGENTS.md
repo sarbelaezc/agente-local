@@ -55,7 +55,7 @@ The local agent groups several features (for example, Hotmail invoices and the m
 - The Gmail API with `google-auth-oauthlib` (sign-in and token refresh only) for a monthly close Gmail mailbox, using only the read-only `gmail.readonly` scope.
 - Tesseract (local) and `pypdfium2` for scanned PDF OCR.
 - SQLite for local state, configuration, and auditing.
-- Tkinter for a minimal desktop interface.
+- A local web panel on 127.0.0.1 for review and approval (exact Host and Origin, per-run CSRF token, no external resources), in the style of the monthly close dashboard. No Tkinter.
 - Pytest for tests.
 
 Do not add unnecessary dependencies without a clear reason.

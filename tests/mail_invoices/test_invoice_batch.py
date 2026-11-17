@@ -9,7 +9,7 @@ from openpyxl import Workbook, load_workbook
 
 from mail_invoices import batch_workflow
 from mail_invoices.batch_state import BatchMessage, BatchStateStore, batch_lock, batch_scope
-from mail_invoices.batch_review_ui import prepare_pdf_preview
+from mail_invoices.batch_review import prepare_pdf_preview
 from mail_invoices.classification_decisions import ClassificationDecisionStore
 from mail_invoices.documents import InvoiceCandidate
 from mail_invoices.folders import IncomingMessage
@@ -438,7 +438,14 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
         def run(self):
             return True
 
-    monkeypatch.setattr(batch_workflow, "BatchReviewWindow", Review)
+        def executing(self):
+            phases.append("executing")
+
+        def finish(self, result):
+            phases.append(("finish", result["summary"]))
+
+    phases = []
+    monkeypatch.setattr(batch_workflow, "BatchReviewPanel", Review)
     executed = []
 
     def execute(message, journal, store, decisions, session):
@@ -454,6 +461,8 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
     assert closed == [True] and launched == [True]
     assert not review_dirs[0].exists()
     assert len([m for m in journal.load() if m.state == "approved"]) == 2
+    # The panel shows progress and then the outcome of the executed messages.
+    assert phases == ["executing", ("finish", "2 archivados y verificados")]
 
 
 @pytest.mark.parametrize("cancel", [True, False])
@@ -485,8 +494,15 @@ def test_batch_cancellation_or_failure_stops_other_durable_approvals(
         def run(self):
             return not cancel
 
+        def executing(self):
+            pass
+
+        def finish(self, result):
+            finished.append(result)
+
+    finished = []
     monkeypatch.setattr(batch_workflow, "open_mailbox", lambda config: Session())
-    monkeypatch.setattr(batch_workflow, "BatchReviewWindow", Review)
+    monkeypatch.setattr(batch_workflow, "BatchReviewPanel", Review)
 
     def execute(message, journal, store, decisions, session):
         attempted.append(message.conversation)
@@ -497,6 +513,7 @@ def test_batch_cancellation_or_failure_stops_other_durable_approvals(
     monkeypatch.setattr(batch_workflow, "execute_message", execute)
     assert batch_workflow.process_invoice_batch(settings, 30, False, 3, resume=True) == 1
     assert attempted == ([] if cancel else ["TEST-1"])
+    assert [result["failed"] for result in finished] == ([] if cancel else [True])
     assert journal.load()[1].state == "approved"
     assert workbook.path.read_bytes() == original
     assert closed == [True]
