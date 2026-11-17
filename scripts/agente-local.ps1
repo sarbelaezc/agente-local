@@ -45,6 +45,39 @@ function Get-PanelContent {
     } finally { $response.Dispose() }
 }
 
+function Write-RunLog {
+    # Appends a launcher line to this run's log (monthly close only); Python appends its output.
+    param([string]$Message)
+    if ($script:logFile) {
+        Add-Content -LiteralPath $script:logFile -Value "[lanzador] $Message" -Encoding UTF8
+    }
+}
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host $Message
+    Write-RunLog $Message
+}
+
+function Show-Notification {
+    # Windows notification for an unattended run; a failure to show it never stops the run.
+    param([string]$Title, [string]$Message)
+    try {
+        [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+        $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(
+            [Windows.UI.Notifications.ToastTemplateType]::ToastText02
+        )
+        $texts = $template.GetElementsByTagName("text")
+        $texts.Item(0).AppendChild($template.CreateTextNode($Title)) | Out-Null
+        $texts.Item(1).AppendChild($template.CreateTextNode($Message)) | Out-Null
+        $toast = [Windows.UI.Notifications.ToastNotification]::new($template)
+        $appId = "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe"
+        [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show($toast)
+    } catch {
+        Write-Warning "No se pudo mostrar la notificacion: $($_.Exception.Message)"
+    }
+}
+
 function Start-SharedOllama {
     # Returns the process this script started, or $null when a running instance is reused.
     # OLLAMA_MODELS is left alone: Ollama uses its default store unless the user set one.
@@ -71,7 +104,7 @@ function Start-SharedOllama {
         $probe.Close()
     }
     if ($running) {
-        Write-Host "Usando Ollama existente; no se cerrara al terminar."
+        Write-Step "Usando Ollama existente; no se cerrara al terminar."
         return $null
     }
     $ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
@@ -81,7 +114,7 @@ function Start-SharedOllama {
         if (-not $found) { throw "No se encuentra Ollama." }
         $ollama = $found.Source
     }
-    Write-Host "Iniciando Ollama compartido para facturas y cierre mensual."
+    Write-Step "Iniciando Ollama compartido para facturas y cierre mensual."
     return Start-Process -FilePath $ollama -ArgumentList "serve" -NoNewWindow -PassThru
 }
 
@@ -106,6 +139,13 @@ $root = Split-Path $PSScriptRoot -Parent
 $python = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $python)) {
     throw "Falta .venv. Ejecuta scripts\bootstrap.ps1."
+}
+# One log per monthly close execution in the local data folder; Python keeps the last 10.
+$script:logFile = $null
+if ($Command -ne "invoices") {
+    $logDir = Join-Path $DataDir "logs"
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    $script:logFile = Join-Path $logDir ("{0}-{1}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"), $Command)
 }
 $previousEnvironment = @{}
 foreach ($key in @("PYTHONPATH", "OLLAMA_HOST", "OLLAMA_NUM_PARALLEL")) {
@@ -143,19 +183,22 @@ try {
 
     $needsOllama = $Command -eq "import" -or ($Command -in @("scan", "pilot") -and -not $ReadOnly)
     if ($Command -eq "scheduled") {
-        # The hourly task only reads the mailbox in the closing hour; skip Ollama otherwise.
+        # Only a month whose close is due and not yet done reads the mailbox; skip Ollama otherwise.
         & $python -c (
             "import sys; from datetime import datetime; from pathlib import Path; " +
-            "from zoneinfo import ZoneInfo; from monthly_close.main import scheduled_month; " +
+            "from zoneinfo import ZoneInfo; from monthly_close.main import due_close_month; " +
             "from monthly_close.store import Store; " +
-            "p = Store(Path(sys.argv[1]) / 'close.sqlite3').preferences(); " +
-            "sys.exit(0 if scheduled_month(datetime.now(ZoneInfo(p.timezone)), p.timezone) else 3)"
+            "s = Store(Path(sys.argv[1]) / 'close.sqlite3'); p = s.preferences(); " +
+            "sys.exit(0 if due_close_month(datetime.now(ZoneInfo(p.timezone)), p.timezone, s.last_close()) else 3)"
         ) $DataDir
-        if ($LASTEXITCODE -eq 3) { exit 0 }
+        if ($LASTEXITCODE -eq 3) {
+            Write-Step "Sin cierre pendiente: el ultimo mes vencido ya esta cerrado."
+            exit 0
+        }
         $needsOllama = $LASTEXITCODE -eq 0
     }
     if ($Command -eq "import") {
-        & $python -m monthly_close.main check-config --data-dir $DataDir
+        & $python -m monthly_close.main check-config --data-dir $DataDir --log-file $script:logFile
         if ($LASTEXITCODE -ne 0) { throw "Configuracion no validada; no se inicia la importacion." }
     }
     if ($needsOllama) {
@@ -169,7 +212,10 @@ try {
     }
 
     $pythonCommand = if ($Command -eq "import") { "scan" } else { $Command }
-    $arguments = @("-u", "-m", "monthly_close.main", $pythonCommand, "--data-dir", $DataDir, "--port", $Port)
+    $arguments = @(
+        "-u", "-m", "monthly_close.main", $pythonCommand, "--data-dir", $DataDir, "--port", $Port,
+        "--log-file", $script:logFile
+    )
     if ($Start) { $arguments += @("--start", $Start) }
     if ($End) { $arguments += @("--end", $End) }
     if ($Month) { $arguments += @("--month", $Month) }
@@ -182,10 +228,13 @@ try {
     if ($ReadOnly) { $arguments += "--read-only" }
     if ($ReprocessEmpty) { $arguments += "--reprocess-empty" }
     if ($Command -eq "import") {
-        Write-Host "Iniciando recorrido del buzon."
+        Write-Step "Iniciando recorrido del buzon."
     }
     & $python @arguments
     $exitCode = $LASTEXITCODE
+    if ($Command -eq "scheduled" -and $exitCode -ne 0) {
+        Show-Notification "Cierre mensual detenido" "Revisa el registro: $($script:logFile)"
+    }
 
     if ($Command -eq "import" -and -not $ReadOnly) {
         $panelUrl = "http://127.0.0.1:8766"
@@ -222,18 +271,25 @@ try {
                 throw "El puerto 8766 esta ocupado por una pagina distinta al panel."
             }
             Start-Process -FilePath $panelUrl
-            Write-Host "Panel abierto. Manten su terminal abierta para revisar los gastos."
+            Write-Step "Panel abierto. Manten su terminal abierta para revisar los gastos."
         } catch {
             if ($panelProcess -and -not $panelProcess.HasExited) {
                 Stop-Process -Id $panelProcess.Id -ErrorAction Stop
             }
             Write-Warning "No se pudo abrir el panel: $($_.Exception.Message)"
+            Write-RunLog "No se pudo abrir el panel: $($_.Exception.Message)"
             if ($exitCode -eq 0) { $exitCode = 1 }
         }
     }
+} catch {
+    Write-RunLog "Detenido: $($_.Exception.Message)"
+    if ($Command -eq "scheduled") {
+        Show-Notification "Cierre mensual detenido" "Revisa el registro: $($script:logFile)"
+    }
+    throw
 } finally {
     if ($ollamaProcess -and -not $ollamaProcess.HasExited) {
-        Write-Host "Cerrando la instancia de Ollama iniciada por este script."
+        Write-Step "Cerrando la instancia de Ollama iniciada por este script."
         Stop-Process -Id $ollamaProcess.Id -ErrorAction Stop
         $ollamaProcess.WaitForExit()
     }

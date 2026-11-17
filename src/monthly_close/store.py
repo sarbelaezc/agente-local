@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS mailbox_sync (
     mailbox TEXT NOT NULL, folder TEXT NOT NULL, token TEXT NOT NULL,
     PRIMARY KEY (mailbox, folder)
 );
+CREATE TABLE IF NOT EXISTS closes (month TEXT PRIMARY KEY, closed_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS coverage (
     month TEXT PRIMARY KEY, status TEXT NOT NULL, note TEXT NOT NULL
 );
@@ -285,6 +286,21 @@ class Store:
                 "SELECT 1 FROM processed WHERE message_id=? AND NOT EXISTS (" + KEPT + ")",
                 (message_id, message_id),
             ).fetchone() is not None
+
+    def last_close(self) -> str | None:
+        """Most recent month the scheduled close completed (YYYY-MM), if any."""
+        with self.connect() as db:
+            return db.execute("SELECT max(month) AS month FROM closes").fetchone()["month"]
+
+    def record_close(self, month: str) -> None:
+        if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+            raise ValueError("Mes de cierre invalido.")
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO closes VALUES (?,?) ON CONFLICT(month) DO UPDATE SET closed_at=excluded.closed_at",
+                (month, datetime.now(timezone.utc).isoformat()),
+            )
+            self._audit(db, "scheduled-close", month, "completed")
 
     def sync_state(self, mailbox: str) -> dict[str, str]:
         """Saved incremental position of a mailbox, per folder (or Gmail history)."""

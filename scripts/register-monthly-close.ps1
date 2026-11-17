@@ -22,21 +22,69 @@ $env:PYTHONPATH = Join-Path $root "src"
 if ($LASTEXITCODE -ne 0) { throw "Completa y verifica primero la configuracion local." }
 $runner = Join-Path $PSScriptRoot "agente-local.ps1"
 if ($runner.Contains('"') -or $DataDir.Contains('"')) { throw "Ruta no valida." }
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument (
-    '-NoProfile -File "{0}" scheduled -DataDir "{1}"' -f $runner, $DataDir
-) -WorkingDirectory $root
-# The hourly wake-up delegates timezone/DST and last-day checks to Python's ZoneInfo.
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
-    -RepetitionInterval (New-TimeSpan -Hours 1)
-$principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
-    -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+
+function ConvertTo-XmlText([string]$Value) { [System.Security.SecurityElement]::Escape($Value) }
+
+# Last day of every month at 22:00. StartWhenAvailable runs a missed close as soon as the
+# computer is on and the session is open; Python decides which month is due, so a late
+# or repeated run never closes a month twice.
+$arguments = '-NoProfile -ExecutionPolicy RemoteSigned -File "{0}" scheduled -DataDir "{1}"' -f $runner, $DataDir
+$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$start = (Get-Date).ToString("yyyy-MM-dd") + "T22:00:00"
+$months = (
+    "January", "February", "March", "April", "May", "June", "July", "August", "September",
+    "October", "November", "December"
+) | ForEach-Object { "<$_ />" }
+$description = (
+    "Cierre mensual: el ultimo dia de cada mes a las 22:00, o al encender el equipo si esa hora se perdio. " +
+    "Lee los buzones en solo lectura, concilia extractos y escribe el resumen; nunca envia correo ni decide gastos. " +
+    "Si la sesion de Gmail vencio, abre el inicio de sesion de Google y espera 15 minutos. Requiere sesion Windows abierta."
+)
+$xml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>$(ConvertTo-XmlText $description)</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>$start</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByMonth>
+        <DaysOfMonth><Day>Last</Day></DaysOfMonth>
+        <Months>$($months -join '')</Months>
+      </ScheduleByMonth>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>$(ConvertTo-XmlText $user)</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <ExecutionTimeLimit>PT2H</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>$(ConvertTo-XmlText $arguments)</Arguments>
+      <WorkingDirectory>$(ConvertTo-XmlText $root)</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"@
+[xml]$xml | Out-Null  # a malformed definition stops here, before anything is registered
 if ($PSCmdlet.ShouldProcess($name, "Registrar cierre mensual persistente")) {
-    Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger `
-        -Principal $principal -Settings $settings -Description (
-            "Comprueba la zona configurada cada hora. Solo lee Outlook el ultimo dia del mes a las 22:00. " +
-            "Requiere sesion Windows abierta; nunca envia correo ni decide gastos."
-        ) | Out-Null
+    Register-ScheduledTask -TaskName $name -Xml $xml -Force | Out-Null
     Get-ScheduledTask -TaskName $name | Select-Object TaskName, State
+    Get-ScheduledTaskInfo -TaskName $name | Select-Object NextRunTime
+} else {
+    $xml
 }
