@@ -23,10 +23,10 @@ param(
     [int]$Port = 8766,
     [switch]$ReadOnly,
     [switch]$ReprocessEmpty,
-    [ValidateRange(1, 5)]
-    [int]$BatchSize = 3,
+    [ValidateRange(1, 20)]
+    [int]$BatchSize = 10,
     [ValidateRange(1, 365)]
-    [int]$Days = 30,
+    [int]$Days = 90,
     [switch]$Resume
 )
 
