@@ -159,6 +159,7 @@ none fits.
 | [frontend-design](.claude/skills/frontend-design/SKILL.md) | Building or substantially redesigning a user interface. |
 | [pdf](.claude/skills/pdf/SKILL.md) | Explicitly requested PDF reading, extraction, creation, conversion, or form work. Follow approval, privacy, and no-generated-code rules; a skill does not authorize file writes or external sharing. |
 | [ponytail](.claude/skills/ponytail/SKILL.md) | Coding tasks where the smallest complete change is preferred, without cutting security, validation, or tests. |
+| [pytest-coverage](.claude/skills/pytest-coverage/SKILL.md) | Measuring test coverage of a change with `pytest-cov` (dev extra) and adding tests for uncovered lines. Write annotated reports outside the repository; tests still never read `.local/`. |
 | [ui-ux-pro-max](.claude/skills/ui-ux-pro-max/SKILL.md) | UI/UX decisions, accessibility, design systems, and targeted design-quality work. |
 | [web-design-guidelines](.claude/skills/web-design-guidelines/SKILL.md) | Explicit reviews of web interface quality, accessibility, and UX guidelines. |
 
