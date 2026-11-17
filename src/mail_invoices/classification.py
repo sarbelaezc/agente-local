@@ -12,7 +12,7 @@ from mail_invoices.graph_mailbox import (
     MailboxError, discover_folders, filter_candidates, open_mailbox, read_history, scan_candidates,
 )
 from mail_invoices.local_model import LocalModelError, OllamaJsonModel
-from mail_invoices.settings import MailSettings
+from mail_invoices.settings import MailSettings, is_excluded_sender
 from mail_invoices.workbook import InvoiceWorkbook
 
 
@@ -81,6 +81,7 @@ def _classify(
     messages = scan_candidates(mailbox, days, date.today())
     if candidate_text is not None:
         messages = filter_candidates(messages, candidate_text)
+    messages = [message for message in messages if not is_excluded_sender(message.sender, settings.excluded_senders)]
     messages = messages[:settings.batch_limit]
     for index, message in enumerate(messages, 1):
         result = {

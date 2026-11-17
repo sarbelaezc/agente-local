@@ -1784,6 +1784,13 @@ mismo `Application (client) ID` de `graph_client_id` en
 `graph_authority: consumers` (por defecto) o `common`. Las claves
 `opera_executable` y `profile_dir` se ignoran y puedes borrarlas.
 
+**Remitentes excluidos.** `invoices.excluded_senders` es una lista de direcciones
+exactas o `@dominio` cuyos correos nunca son facturas para registrar; por ejemplo,
+recibos extranjeros en USD, que el Excel no admite porque solo guarda valores en
+COP. Esos correos no se clasifican ni se descargan, y un pendiente ya guardado de
+un remitente excluido deja de mostrarse en el panel (lo ya aprobado termina su
+ejecución). Se archivan a mano.
+
 **Inicio de sesión** (no lee ni mueve mensajes):
 
 ```powershell

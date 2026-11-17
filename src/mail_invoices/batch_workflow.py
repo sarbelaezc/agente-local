@@ -19,7 +19,7 @@ from mail_invoices.graph_mailbox import (
     MailboxError, discover_folders, move_registered_message, open_mailbox, verify_destination,
 )
 from mail_invoices.review_server import ReviewPanel
-from mail_invoices.settings import MailSettings
+from mail_invoices.settings import MailSettings, is_excluded_sender
 from mail_invoices.workbook import InvoiceWorkbook, WorkbookError
 
 
@@ -58,7 +58,9 @@ class BatchReviewPanel:
         self.panel.finish(result)
 
 
-def _active_messages(messages: list[BatchMessage], limit: int) -> list[BatchMessage]:
+def _active_messages(
+    messages: list[BatchMessage], limit: int, excluded: tuple[str, ...] = (),
+) -> list[BatchMessage]:
     def priority(message: BatchMessage) -> int:
         if message.state in {"moving", "registered", "approved"}:
             return 0
@@ -66,8 +68,15 @@ def _active_messages(messages: list[BatchMessage], limit: int) -> list[BatchMess
             return 1
         return 2
 
+    # A pending message from an excluded sender is never shown again; approved work
+    # already in progress still finishes.
     return sorted(
-        (message for message in messages if message.state != "moved"), key=priority,
+        (
+            message for message in messages
+            if message.state != "moved"
+            and not (message.state == "pending" and is_excluded_sender(message.sender, excluded))
+        ),
+        key=priority,
     )[:limit]
 
 
@@ -161,7 +170,7 @@ def _process_invoice_batch(
     with batch_lock(path.with_suffix(".lock")):
         journal = BatchStateStore(path, batch_scope(settings))
         stored = {message.conversation: message for message in journal.load()}
-        active = _active_messages(list(stored.values()), batch_size)
+        active = _active_messages(list(stored.values()), batch_size, settings.excluded_senders)
         missing_identity = []
         if resume and not active:
             print(to_json({"messages": [], "message": "No hay correos pendientes"}))
@@ -182,7 +191,7 @@ def _process_invoice_batch(
                     if existing is None or existing.state == "pending":
                         journal.save([prepared])
                         stored[prepared.conversation] = prepared
-                active = _active_messages(list(stored.values()), batch_size)
+                active = _active_messages(list(stored.values()), batch_size, settings.excluded_senders)
                 if missing_identity:
                     print(to_json({"untracked_errors": missing_identity}))
             if not active:

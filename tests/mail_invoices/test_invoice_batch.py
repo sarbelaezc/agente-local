@@ -543,3 +543,13 @@ def test_cli_rejects_unsafe_batch_sizes(monkeypatch, size):
     with pytest.raises(SystemExit) as error:
         main.main()
     assert error.value.code == 2
+
+
+def test_an_excluded_sender_is_no_longer_shown_unless_already_approved():
+    from dataclasses import replace as copy
+
+    stale = copy(pending("RECIBO"), sender="invoice+statements@mail.anthropic.com", errors=["PDF is not identifiable as an invoice"])
+    running = copy(approved("APROBADO"), sender="invoice+statements@mail.anthropic.com")
+    ready = pending("READY")
+    active = batch_workflow._active_messages([stale, running, ready], 5, ("invoice+statements@mail.anthropic.com",))
+    assert active == [running, ready]
