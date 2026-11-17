@@ -128,6 +128,9 @@ def _hint(description: str, outflow: bool) -> str:
         return "investment" if outflow else "investment_withdrawal"
     if re.search(r"traslado de fondo", text):
         return "investment_withdrawal"
+    # "RECARGA DE TARJETA CIVICA": topping up a prepaid card, such as the metro pass.
+    if outflow and re.search(r"recarga\s+(?:de\s+)?tarjeta|tarjeta\s+civica", text):
+        return "purchase"
     # "PAGO SUC VIRT TC MASTER DOLAR": paying a card's dollar balance from savings.
     if re.search(r"tarjeta|abono sucursal|pago tc|pago tarj|\btc\b", text):
         return "card_payment"
