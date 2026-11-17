@@ -78,8 +78,7 @@ def test_real_review_window_in_isolated_process(tmp_path):
         book.close()
         original = path.read_bytes()
         settings = MailSettings(
-            folder / "opera.exe", folder / "profile", path, folder / "backups",
-            "Hoja1", 1, approver="Test",
+            "11111111-2222-3333-4444-555555555555", path, folder / "backups", "Hoja1", 1, approver="Test",
         )
         item = ReviewItem(InvoiceCandidate(
             source="synthetic.xml", digest="test", number="TEST-1",

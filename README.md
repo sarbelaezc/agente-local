@@ -6,23 +6,24 @@ implementa.
 
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
-| Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
+| Organización y clasificación de facturas electrónicas en Hotmail | Lectura y archivo por [Microsoft Graph](#acceso-al-buzón-de-facturas-por-microsoft-graph) con app propia (implementado y probado con un Graph simulado; **pendiente de validar con el buzón real**); el piloto anterior con Opera tuvo resultado mixto | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
 | Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); [tarea programada](#cobertura-cierre-y-tarea-persistente) del último día del mes con recuperación al encender el equipo y [registro de ejecuciones](#registro-de-ejecuciones) (implementado y probado; primera ejecución supervisada pendiente); [varios buzones](#varios-buzones-y-gmail-de-manuela) con Gmail de Manuela en solo lectura y [lectura incremental](#lectura-incremental) de Outlook y Gmail (implementado; validado con los buzones reales: inicio de sesión en Gmail, importación de Manuela y ejecuciones incrementales); [extractos de Protección](#hogar-santiago-y-manuela): saldo, aportes, retiros y rendimientos de pensión voluntaria y cesantías (implementado y validado con los extractos reales de 2026) | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` / `scripts/agente-local.ps1 login -Mailbox manuela` |
 
 ## Stack tecnológico
 
 - **Python 3.12 o posterior**; empaquetado con `setuptools` y dependencias declaradas en `pyproject.toml`.
-- **Playwright para Python** automatiza Opera para facturas y ejecuta las pruebas gráficas del panel. El cierre mensual no controla ningún navegador.
+- **Playwright para Python** (dependencia de desarrollo) ejecuta las pruebas gráficas del panel. Ninguna función controla un navegador.
 - **Microsoft Graph con `msal`** (solo lectura, permiso `Mail.Read`) lee el buzón de Outlook del cierre mensual.
+- **Microsoft Graph con `msal` para facturas**, con una app propia y el permiso `Mail.ReadWrite`, limitado en el código a leer correos y mover los aprobados.
 - **API de Gmail con `google-auth-oauthlib`** (solo lectura, permiso `gmail.readonly`) lee el buzón de Gmail de Manuela, si está configurado. La librería solo gestiona el inicio de sesión y la renovación del token; las consultas usan `httpx`.
 - **Una instancia local de Ollama compartida por facturas y cierre mensual** en `127.0.0.1:11434`; `scripts/agente-local.ps1` la inicia cuando un comando la necesita y no está activa, con el almacén de modelos predeterminado de Ollama.
 - **Facturas:** `openpyxl` para Excel, `defusedxml` para XML, `pypdf` para PDF con texto, y `pypdfium2` más `Pillow` para renderizar PDF escaneados.
 - **Tkinter y SQLite** de la biblioteca estándar para interfaces y persistencia local; **pytest** para pruebas.
-- **Tesseract OCR** es una instalación externa opcional, necesaria solo para PDF escaneados. Opera y Ollama también se instalan aparte cuando se usa la función correspondiente.
+- **Tesseract OCR** es una instalación externa opcional, necesaria solo para PDF escaneados. Ollama también se instala aparte.
 
 ## Reproducir en otro equipo Windows
 
-1. Instala Git, Python 3.12 o posterior y Ollama. Instala Opera para facturas.
+1. Instala Git, Python 3.12 o posterior y Ollama.
 2. Clona el repositorio y entra en su carpeta:
 
     ```powershell
@@ -36,7 +37,7 @@ implementa.
     .\scripts\bootstrap.ps1
     ```
 
-4. Crea la configuración local solo si aún no existe y completa las rutas de Opera y del libro Excel. `config/settings.yaml` está excluido de Git y debe configurarse en cada equipo, no copiarse al repositorio.
+4. Crea la configuración local solo si aún no existe y completa `invoices.graph_client_id` y la ruta del libro Excel. `config/settings.yaml` está excluido de Git y debe configurarse en cada equipo, no copiarse al repositorio.
 
    ```powershell
    if (-not (Test-Path "config/settings.yaml")) {
@@ -67,7 +68,7 @@ proyecto, que Git ignora:
 | `.local\MonthlyCloseAgent\statements.json` | Contraseña de los extractos PDF y remitentes exactos aprobados (texto plano, fuera de Git) |
 | `.local\MonthlyCloseAgent\logs\` | Un registro por ejecución del cierre mensual (`AAAAMMDD-HHMMSS-<comando>.log`); se conservan los 10 más recientes ([detalle](#registro-de-ejecuciones)) |
 | `.local\ImportManuela\` | Archivos exportados del panel de Manuela que lee `import-manuela` (movimientos, decisiones por destino y totales de paridad) |
-| `.local\MailInvoiceAgent\` | Perfil de Opera, copias de seguridad del libro, `tessdata`, decisiones de clasificación y estados de lotes |
+| `.local\MailInvoiceAgent\` | `graph_token_cache.bin` (sesión de Microsoft de facturas), copias de seguridad del libro, `tessdata`, decisiones de clasificación y estados de lotes. `OperaProfile\` es del lector retirado y se puede borrar |
 | `config\settings.yaml` | Configuración personal de facturas (también ignorada por Git) |
 
 Las rutas relativas de `config/settings.yaml` se resuelven desde la raíz del
@@ -76,9 +77,11 @@ en otro lugar, define la variable de entorno `AGENTE_LOCAL_DATA` con esa carpeta
 (sustituye a `.local`) y ajusta las rutas de `settings.yaml`. Las pruebas usan
 siempre una carpeta temporal y nunca leen ni escriben `.local`.
 
-Los estados de lotes de facturas se asocian a la ruta del perfil de Opera: si
-mueves el perfil, hay que migrar esa asociación o los lotes guardados dejan de
-reconocerse.
+Los estados de lotes de facturas se asocian a la app de Graph
+(`invoices.graph_client_id`), al libro y a la hoja. Si cambias alguno, los lotes
+guardados dejan de reconocerse. Los lotes del lector de Opera quedaron en su
+propio ámbito: se conservan en la base, pero el flujo nuevo nunca actúa sobre
+ellos.
 
 Antes estos datos estaban en `%LOCALAPPDATA%\MonthlyCloseAgent` y
 `%LOCALAPPDATA%\MailInvoiceAgent`; esas carpetas ya no se usan.
@@ -139,7 +142,7 @@ Ajusta el tamaño (1 a 5) y el rango (1 a 365 días) cuando lo necesites; usa
 .\scripts\agente-local.ps1 invoices -Resume -BatchSize 5
 ```
 
-El comando requiere `.venv`, `config/settings.yaml` y Opera; inicia Ollama en el
+El comando requiere `.venv`, `config/settings.yaml` y la sesión de facturas (`--login`); inicia Ollama en el
 endpoint de `invoices.ollama` si no está activo. Si falta la configuración,
 crea una copia de la plantilla y se detiene para que completes los valores.
 Cada ejecución abre la revisión supervisada; nada se escribe ni se mueve hasta
@@ -1345,7 +1348,7 @@ Todas las reglas del proyecto están en un solo archivo, [`AGENTS.md`](AGENTS.md
 | [`AGENTS.md`](AGENTS.md) | Copilot directamente; Claude Code a través de `CLAUDE.md` | Reglas del proyecto, seguridad y catálogo/selección de skills |
 | [`CLAUDE.md`](CLAUDE.md) | Claude Code | Una sola línea, `@AGENTS.md`, porque Claude Code no lee `AGENTS.md` por sí solo |
 | [`.claude/skills/`](.claude/skills/) | Ambos | Única ubicación de las skills compartidas |
-| [`.claude/settings.json`](.claude/settings.json) | Claude Code | Permisos compartidos: impide leer el token de Microsoft y el perfil de Opera |
+| [`.claude/settings.json`](.claude/settings.json) | Claude Code | Permisos compartidos: impide leer los tokens de Microsoft y de Google, el cliente OAuth de Gmail y el perfil de Opera retirado |
 
 Para cambiar una regla, edita solo `AGENTS.md`. Los ajustes
 personales de Claude Code van en `.claude/settings.local.json`, que Git ignora.
@@ -1379,7 +1382,7 @@ para probar otra feature).
 - `workflow.py`: modos de solo lectura y extracción compartida de adjuntos.
 - `review.py`: datos y reglas de revisión, sin depender de Tkinter.
 - `review_ui.py`: ventana, selección y aprobación humana.
-- `browser.py` e `inbox.py`: interacción con Opera y Outlook.
+- `graph_mailbox.py`: buzón por Microsoft Graph (carpetas, candidatos, adjuntos, mover y verificar) y su sesión.
 - `documents.py`, `ocr.py`, `assist.py` y `local_model.py`: extracción y asistencia local.
 - `workbook.py`: validación, duplicados, respaldo y escritura verificada del Excel.
 - `settings.py`: lectura de la sección de facturas de la configuración unificada.
@@ -1467,14 +1470,14 @@ se habilita solo con aprobación en lotes supervisados pequeños, descritos abaj
   .\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --classify-invoices --days 30 --candidate-text NUMERO_FACTURA
 ```
 
-`--candidate-text` filtra el texto de la lista/preview antes de abrir mensajes;
-úsalo con un identificador de factura para revisar un único candidato. Abrirlo
-puede marcarlo como leído. Corregir y guardar su destino solo registra un ejemplo
+`--candidate-text` filtra el remitente, el asunto y la vista previa antes de abrir
+mensajes; úsalo con un identificador de factura para revisar un único candidato.
+Leerlo por Graph no lo marca como leído. Corregir y guardar su destino solo registra un ejemplo
 local para futuras sugerencias; esta simulación nunca mueve correos.
 
 Lee las carpetas existentes de Outlook, abre hasta `invoices.batch_limit` correos
 candidatos y descarga sus adjuntos en subdirectorios `classification-N` de
-`invoices.attachments_dir`. Abrir un correo puede marcarlo como leído. Verifica
+`invoices.attachments_dir`. Leer un correo por Graph no cambia su estado. Verifica
 número, proveedor, fecha y valor contra el Excel configurado **sin escribirlo**.
 Una coincidencia histórica sin número no equivale a registro confirmado.
 Tras abrir cada candidato, lee exclusivamente su cuerpo identificado en Outlook,
@@ -1543,8 +1546,8 @@ supervisado y la aprobación explícita de su destino.
 
 Prepara hasta 3 correos por defecto (entre 1 y 5 con `--batch-size`, independiente
 de `invoices.batch_limit`, que solo usa `--classify-invoices`). Cada ejecución abre
-Opera una sola vez y reutiliza esa sesión para clasificar, revisar y archivar;
-`--resume-invoice-batch` sin pendientes termina sin abrir Opera. La ventana muestra las facturas
+una sola sesión de Graph y la reutiliza para clasificar, revisar y archivar;
+`--resume-invoice-batch` sin pendientes termina sin conectarse al buzón. La ventana muestra las facturas
 editables, la carpeta sugerida y los errores de cada correo. La selección es por
 correo, empieza desmarcada e incluye TODAS sus facturas; un adjunto con errores
 bloquea la selección. Puede usar «Seleccionar correos aptos» y desmarcar después.
@@ -1592,7 +1595,7 @@ Para retomar sin descargar ni clasificar de nuevo:
 La ventana muestra los pendientes y las aprobaciones previas. Pulsar ejecutar
 retoma estas últimas sin volver a pedir sus datos o carpeta. Un estado `approved`
 registra de forma idempotente y verifica Excel; `registered` verifica el libro
-y continúa solo el archivo. Antes del clic de mover se guarda `moving`. Si el
+y continúa solo el archivo. Antes de pedir a Graph que mueva el correo se guarda `moving`. Si el
 proceso se interrumpe ahí, la siguiente ejecución **solo comprueba la carpeta
 aprobada y nunca vuelve a mover automáticamente**. Si no puede verificarla,
 permanece pendiente de revisión con un error explícito. `moved` no se procesa
@@ -1617,15 +1620,16 @@ revise manualmente ese correo antes de volver a aprobarlo. El agente no reemplaz
 el digest aprobado con el cuerpo nuevo ni mueve el correo usando una aprobación
 obsoleta.
 La ejecución programada y la aprobación automática sin supervisión siguen
-pendientes. Un piloto real supervisado terminó con cuatro correos movidos y
-verificados y uno bloqueado porque su cuerpo cambió después de la revisión. El
+pendientes. Un piloto real supervisado **con el lector de Opera** terminó con
+cuatro correos movidos y verificados y uno bloqueado porque su cuerpo, leído desde
+la página, cambió después de la revisión. El
 candidato con discrepancia entre asunto y PDF pudo corregirse en la UI; la factura
 se validó con su PDF. El piloto sigue teniendo resultado mixto y no habilita
 ejecución autónoma. El correo bloqueado requiere reconciliación manual antes de
 otra aprobación. Las pruebas cubren
 aprobación conjunta, persistencia, cancelación, recuperación sin duplicar registros,
-bloqueo de ejecuciones simultáneas y una página sintética con los selectores de
-movimiento. Esto no valida la precisión general del modelo ni convierte el piloto
+bloqueo de ejecuciones simultáneas y, con un Graph simulado, la lectura, el
+movimiento y su verificación. Esto no valida la precisión general del modelo ni convierte el piloto
 mixto en una validación exitosa.
 
 ### Escanear la bandeja (solo lectura)
@@ -1701,8 +1705,8 @@ valores y el formato antes de reemplazar el libro. No agrega filas.
 
 Las pruebas del escritor usan únicamente libros sintéticos en directorios temporales;
 nunca escriben en el Excel real. La interfaz solicita aprobación explícita antes de
-llamar al registro. La simulación de carpetas ya se probó con Outlook real;
-los lotes pequeños exigen aprobación para el movimiento real,
+llamar al registro. La simulación de carpetas se probó con Outlook real usando el
+lector de Opera; con Graph falta validarla con el buzón real. Los lotes pequeños exigen aprobación para el movimiento real,
 como se indica arriba.
 
 La configuración personal está en `config/settings.yaml`, excluida de Git.
@@ -1714,19 +1718,77 @@ El lector conserva compatibilidad con archivos planos anteriores mediante
 valores personales. En configuraciones antiguas, el bloque global `ollama` se
 conserva como endpoint compartido de facturas y cierre mensual.
 No copie la plantilla encima de una configuración personal existente.
-La plantilla es `config/settings.example.yaml`. El perfil de Opera y las
-copias locales están bajo `.local\MailInvoiceAgent`, fuera de los
-perfiles habituales de Opera.
+La plantilla es `config/settings.example.yaml`. La sesión y las copias locales
+están bajo `.local\MailInvoiceAgent`.
 
-Inicio de sesión manual (sin escanear ni mover mensajes):
+### Acceso al buzón de facturas por Microsoft Graph
+
+Facturas lee los correos y archiva los aprobados por la API de Microsoft Graph,
+sin navegador. El lector anterior, que automatizaba Outlook Web en Opera con
+Playwright, se retiró: sus selectores, desplazamientos con esperas fijas y la
+lectura del cuerpo desde la página causaban el resultado mixto del piloto.
+
+**App propia (una sola vez).** Facturas necesita mover correos, así que usa el
+permiso delegado `Mail.ReadWrite`. Regístralo en **otra app**, no en la del
+cierre mensual: si una misma app tiene `Mail.ReadWrite` concedido, sus tokens
+pueden llevarlo aunque se pida `Mail.Read`, y el cierre mensual dejaría de ser
+de solo lectura. En portal.azure.com, Microsoft Entra ID, App registrations, New
+registration:
+
+- Nombre: por ejemplo «Agente local - facturas».
+- Tipos de cuenta: debe admitir cuentas personales de Microsoft.
+- Redirect URI: «Aplicaciones móviles y de escritorio» con `http://localhost`.
+- API permissions: Microsoft Graph, permiso delegado `Mail.ReadWrite`.
+- No crees secretos de cliente. El `Application (client) ID` no es un secreto.
+
+En `config/settings.yaml`, dentro de `invoices`, define
+`graph_client_id: "<Application (client) ID>"` y, opcionalmente,
+`graph_authority: consumers` (por defecto) o `common`. Las claves
+`opera_executable` y `profile_dir` se ignoran y puedes borrarlas.
+
+**Inicio de sesión** (no lee ni mueve mensajes):
 
 ```powershell
 .\.venv\Scripts\python.exe -m mail_invoices.main --login --config config\settings.yaml
 ```
 
-Opera se comprobó con Playwright en una página local. Esto no valida todavía
-su sesión ni sus selectores en Outlook. Completa el acceso manual y cierra la
-ventana; no compartas credenciales ni copies cookies.
+Abre el navegador del sistema con la página de Microsoft; el agente nunca ve la
+contraseña. La sesión queda en `.local\MailInvoiceAgent\graph_token_cache.bin`,
+dato sensible fuera de Git; borrarlo cierra la sesión. Los lotes nunca abren un
+navegador: si la sesión falta o venció, se detienen y piden `--login`.
+
+**Qué puede hacer el agente con ese permiso.** Aunque `Mail.ReadWrite` permitiría
+más, el cliente (`graph_mailbox.py`) solo envía peticiones `GET` bajo
+`/v1.0/me/` y una única escritura: `POST /v1.0/me/messages/{id}/move`. Borrar,
+enviar, copiar, marcar como leído, crear carpetas o cualquier otra operación se
+rechaza antes de salir del equipo. El token solo se envía a
+`graph.microsoft.com/v1.0`.
+
+**Cómo lee y archiva.**
+
+- Candidatos: correos de la Bandeja de entrada con adjuntos, desde `--days`, cuyo
+  remitente, asunto o vista previa mencionan factura, invoice, recibo, CFDI o
+  comprobante. Listarlos no abre ningún correo.
+- Lectura: el cuerpo se pide en texto plano (hasta 6000 caracteres). Su huella
+  SHA-256 es la que se aprueba; si el cuerpo cambia antes de mover, el correo se
+  bloquea como antes.
+- Adjuntos: solo archivos PDF, XML y ZIP de hasta 10 MB, con nombres saneados
+  dentro del directorio temporal de la ejecución. Los enlaces a la nube y los
+  correos adjuntos no se descargan.
+- Carpetas: el árbol completo por su ruta («Padre/Hija»), sin las carpetas del
+  sistema. Las rutas coinciden con las que ya usaban las decisiones guardadas y
+  `folder_rules`.
+- Mover: con identificadores inmutables, el correo conserva su identificador al
+  moverse; después se verifica que está en la carpeta aprobada con el mismo
+  remitente y asunto. Una respuesta perdida no se repite: el estado `moving`
+  solo se verifica en la siguiente ejecución. Un rechazo por exceso de peticiones
+  (429) sí se reintenta, porque Graph no actuó.
+
+**Estado.** Implementado y probado con un Graph simulado: lista de operaciones
+permitidas, reintentos, carpetas, candidatos, adjuntos, historial, cuerpo y su
+huella, movimiento y verificación, sesión y la clasificación de extremo a
+extremo sin mover nada. **Pendiente de validar con el buzón real**: requiere
+registrar la app y ejecutar `--login`.
 
 ## Licencia
 

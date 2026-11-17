@@ -14,8 +14,7 @@ from mail_invoices.settings import MailSettings
 @pytest.fixture
 def settings(tmp_path):
     return MailSettings(
-        tmp_path / "opera.exe", tmp_path / "profile", tmp_path / "book.xlsx",
-        tmp_path / "backups", "Hoja1", 1,
+        "11111111-2222-3333-4444-555555555555", tmp_path / "book.xlsx", tmp_path / "backups", "Hoja1", 1,
     )
 
 
@@ -74,8 +73,7 @@ def test_failed_extraction_keeps_readonly_json_shape(monkeypatch, tmp_path):
 def test_classification_cleans_run_attachments(tmp_path, monkeypatch):
     attachments = tmp_path / "attachments"
     settings = MailSettings(
-        tmp_path / "opera.exe", tmp_path, tmp_path / "book.xlsx", tmp_path,
-        "Hoja1", 1, attachments_dir=attachments,
+        "11111111-2222-3333-4444-555555555555", tmp_path / "book.xlsx", tmp_path, "Hoja1", 1, attachments_dir=attachments,
     )
     created = []
 

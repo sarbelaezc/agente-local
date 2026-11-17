@@ -82,7 +82,7 @@ def test_unified_batch_review_requires_complete_explicit_approval(tmp_path, acti
                 ReviewedInvoice("Approved company", "Synthetic SAS", date(2026,10,31),
                     Decimal("100"), candidate.number, "COP") for candidate in candidates
             ]
-        settings = MailSettings(directory / "opera", directory, path, directory / "backups", "Hoja1", 3, approver="Santi")
+        settings = MailSettings("11111111-2222-3333-4444-555555555555", path, directory / "backups", "Hoja1", 3, approver="Santi")
         journal = BatchStateStore(directory / "states.sqlite3", "test")
         journal.save(messages)
         errors = []

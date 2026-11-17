@@ -2,21 +2,16 @@ from __future__ import annotations
 
 from datetime import date
 from dataclasses import asdict, replace
-from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from playwright.sync_api import Error as PlaywrightError, sync_playwright
-
-from mail_invoices.browser import outlook_page, reopen_outlook
 from mail_invoices.documents import MAX_FILE_BYTES, InvoiceCandidate
 from mail_invoices.folders import IncomingMessage, bounded_context, suggest_folder
 from mail_invoices.classification_decisions import ClassificationDecisionStore, decisions_path
-from mail_invoices.inbox import (
-    MESSAGE_SELECTOR, _find_message, download_attachments, filter_inbox_messages, scan_inbox,
+from mail_invoices.graph_mailbox import (
+    MailboxError, discover_folders, filter_candidates, open_mailbox, read_history, scan_candidates,
 )
 from mail_invoices.local_model import LocalModelError, OllamaJsonModel
-from mail_invoices.outlook_folders import discover_folders, message_metadata, read_history, read_message_body
 from mail_invoices.settings import MailSettings
 from mail_invoices.workbook import InvoiceWorkbook
 
@@ -30,23 +25,23 @@ def simulate_classification(
     *, include_review_items: bool = False,
     candidate_text: str | None = None,
     attachment_dir: Path | None = None,
-    page=None,
+    mailbox=None,
 ) -> dict:
     """Run classification with attachments isolated to a cleaned temporary directory.
 
-    A supplied ``page`` reuses an already open Outlook session instead of launching Opera.
+    A supplied ``mailbox`` reuses an already open Graph session.
     """
     if attachment_dir is not None:
         attachment_dir.mkdir(parents=True, exist_ok=True)
         return _simulate_classification(
             replace(settings, attachments_dir=attachment_dir), days, authorized_history, use_model,
-            include_review_items=include_review_items, candidate_text=candidate_text, page=page,
+            include_review_items=include_review_items, candidate_text=candidate_text, mailbox=mailbox,
         )
     settings.attachments_dir.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix="classification-run-", dir=settings.attachments_dir) as run_dir:
         return _simulate_classification(
             replace(settings, attachments_dir=Path(run_dir)), days, authorized_history, use_model,
-            include_review_items=include_review_items, candidate_text=candidate_text, page=page,
+            include_review_items=include_review_items, candidate_text=candidate_text, mailbox=mailbox,
         )
 
 
@@ -54,34 +49,23 @@ def _simulate_classification(
     settings: MailSettings, days: int, authorized_history: list[str], use_model: bool,
     *, include_review_items: bool = False,
     candidate_text: str | None = None,
-    page=None,
+    mailbox=None,
 ) -> dict:
     """Suggest destinations and verify Excel read-only. No move command is invoked."""
-    if page is not None:
-        return _classify_on_page(
-            page, settings, days, authorized_history, use_model,
+    if mailbox is not None:
+        return _classify(
+            mailbox, settings, days, authorized_history, use_model,
             include_review_items=include_review_items, candidate_text=candidate_text,
         )
-    if not settings.executable.is_file():
-        raise FileNotFoundError("Configured Opera executable does not exist")
-    with sync_playwright() as playwright:
-        context = playwright.chromium.launch_persistent_context(
-            str(settings.profile_dir), executable_path=str(settings.executable),
-            headless=False, accept_downloads=True,
+    with open_mailbox(settings) as mailbox:
+        return _classify(
+            mailbox, settings, days, authorized_history, use_model,
+            include_review_items=include_review_items, candidate_text=candidate_text,
         )
-        try:
-            page = outlook_page(context)
-            page.wait_for_selector(MESSAGE_SELECTOR, timeout=60000)
-            return _classify_on_page(
-                page, settings, days, authorized_history, use_model,
-                include_review_items=include_review_items, candidate_text=candidate_text,
-            )
-        finally:
-            context.close()
 
 
-def _classify_on_page(
-    page, settings: MailSettings, days: int, authorized_history: list[str], use_model: bool,
+def _classify(
+    mailbox, settings: MailSettings, days: int, authorized_history: list[str], use_model: bool,
     *, include_review_items: bool, candidate_text: str | None,
 ) -> dict:
     from mail_invoices.workflow import _build_ocr, _extract_file, _prefer_xml_candidates
@@ -92,12 +76,11 @@ def _classify_on_page(
     ocr = _build_ocr(settings)
     confirmed = ClassificationDecisionStore(decisions_path()).load()
     results = []
-    folders = [folder.path for folder in discover_folders(page)]
-    history = read_history(page, authorized_history)
-    reopen_outlook(page, MESSAGE_SELECTOR)
-    messages = scan_inbox(page, days, date.today())
+    folders = [folder.path for folder in discover_folders(mailbox)]
+    history = read_history(mailbox, authorized_history)
+    messages = scan_candidates(mailbox, days, date.today())
     if candidate_text is not None:
-        messages = filter_inbox_messages(messages, candidate_text)
+        messages = filter_candidates(messages, candidate_text)
     messages = messages[:settings.batch_limit]
     for index, message in enumerate(messages, 1):
         result = {
@@ -106,21 +89,15 @@ def _classify_on_page(
         }
         results.append(result)
         try:
-            reopen_outlook(page, MESSAGE_SELECTOR)
-            option = _find_message(page, message.label)
-            if option is None:
-                raise LookupError("Candidate no longer available in inbox")
-            sender, subject = message_metadata(option)
-            result.update(
-                sender=sender, subject=subject,
-                conversation=option.get_attribute("data-convid"),
-            )
+            detail = mailbox.message(message.id)
+            sender, subject, body = detail.sender, detail.subject, detail.body
+            result.update(sender=sender, subject=subject, conversation=detail.id)
             # Separate message directories prevent same-name attachment overwrites.
-            paths = download_attachments(
-                page, message.label, settings.attachments_dir / f"classification-{index}",
+            paths, download_errors = mailbox.download_attachments(
+                detail.id, settings.attachments_dir / f"classification-{index}",
             )
-            body = read_message_body(page)
-            result["body_digest"] = sha256(body.encode("utf-8")).hexdigest()
+            result["errors"].extend(download_errors)
+            result["body_digest"] = detail.body_digest
             if not paths:
                 result["errors"].append("No supported attachments downloaded")
             items = []
@@ -177,7 +154,7 @@ def _classify_on_page(
             )
             result.update(folder=suggestion.folder, reason=suggestion.reason, source=suggestion.source)
             result["eligible"] = classification_ready(statuses, result["errors"])
-        except (LookupError, PlaywrightError, OSError, ValueError, LocalModelError) as error:
+        except (LookupError, MailboxError, OSError, ValueError, LocalModelError) as error:
             result["errors"].append(str(error))
             result["eligible"] = False
     return {

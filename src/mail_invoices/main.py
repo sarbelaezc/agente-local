@@ -13,7 +13,7 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--process-invoice-batch", action="store_true", help="Review and approve a small E2E batch.")
     mode.add_argument("--resume-invoice-batch", action="store_true", help="Resume local pending batches without rescanning.")
-    mode.add_argument("--login", action="store_true", help="Open Outlook for a manual sign-in")
+    mode.add_argument("--login", action="store_true", help="Sign in to the invoice mailbox (Microsoft Graph)")
     mode.add_argument(
         "--classify-invoices", action="store_true",
         help="Simulate folder classification and verify original Excel; never moves mail.",
@@ -24,7 +24,7 @@ def main() -> int:
     )
     mode.add_argument(
         "--scan-inbox", action="store_true",
-        help="List invoice candidates in the inbox list (read-only, opens no message)",
+        help="List invoice candidates in the inbox (read-only, opens no message)",
     )
     parser.add_argument(
         "--batch-size", type=int, default=3, help="Controlled E2E batch size (1-5, default 3)",

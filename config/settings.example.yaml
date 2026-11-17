@@ -2,8 +2,9 @@ invoices:
   ollama:
     url: http://127.0.0.1:11434
     model: qwen2.5:7b
-  opera_executable: "%LOCALAPPDATA%\\Programs\\Opera\\opera.exe"
-  profile_dir: ".local\\MailInvoiceAgent\\OperaProfile"
+  # Application (client) ID of the invoice app in Azure (Mail.ReadWrite, personal accounts).
+  graph_client_id: "00000000-0000-0000-0000-000000000000"
+  graph_authority: consumers
   workbook: "C:\\Documents\\Resumen_Facturas.xlsx"
   backup_dir: ".local\\MailInvoiceAgent\\Backups"
   sheet: Hoja1

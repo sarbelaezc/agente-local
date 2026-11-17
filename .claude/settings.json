@@ -2,6 +2,9 @@
   "permissions": {
     "deny": [
       "Read(./.local/MonthlyCloseAgent/graph_token_cache.bin)",
+      "Read(./.local/MonthlyCloseAgent/gmail_token_*.json)",
+      "Read(./.local/MonthlyCloseAgent/gmail_client_secret.json)",
+      "Read(./.local/MailInvoiceAgent/graph_token_cache.bin)",
       "Read(./.local/MailInvoiceAgent/OperaProfile/**)"
     ]
   }

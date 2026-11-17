@@ -161,7 +161,7 @@ try {
         $config = Join-Path $root "config\settings.yaml"
         if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
             Copy-Item (Join-Path $root "config\settings.example.yaml") $config
-            throw "Se creo config\settings.yaml. Configura Opera, el libro e invoices.ollama y repite."
+            throw "Se creo config\settings.yaml. Configura invoices.graph_client_id, el libro e invoices.ollama y repite."
         }
         $endpoint = & $python -c (
             "import sys; from pathlib import Path; from mail_invoices.settings import load_settings; " +

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 from mail_invoices.assist import complete_candidate, describe, to_json
-from mail_invoices.browser import outlook_page
 from mail_invoices.documents import (
     MAX_FILE_BYTES,
     DocumentError,
@@ -15,9 +13,6 @@ from mail_invoices.local_model import LocalModelError, OllamaJsonModel
 from mail_invoices.ocr import TesseractOcr
 from mail_invoices.review import ReviewItem
 from mail_invoices.settings import MailSettings
-
-OPERA_EXECUTABLE_ERROR = "Configured Opera executable does not exist"
-
 
 def classify_invoices(
     settings: MailSettings, days: int, authorized_history: list[str], use_model: bool,
@@ -39,30 +34,15 @@ def classify_invoices(
 
 
 def login(settings: MailSettings) -> int:
-    from playwright.sync_api import sync_playwright
+    """Sign in to the invoice mailbox in the system browser; the agent never sees the password."""
+    from mail_invoices.graph_mailbox import interactive_login, token_cache_path
 
-    if not settings.executable.is_file():
-        raise FileNotFoundError(OPERA_EXECUTABLE_ERROR)
-    settings.profile_dir.mkdir(parents=True, exist_ok=True)
-    with sync_playwright() as playwright:
-        context = playwright.chromium.launch_persistent_context(
-            str(settings.profile_dir),
-            executable_path=str(settings.executable),
-            headless=False,
-            accept_downloads=True,
-        )
-        try:
-            outlook_page(context)
-            print(
-                "Sign in to your personal Hotmail account manually. "
-                "Close this Opera window when the inbox is available. "
-                "No messages are opened or modified in login mode.",
-                flush=True,
-            )
-            while context.pages:
-                time.sleep(1)
-        finally:
-            context.close()
+    account = interactive_login(settings.graph_client_id, settings.graph_authority, token_cache_path())
+    print(
+        f"Sesion de Microsoft para facturas guardada para {account}. Permiso: Mail.ReadWrite; "
+        "el agente solo lee correos y mueve los aprobados.",
+        flush=True,
+    )
     return 0
 
 
@@ -143,35 +123,21 @@ def _prefer_xml_candidates(items: list[ReviewItem]) -> list[ReviewItem]:
 
 
 def scan_inbox(settings: MailSettings, days: int) -> int:
-    """Read-only: lists invoice candidates from the inbox list without opening messages."""
+    """Read-only: lists invoice candidates from the inbox without opening messages."""
     from datetime import date
 
-    from playwright.sync_api import sync_playwright
+    from mail_invoices.graph_mailbox import open_mailbox, scan_candidates
 
-    from mail_invoices.inbox import MESSAGE_SELECTOR, scan_inbox
-
-    if not settings.executable.is_file():
-        raise FileNotFoundError(OPERA_EXECUTABLE_ERROR)
-    settings.profile_dir.mkdir(parents=True, exist_ok=True)
-    with sync_playwright() as playwright:
-        context = playwright.chromium.launch_persistent_context(
-            str(settings.profile_dir),
-            executable_path=str(settings.executable),
-            headless=False,
-        )
-        try:
-            page = outlook_page(context)
-            page.wait_for_selector(MESSAGE_SELECTOR, timeout=60000)
-            candidates = scan_inbox(page, days, date.today())
-        finally:
-            context.close()
+    with open_mailbox(settings) as mailbox:
+        candidates = scan_candidates(mailbox, days, date.today())
     print(
         to_json(
             [
                 {
                     "unread": message.unread,
-                    "received": message.received.isoformat() if message.received else None,
-                    "preview": message.label[:300],
+                    "received": message.received.isoformat(),
+                    "sender": message.sender,
+                    "subject": message.subject[:300],
                 }
                 for message in candidates
             ]

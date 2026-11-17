@@ -5,20 +5,17 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from playwright.sync_api import Error as PlaywrightError, sync_playwright
-
 from mail_invoices.assist import to_json
 from mail_invoices.batch_review_ui import BatchReviewWindow
 from mail_invoices.batch_state import (
     BatchMessage, BatchStateStore, batch_lock, batch_scope, batch_state_path,
 )
-from mail_invoices.browser import outlook_page
 from mail_invoices.classification import simulate_classification
 from mail_invoices.classification_decisions import ClassificationDecisionStore, decisions_path
 from mail_invoices.folders import ConfirmedExample
-from mail_invoices.inbox import MESSAGE_SELECTOR
-from mail_invoices.movement import move_registered_message, verify_destination
-from mail_invoices.outlook_folders import discover_folders
+from mail_invoices.graph_mailbox import (
+    MailboxError, discover_folders, move_registered_message, open_mailbox, verify_destination,
+)
 from mail_invoices.settings import MailSettings
 from mail_invoices.workbook import InvoiceWorkbook, WorkbookError
 
@@ -50,7 +47,7 @@ def _persist_execution_error(
 
 def execute_message(
     message: BatchMessage, journal: BatchStateStore, workbook: InvoiceWorkbook,
-    decisions: ClassificationDecisionStore, page,
+    decisions: ClassificationDecisionStore, mailbox,
 ) -> None:
     """Resume a durable approval; uncertain moves are verification-only."""
     if message.state not in {"approved", "registered", "moving"}:
@@ -81,26 +78,26 @@ def execute_message(
             raise ValueError("El registro en Excel no coincide; no se movera el correo")
         if message.folder is None:
             raise ValueError("Falta el destino aprobado")
-        folders = [folder.path for folder in discover_folders(page)]
+        folders = [folder.path for folder in discover_folders(mailbox)]
         if message.folder not in folders:
             raise LookupError("La carpeta aprobada ya no existe; no se movera el correo")
         decisions.save(
             [ConfirmedExample(message.context, message.folder)], message.approver, folders,
         )
         if message.state == "moving":
-            verify_destination(page, data, message.folder)
+            verify_destination(mailbox, data, message.folder)
         else:
             def mark_moving() -> None:
                 message.state = "moving"
                 journal.save([message])
 
             move_registered_message(
-                page, data, message.folder, approved=True, before_move=mark_moving,
+                mailbox, data, message.folder, approved=True, before_move=mark_moving,
             )
         message.state = "moved"
         message.last_error = ""
         journal.save([message])
-    except (OSError, ValueError, LookupError, sqlite3.Error, PlaywrightError) as error:
+    except (OSError, ValueError, LookupError, sqlite3.Error, MailboxError) as error:
         _persist_execution_error(message, journal, error)
         raise
 
@@ -131,54 +128,43 @@ def _process_invoice_batch(
         if resume and not active:
             print(to_json({"messages": [], "message": "No hay correos pendientes"}))
             return 0
-        if not settings.executable.is_file():
-            raise FileNotFoundError("Configured Opera executable does not exist")
-        # One browser session per run, always closed, including cancellation.
-        with sync_playwright() as playwright:
-            context = playwright.chromium.launch_persistent_context(
-                str(settings.profile_dir), executable_path=str(settings.executable),
-                headless=False, accept_downloads=True,
-            )
-            try:
-                page = outlook_page(context)
-                page.wait_for_selector(MESSAGE_SELECTOR, timeout=60000)
-                if not resume:
-                    report = simulate_classification(
-                        replace(settings, batch_limit=batch_size), days, [], use_model,
-                        include_review_items=True, attachment_dir=attachment_dir, page=page,
-                    )
-                    for raw in report["messages"]:
-                        if not raw.get("conversation"):
-                            missing_identity.append(raw["errors"])
-                            continue
-                        prepared = BatchMessage.from_report(raw)
-                        existing = stored.get(prepared.conversation)
-                        if existing is None or existing.state == "pending":
-                            journal.save([prepared])
-                            stored[prepared.conversation] = prepared
-                    active = _active_messages(list(stored.values()), batch_size)
-                    if missing_identity:
-                        print(to_json({"untracked_errors": missing_identity}))
-                if not active:
-                    print(to_json({"messages": [], "message": "No hay correos pendientes"}))
-                    return 1 if missing_identity else 0
-                folders = [folder.path for folder in discover_folders(page)]
-                window = BatchReviewWindow(active, folders, settings, journal, attachment_dir)
-                if not window.run():
-                    print(to_json({"executed": False, "message": "Lote cerrado sin ejecutar"}))
-                    return 1
-                decisions = ClassificationDecisionStore(decisions_path())
-                workbook = InvoiceWorkbook(settings.workbook, settings.backup_dir, settings.sheet)
-                failed = False
-                for message in active:
-                    try:
-                        execute_message(message, journal, workbook, decisions, page)
-                    except (OSError, ValueError, LookupError, sqlite3.Error, PlaywrightError):
-                        failed = True
-                        # Stop the batch on failures; remaining durable approvals can be resumed.
-                        break
-            finally:
-                context.close()
+        # One Graph session per run, always closed, including cancellation.
+        with open_mailbox(settings) as mailbox:
+            if not resume:
+                report = simulate_classification(
+                    replace(settings, batch_limit=batch_size), days, [], use_model,
+                    include_review_items=True, attachment_dir=attachment_dir, mailbox=mailbox,
+                )
+                for raw in report["messages"]:
+                    if not raw.get("conversation"):
+                        missing_identity.append(raw["errors"])
+                        continue
+                    prepared = BatchMessage.from_report(raw)
+                    existing = stored.get(prepared.conversation)
+                    if existing is None or existing.state == "pending":
+                        journal.save([prepared])
+                        stored[prepared.conversation] = prepared
+                active = _active_messages(list(stored.values()), batch_size)
+                if missing_identity:
+                    print(to_json({"untracked_errors": missing_identity}))
+            if not active:
+                print(to_json({"messages": [], "message": "No hay correos pendientes"}))
+                return 1 if missing_identity else 0
+            folders = [folder.path for folder in discover_folders(mailbox)]
+            window = BatchReviewWindow(active, folders, settings, journal, attachment_dir)
+            if not window.run():
+                print(to_json({"executed": False, "message": "Lote cerrado sin ejecutar"}))
+                return 1
+            decisions = ClassificationDecisionStore(decisions_path())
+            workbook = InvoiceWorkbook(settings.workbook, settings.backup_dir, settings.sheet)
+            failed = False
+            for message in active:
+                try:
+                    execute_message(message, journal, workbook, decisions, mailbox)
+                except (OSError, ValueError, LookupError, sqlite3.Error, MailboxError):
+                    failed = True
+                    # Stop the batch on failures; remaining durable approvals can be resumed.
+                    break
         print(to_json({
             "messages": [
                 {"conversation": message.conversation, "state": message.state,
