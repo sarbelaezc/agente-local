@@ -95,6 +95,13 @@ def parse_money(text: str) -> Decimal:
     return result
 
 
+class ContainerWithoutInvoice(DocumentError):
+    """A DIAN AttachedDocument that carries only its validation response, no invoice.
+
+    Some providers send it next to the invoice PDF; it is not an invoice itself.
+    """
+
+
 def _xml_invoice(data: bytes, source: str) -> InvoiceCandidate:
     try:
         root = ElementTree.fromstring(data, forbid_dtd=True)
@@ -106,6 +113,8 @@ def _xml_invoice(data: bytes, source: str) -> InvoiceCandidate:
                 and node.text
                 and "<Invoice" in node.text
             ]
+            if not embedded:
+                raise ContainerWithoutInvoice("AttachedDocument carries no invoice, only its DIAN validation")
             if len(embedded) != 1:
                 raise DocumentError("AttachedDocument does not contain one unambiguous invoice")
             root = ElementTree.fromstring(embedded[0], forbid_dtd=True)
@@ -211,13 +220,19 @@ def _pdf_invoice(data: bytes, source: str, ocr: PdfOcr | None) -> InvoiceCandida
 
 def _zip_member(
     archive: ZipFile, entry: ZipInfo, source: str, ocr: PdfOcr | None,
-    failures: list[tuple[str, DocumentError]],
+    failures: list[tuple[str, DocumentError]], containers: list[DocumentError] | None = None,
 ) -> list[InvoiceCandidate]:
     name = f"{source}:{entry.filename}"
     with archive.open(entry) as stream:
         content = stream.read(MAX_FILE_BYTES + 1)
     try:
         return parse_document(content, name, ocr)
+    except ContainerWithoutInvoice as exc:
+        if containers is None:
+            failures.append((name, exc))
+        else:
+            containers.append(exc)  # not an invoice: never blocks the invoice next to it
+        return []
     except DocumentError as exc:
         failures.append((name, exc))
         return []
@@ -256,6 +271,7 @@ def parse_document(
         raise DocumentError("Only XML, PDF and ZIP attachments are supported")
     candidates = []
     failures: list[tuple[str, DocumentError]] = []
+    containers: list[DocumentError] = []
     try:
         with ZipFile(BytesIO(data)) as archive:
             entries = archive.infolist()
@@ -277,10 +293,12 @@ def parse_document(
                 documents.append((path.suffix.lower(), entry))
             xmls: list[tuple[str, set[str]]] = []
             for entry in [entry for suffix, entry in documents if suffix == ".xml"]:
-                parsed = _zip_member(archive, entry, source, ocr, failures)
+                parsed = _zip_member(archive, entry, source, ocr, failures, containers)
                 candidates.extend(parsed)
-                key = str(PurePosixPath(entry.filename.replace("\\", "/")).with_suffix("")).lower()
-                xmls.append((key, {c.number.lower() for c in parsed if c.number}))
+                # Only an XML that yielded an invoice can make its PDF a mere rendering.
+                if parsed:
+                    key = str(PurePosixPath(entry.filename.replace("\\", "/")).with_suffix("")).lower()
+                    xmls.append((key, {c.number.lower() for c in parsed if c.number}))
             claimed: set[int] = set()
             for entry in [entry for suffix, entry in documents if suffix == ".pdf"]:
                 pair = rendered_xml(entry.filename, xmls)
@@ -294,7 +312,7 @@ def parse_document(
     if failures and (not candidates or member_errors is None):
         raise failures[0][1]
     if not candidates:
-        raise DocumentError("ZIP contains no supported invoices")
+        raise containers[0] if containers else DocumentError("ZIP contains no supported invoices")
     if member_errors is not None:
         member_errors.extend((name, str(exc)) for name, exc in failures)
     return candidates

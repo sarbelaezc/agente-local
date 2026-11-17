@@ -116,7 +116,8 @@ def _classify(
                     path.unlink()
                     continue
                 extracted, issues = _extract_file(path, ocr, model)
-                if path.suffix.lower() == ".xml":
+                # Only an XML that yielded an invoice can make its PDF a mere rendering.
+                if path.suffix.lower() == ".xml" and extracted:
                     xmls.append((path.stem.lower(), {c.number.lower() for c, _, _ in extracted if c.number}))
                 result["errors"].extend(f"{i['source']}: {i['error']}" for i in issues)
                 for candidate, rejected, error in extracted:
