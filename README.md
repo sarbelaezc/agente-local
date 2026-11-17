@@ -6,7 +6,7 @@ implementa.
 
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
-| Organización y clasificación de facturas electrónicas en Hotmail | Lectura y archivo por [Microsoft Graph](#acceso-al-buzón-de-facturas-por-microsoft-graph) con app propia (implementado y probado con un Graph simulado; **pendiente de validar con el buzón real**); el piloto anterior con Opera tuvo resultado mixto | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
+| Organización y clasificación de facturas electrónicas en Hotmail | Lectura y archivo por [Microsoft Graph](#acceso-al-buzón-de-facturas-por-microsoft-graph) con la misma app del cierre mensual (implementado y probado con un Graph simulado; **pendiente de validar con el buzón real**); el piloto anterior con Opera tuvo resultado mixto | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
 | Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); [tarea programada](#cobertura-cierre-y-tarea-persistente) del último día del mes con recuperación al encender el equipo y [registro de ejecuciones](#registro-de-ejecuciones) (implementado y probado; primera ejecución supervisada pendiente); [varios buzones](#varios-buzones-y-gmail-de-manuela) con Gmail de Manuela en solo lectura y [lectura incremental](#lectura-incremental) de Outlook y Gmail (implementado; validado con los buzones reales: inicio de sesión en Gmail, importación de Manuela y ejecuciones incrementales); [extractos de Protección](#hogar-santiago-y-manuela): saldo, aportes, retiros y rendimientos de pensión voluntaria y cesantías (implementado y validado con los extractos reales de 2026) | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` / `scripts/agente-local.ps1 login -Mailbox manuela` |
 
 ## Stack tecnológico
@@ -14,7 +14,7 @@ implementa.
 - **Python 3.12 o posterior**; empaquetado con `setuptools` y dependencias declaradas en `pyproject.toml`.
 - **Playwright para Python** (dependencia de desarrollo) ejecuta las pruebas gráficas del panel. Ninguna función controla un navegador.
 - **Microsoft Graph con `msal`** (solo lectura, permiso `Mail.Read`) lee el buzón de Outlook del cierre mensual.
-- **Microsoft Graph con `msal` para facturas**, con una app propia y el permiso `Mail.ReadWrite`, limitado en el código a leer correos y mover los aprobados.
+- **Microsoft Graph con `msal` para facturas**, con la misma app del cierre mensual y el permiso `Mail.ReadWrite`, limitado en el código a leer correos y mover los aprobados.
 - **API de Gmail con `google-auth-oauthlib`** (solo lectura, permiso `gmail.readonly`) lee el buzón de Gmail de Manuela, si está configurado. La librería solo gestiona el inicio de sesión y la renovación del token; las consultas usan `httpx`.
 - **Una instancia local de Ollama compartida por facturas y cierre mensual** en `127.0.0.1:11434`; `scripts/agente-local.ps1` la inicia cuando un comando la necesita y no está activa, con el almacén de modelos predeterminado de Ollama.
 - **Facturas:** `openpyxl` para Excel, `defusedxml` para XML, `pypdf` para PDF con texto, y `pypdfium2` más `Pillow` para renderizar PDF escaneados.
@@ -511,7 +511,10 @@ titulares queda en `audit` con su origen.
 ### Lectura del buzón por Microsoft Graph
 
 El agente lee el buzón por la API de Microsoft Graph con el permiso delegado
-`Mail.Read`: no puede enviar, mover, borrar ni marcar mensajes. Según la
+`Mail.Read`. Su cliente solo hace peticiones `GET`: no puede enviar, mover, borrar
+ni marcar mensajes. La app también tiene `Mail.ReadWrite` concedido para que
+facturas archive los correos aprobados, así que sus tokens pueden llevar ese
+permiso; el límite del cierre lo pone su código, no el token. Según la
 documentación de Microsoft, registrar la app y consultar correo no tiene costo
 (la única API facturada de Graph es `assignSensitivityLabel` de
 SharePoint/OneDrive). Ollama sigue siendo local; no se usan tokens de IA externos.
@@ -1435,7 +1438,11 @@ se trata como la representación gráfica de un XML (estructura DIAN) y no se
 analiza ni pasa por OCR u Ollama solo si se empareja de forma uno a uno e
 inequívoca con ese XML: mismo nombre de archivo sin extensión, o el número de
 factura del XML como palabra del nombre del PDF. Así un PDF ilegible no bloquea
-la factura XML válida. Cualquier PDF sin pareja inequívoca se sigue analizando,
+la factura XML válida. La misma regla se aplica cuando el XML y el PDF llegan
+sueltos en el correo, sin ZIP: se lee primero cada XML y el PDF que es su
+representación gráfica no se analiza; un PDF sin pareja inequívoca se analiza
+como siempre. En los 25 correos procesados hasta noviembre de 2026 todas las
+facturas llegaron en ZIP. Cualquier PDF sin pareja inequívoca se sigue analizando,
 aunque el ZIP traiga tantos PDF como XML. Si un archivo del ZIP falla y otro es
 válido, se conservan las facturas válidas y el fallo se informa con la ruta de
 ese archivo (`adjunto.zip:archivo.pdf`). Ese error sigue bloqueando el correo en
@@ -1754,21 +1761,20 @@ sin navegador. El lector anterior, que automatizaba Outlook Web en Opera con
 Playwright, se retiró: sus selectores, desplazamientos con esperas fijas y la
 lectura del cuerpo desde la página causaban el resultado mixto del piloto.
 
-**App propia (una sola vez).** Facturas necesita mover correos, así que usa el
-permiso delegado `Mail.ReadWrite`. Regístralo en **otra app**, no en la del
-cierre mensual: si una misma app tiene `Mail.ReadWrite` concedido, sus tokens
-pueden llevarlo aunque se pida `Mail.Read`, y el cierre mensual dejaría de ser
-de solo lectura. En portal.azure.com, Microsoft Entra ID, App registrations, New
-registration:
+**La misma app del cierre mensual (una sola vez).** Facturas necesita mover
+correos, así que usa el permiso delegado `Mail.ReadWrite`. Por decisión del
+usuario comparte la app registrada del cierre mensual: en portal.azure.com,
+Microsoft Entra ID, App registrations, abre esa app y en **API permissions**
+agrega el permiso delegado de Microsoft Graph `Mail.ReadWrite`.
 
-- Nombre: por ejemplo «Agente local - facturas».
-- Tipos de cuenta: debe admitir cuentas personales de Microsoft.
-- Redirect URI: «Aplicaciones móviles y de escritorio» con `http://localhost`.
-- API permissions: Microsoft Graph, permiso delegado `Mail.ReadWrite`.
-- No crees secretos de cliente. El `Application (client) ID` no es un secreto.
+Consecuencia aceptada: como la app tiene `Mail.ReadWrite`, los tokens de
+cualquiera de las dos funciones pueden llevarlo. Por eso cada cliente limita lo
+que hace en su código: el del cierre mensual solo hace `GET`, y el de facturas
+solo lee y mueve (ver abajo). Cada función guarda su propia sesión.
 
-En `config/settings.yaml`, dentro de `invoices`, define
-`graph_client_id: "<Application (client) ID>"` y, opcionalmente,
+En `config/settings.yaml`, dentro de `invoices`, define `graph_client_id` con el
+mismo `Application (client) ID` de `graph_client_id` en
+`.local\MonthlyCloseAgent\runtime.json` y, opcionalmente,
 `graph_authority: consumers` (por defecto) o `common`. Las claves
 `opera_executable` y `profile_dir` se ignoran y puedes borrarlas.
 

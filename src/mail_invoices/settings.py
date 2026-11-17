@@ -26,8 +26,8 @@ def _path(value: str) -> Path:
 
 @dataclass(frozen=True)
 class MailSettings:
-    """Invoice settings. graph_client_id is the invoice app's own Azure registration
-    (Mail.ReadWrite); the monthly close keeps its read-only app."""
+    """Invoice settings. graph_client_id is the Azure app shared with the monthly close,
+    with Mail.ReadWrite added; each feature keeps its own session and allow-list."""
 
     graph_client_id: str
     workbook: Path

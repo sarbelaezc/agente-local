@@ -1,9 +1,9 @@
 """Hotmail access for the invoice organizer through Microsoft Graph.
 
-The invoice app has its own Azure registration with the delegated Mail.ReadWrite
-permission, because filing a registered invoice moves its message. That permission
-would also allow deleting, sending or flagging, so this client enforces a narrower
-allow-list in code: GET requests under /v1.0/me/ and a single write, POST
+The invoice organizer uses the monthly close's Azure app with the delegated
+Mail.ReadWrite permission added, because filing a registered invoice moves its
+message. That permission would also allow deleting, sending or flagging, so this
+client enforces a narrower allow-list in code: GET requests under /v1.0/me/ and a single write, POST
 /v1.0/me/messages/{id}/move. Message ids are immutable, so a message keeps its id
 after the move and can be verified in its destination.
 """

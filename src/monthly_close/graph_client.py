@@ -12,7 +12,8 @@ import httpx
 from monthly_close.outlook import OutlookError
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
-# Read-only: this scope cannot change, move, delete or mark messages.
+# Read-only scope. The app is shared with the invoice organizer, which adds Mail.ReadWrite,
+# so tokens may carry write access: this client stays read-only because it only sends GET.
 SCOPES = ["Mail.Read"]
 AUTHORITIES = {"consumers", "common"}
 CLIENT_ID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")

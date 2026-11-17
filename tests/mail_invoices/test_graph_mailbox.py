@@ -463,13 +463,12 @@ def test_classification_reads_downloads_and_suggests_without_moving(graph, tmp_p
     )
     [result] = report["messages"]
     assert report["moved"] == 0 and graph.moves == []
-    assert sorted(seen) == ["FE-1.pdf", "FE-1.xml"]
+    assert seen == ["FE-1.xml"]  # the loose PDF with the same name is the XML's rendering
     assert (result["conversation"], result["sender"], result["subject"]) == ("m1", SENDER, "Factura FE-1")
     # Sender rules never impose an invoice destination and the model is off: no suggestion.
     assert result["folder"] is None and result["errors"] == ["enorme.zip: larger than 10 MB"]
     assert result["body_digest"] == sha256("Cuerpo de la factura FE-1".encode()).hexdigest()
-    # Loose XML and PDF are two documents today; only a ZIP pairs them (see README).
-    assert [invoice["status"] for invoice in result["invoices"]] == ["not_registered", "not_registered"]
+    assert [invoice["status"] for invoice in result["invoices"]] == ["not_registered"]
     assert not (tmp_path / "tmp").exists() or list((tmp_path / "tmp").iterdir()) == []
 
 
@@ -595,3 +594,40 @@ def test_scan_inbox_lists_candidates_without_opening_them(graph, monkeypatch, tm
     listed = json.loads(capsys.readouterr().out)
     assert [item["subject"] for item in listed] == ["Factura FE-1"]
     assert not any("/me/messages/" in url for method, url in graph.requests)  # nothing opened
+
+
+@pytest.mark.parametrize("names,read", [
+    (["FE-1.xml", "FE-1.pdf"], ["FE-1.xml"]),                                # same name
+    (["FE-1.xml", "Representacion grafica FE-1.pdf"], ["FE-1.xml"]),         # invoice number in the name
+    (["FE-1.xml", "otro.pdf"], ["FE-1.xml", "otro.pdf"]),                    # no unambiguous pair: still read
+    (["FE-1.xml", "FE-1.pdf", "FE-1 copia.pdf"], ["FE-1.xml", "FE-1 copia.pdf"]),  # one PDF per XML only
+    (["FE-1.pdf"], ["FE-1.pdf"]),                                            # a PDF alone is the invoice
+])
+def test_loose_xml_and_pdf_are_paired_like_inside_a_zip(graph, tmp_path, monkeypatch, names, read):
+    from mail_invoices import classification, workflow
+    from mail_invoices.documents import InvoiceCandidate
+    from mail_invoices.settings import MailSettings
+
+    graph.attachments["m1"] = [
+        {"@odata.type": "#microsoft.graph.fileAttachment", "id": f"a{i}", "name": name, "size": 10}
+        for i, name in enumerate(names)
+    ]
+    graph.files = {f"a{i}": b"x" for i in range(len(names))}
+    seen = []
+
+    def extract(path, ocr, model):
+        seen.append(path.name)
+        if path.suffix == ".pdf" and path.name != "FE-1.pdf" and "copia" not in path.name:
+            return [], [{"source": path.name, "error": "Scanned PDF", "requires_review": True}]
+        return [(InvoiceCandidate(path.name, "d", "FE-1" if path.suffix == ".xml" else "", method=path.suffix[1:]), (), None)], []
+
+    monkeypatch.setattr(workflow, "_extract_file", extract)
+    monkeypatch.setattr(classification, "InvoiceWorkbook", lambda *a: type("Book", (), {"registration_status": lambda *x, **k: "not_registered"})())
+    monkeypatch.setenv("AGENTE_LOCAL_DATA", str(tmp_path / "data"))
+    settings = MailSettings(CLIENT_ID, tmp_path / "book.xlsx", tmp_path, "Hoja1", 5, attachments_dir=tmp_path / "tmp",
+                            tesseract_executable=tmp_path / "missing.exe")
+    report = classification.simulate_classification(settings, 30, [], False, mailbox=gm.GraphMailbox(graph))
+    assert seen == read
+    # A paired PDF that could not be read never blocks its valid XML.
+    if names == ["FE-1.xml", "Representacion grafica FE-1.pdf"]:
+        assert report["messages"][0]["errors"] == []
