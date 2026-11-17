@@ -34,6 +34,7 @@ from monthly_close import gmail_client
 from monthly_close.gmail_client import GmailClient
 from monthly_close.gmail_reader import GmailSourceReader
 from monthly_close.mailboxes import Mailbox, find, load_mailboxes, primary_graph
+from monthly_close.run_log import run_log
 from monthly_close.household_import import PARITY_FILE, import_member, parity_report
 from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.server import create_server
@@ -101,7 +102,9 @@ def login(data_dir: Path, settings: dict, name: str | None) -> str:
     box = find(load_mailboxes(settings), name)
     if box.provider == "gmail":
         assert box.client_secrets is not None
-        account = gmail_client.interactive_login(data_dir / box.client_secrets, data_dir / box.token_cache)
+        account = gmail_client.interactive_login(
+            data_dir / box.client_secrets, data_dir / box.token_cache, expected=box.address,
+        )
         return f"Sesion de Google guardada para {account} (buzon {box.name}). Permiso: solo lectura de Gmail."
     account = interactive_login(
         settings["graph_client_id"], settings.get("graph_authority", "consumers"), data_dir / box.token_cache,
@@ -118,14 +121,28 @@ def months(start: date, end: date) -> list[str]:
     return result
 
 
-def scheduled_month(now: datetime, timezone: str) -> str | None:
-    """Only close on the last local calendar day, during the 22:00 hour."""
+CLOSING_HOUR = 22
+# The scheduled close opens Google's sign-in when Manuela's Gmail session expired and
+# waits this long for her before stopping.
+RELOGIN_MINUTES = 15
+
+
+def due_close_month(now: datetime, timezone: str, last_closed: str | None) -> str | None:
+    """Most recent month whose close is due (last local day from 22:00) and not yet done.
+
+    A run delayed because the computer was off, for example the next morning, closes
+    the month that just ended; a month already closed is never closed again.
+    """
     if now.tzinfo is None:
         raise ValueError("El reloj del cierre necesita zona horaria explicita.")
     local = now.astimezone(ZoneInfo(timezone))
-    if local.day == calendar.monthrange(local.year, local.month)[1] and local.hour == 22:
-        return local.strftime("%Y-%m")
-    return None
+    if local.day == calendar.monthrange(local.year, local.month)[1] and local.hour >= CLOSING_HOUR:
+        month = local.strftime("%Y-%m")
+    else:
+        month = (local.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+    if last_closed is not None and month <= last_closed:
+        return None
+    return month
 
 
 class Progress:
@@ -182,10 +199,42 @@ class _ClearProgress(logging.Filter):
         return True
 
 
+def check_sessions(data_dir: Path, boxes: list[Mailbox], relogin_minutes: int | None = None) -> None:
+    """Check every Gmail session before reading any mailbox, so a run stops before importing.
+
+    With relogin_minutes (the scheduled close), an expired session opens Google's
+    sign-in in the browser and waits that long for the mailbox owner; the new session
+    must belong to the mailbox's configured address. Otherwise the run stops.
+    """
+    for box in boxes:
+        if box.provider != "gmail":
+            continue
+        try:
+            gmail_client.silent_token(data_dir / box.token_cache)()
+        except gmail_client.GmailSessionError as exc:
+            if relogin_minutes is None:
+                raise
+            if box.address is None or box.client_secrets is None:
+                raise gmail_client.GmailSessionError(
+                    f"La sesion de Gmail del buzon {box.name} vencio y no tiene address configurado "
+                    "para pedir un nuevo inicio de sesion. Ejecuta login con ese buzon."
+                ) from exc
+            print(
+                f"La sesion de Gmail del buzon {box.name} vencio. Se abre el inicio de sesion de Google "
+                f"en el navegador; se espera {relogin_minutes} minutos a que {box.owner.capitalize()} inicie sesion.",
+                flush=True,
+            )
+            account = gmail_client.interactive_login(
+                data_dir / box.client_secrets, data_dir / box.token_cache,
+                timeout_seconds=relogin_minutes * 60, expected=box.address,
+            )
+            print(f"Sesion de Google renovada para {account} (buzon {box.name}).", flush=True)
+
+
 def scan(
     store: Store, data_dir: Path, settings: dict, preferences: Preferences,
     start: date, end: date, read_only: bool = False, reprocess_empty: bool = False,
-    incremental: bool = False,
+    incremental: bool = False, relogin_minutes: int | None = None,
 ) -> None:
     """Read every configured mailbox; incremental reads only what changed since last time.
 
@@ -219,6 +268,7 @@ def scan(
                 "eliminados y Dinero con todas sus subcarpetas; sin conciliar. "
                 "Otras carpetas y avisos borrados no estan cubiertos.",
             )
+    check_sessions(data_dir, boxes, relogin_minutes)
     model = None if read_only else OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
     mode = ScanMode(read_only, reprocess_empty, incremental)
     for box in boxes:
@@ -745,8 +795,11 @@ def run(args: argparse.Namespace) -> None:
         return
     preferences = store.preferences()
     now = datetime.now(ZoneInfo(preferences.timezone))
-    closing_month = scheduled_month(now, preferences.timezone) if args.command == "scheduled" else None
+    closing_month = (
+        due_close_month(now, preferences.timezone, store.last_close()) if args.command == "scheduled" else None
+    )
     if args.command == "scheduled" and closing_month is None:
+        print("Sin cierre pendiente: el ultimo mes vencido ya esta cerrado.")
         return
     settings = runtime(data_dir)
     if args.command == "pilot":
@@ -785,11 +838,16 @@ def run(args: argparse.Namespace) -> None:
         assert closing_month is not None
         start = date.fromisoformat(closing_month + "-01")
         end = now.date() + timedelta(days=1)
+        print(f"Cierre de {closing_month}.", flush=True)
         # A completed scan is idempotent and human choices survive every run.
-        scan(store, data_dir, settings, preferences, start, end, incremental=True)
+        scan(
+            store, data_dir, settings, preferences, start, end,
+            incremental=True, relogin_minutes=RELOGIN_MINUTES,
+        )
         run_complements(store, data_dir, settings, preferences, start)
         summary = store.summary(closing_month)
         (data_dir / "last-close.txt").write_text(summary + "\n", encoding="utf-8")
+        store.record_close(closing_month)
         print(summary)
         return
     # Without dates, a normal scan reads only what changed since the last one (delta).
@@ -830,6 +888,10 @@ def main() -> None:
     )
     parser.add_argument("--suffix", help="Con owner-account, ultimos cuatro digitos de la cuenta.")
     parser.add_argument("--mailbox", help="Con login, nombre del buzon de runtime.json (por defecto Outlook de Santiago).")
+    parser.add_argument(
+        "--log-file", type=Path,
+        help="Registro de esta ejecucion dentro de la carpeta logs de los datos (el lanzador lo indica).",
+    )
     parser.add_argument("--from", dest="source_category", help="Con merge-category, categoria que desaparece.")
     parser.add_argument("--to", dest="target_category", help="Con merge-category, categoria que la recibe.")
     parser.add_argument("--port", type=int, default=8766)
@@ -851,6 +913,17 @@ def main() -> None:
         parser.error("--mailbox solo se permite con login.")
     if args.read_only and args.command not in {"pilot", "scan", "reconcile-statements"}:
         parser.error("--read-only solo se permite con pilot, scan o reconcile-statements.")
+    data_dir = args.data_dir.expanduser().resolve()
+    try:
+        with run_log(data_dir, args.command, args.log_file):
+            _run_reporting(args)
+    except ValueError as exc:  # an invalid --log-file, before anything ran
+        print(f"Detenido: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
+def _run_reporting(args: argparse.Namespace) -> None:
+    """Run a command and report failures without message bodies; the run log keeps them."""
     try:
         run(args)
     except KeyboardInterrupt:

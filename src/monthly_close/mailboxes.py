@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, replace
 
-from monthly_close.domain import Preferences, owner_id, string_list
+from monthly_close.domain import EMAIL, Preferences, owner_id, string_list
 from monthly_close.gmail_reader import DEFAULT_ORIGIN as GMAIL_ORIGIN
 from monthly_close.graph_client import CACHE_NAME
 from monthly_close.graph_reader import DEFAULT_ORIGIN as GRAPH_ORIGIN
@@ -12,7 +12,10 @@ PROVIDERS = {"graph", "gmail"}
 NAME = re.compile(r"[a-z][a-z0-9-]{1,30}")
 FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}")
 ORIGIN = re.compile(r"[a-z0-9.-]+(?:/[a-z0-9-]+)?")
-KEYS = {"name", "provider", "owner", "origin", "token_cache", "client_secrets", "verified", "accounts", "excluded_accounts"}
+KEYS = {
+    "name", "provider", "owner", "origin", "token_cache", "client_secrets", "verified", "accounts",
+    "excluded_accounts", "address",
+}
 DEFAULT_CLIENT_SECRETS = "gmail_client_secret.json"
 
 
@@ -33,6 +36,9 @@ class Mailbox:
     client_secrets: str | None = None
     accounts: tuple[str, ...] | None = None
     excluded_accounts: tuple[str, ...] | None = None
+    # Gmail only: the account a new sign-in must belong to (required to sign in again
+    # from the scheduled close, so another person's account is never imported).
+    address: str | None = None
 
     def preferences(self, base: Preferences) -> Preferences:
         """Step-zero answers with this mailbox's own account aliases, when it has them."""
@@ -68,6 +74,9 @@ def _mailbox(raw: object, settings: dict) -> Mailbox:
     origin = raw.get("origin", GRAPH_ORIGIN if provider == "graph" else GMAIL_ORIGIN)
     if not isinstance(origin, str) or not ORIGIN.fullmatch(origin):
         raise ValueError(f"origin del buzon {name} no es valido.")
+    address = raw.get("address")
+    if address is not None and (provider != "gmail" or not isinstance(address, str) or not EMAIL.fullmatch(address)):
+        raise ValueError(f"address del buzon {name} debe ser el correo exacto de su cuenta de Gmail.")
     if provider == "graph":
         if "client_secrets" in raw or "verified" in raw:
             raise ValueError(f"El buzon {name} de Graph usa graph_client_id y folder_scan_verified.")
@@ -82,6 +91,7 @@ def _mailbox(raw: object, settings: dict) -> Mailbox:
         name, provider, owner_id(raw.get("owner")), origin,
         _file(raw, "token_cache", CACHE_NAME if provider == "graph" else f"gmail_token_{name}.json"),
         verified, secrets, _aliases(raw, "accounts"), _aliases(raw, "excluded_accounts"),
+        address.lower() if address else None,
     )
 
 

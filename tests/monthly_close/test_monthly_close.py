@@ -12,7 +12,7 @@ import pytest
 from monthly_close import main as app
 from monthly_close.domain import Preferences, amount_minor, received_local
 from monthly_close.extraction import EvidenceError, Mail, extract
-from monthly_close.main import months, scheduled_month
+from monthly_close.main import due_close_month, months
 from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.server import create_server
 from monthly_close.store import SCHEMA, Store
@@ -981,25 +981,42 @@ def test_excluded_account_cannot_count_as_personal(tmp_path, preferences, mail):
         store.decide(events[0]["id"], "personal")
 
 
-@pytest.mark.parametrize(("stamp", "zone", "expected"), [
-    ("2026-02-28T22:00:00-05:00", "America/Bogota", "2026-02"),
-    ("2028-02-29T22:59:00-05:00", "America/Bogota", "2028-02"),
-    ("2026-04-30T22:00:00+02:00", "Europe/Madrid", "2026-04"),
-    ("2026-03-31T22:00:00+02:00", "Europe/Madrid", "2026-03"),
-    ("2026-03-30T22:00:00+02:00", "Europe/Madrid", None),
-    ("2026-02-28T21:59:00-05:00", "America/Bogota", None),
+@pytest.mark.parametrize(("stamp", "zone", "last_closed", "expected"), [
+    # On time: the last local day from 22:00, with leap years and daylight saving time.
+    ("2026-02-28T22:00:00-05:00", "America/Bogota", "2026-01", "2026-02"),
+    ("2028-02-29T23:59:00-05:00", "America/Bogota", "2028-01", "2028-02"),
+    ("2026-04-30T22:00:00+02:00", "Europe/Madrid", "2026-03", "2026-04"),
+    ("2026-03-31T22:00:00+02:00", "Europe/Madrid", "2026-02", "2026-03"),
+    # Before the closing moment the previous month is the one due, and it is closed.
+    ("2026-03-30T22:00:00+02:00", "Europe/Madrid", "2026-02", None),
+    ("2026-02-28T21:59:00-05:00", "America/Bogota", "2026-01", None),
+    # The computer was off at the closing hour: the next run closes the month that ended.
+    ("2026-03-01T08:00:00-05:00", "America/Bogota", "2026-01", "2026-02"),
+    ("2026-03-05T19:00:00-05:00", "America/Bogota", "2026-01", "2026-02"),
+    # Never closed before: the most recent month that ended.
+    ("2026-03-05T19:00:00-05:00", "America/Bogota", None, "2026-02"),
+    # A month already closed is never closed again.
+    ("2026-02-28T23:00:00-05:00", "America/Bogota", "2026-02", None),
+    # UTC already in March, but still February 28 at 22:30 in Bogota.
+    ("2026-03-01T03:30:00+00:00", "America/Bogota", "2026-01", "2026-02"),
 ])
-def test_schedule_checks_last_day_local_hour_and_dst(stamp, zone, expected):
-    assert scheduled_month(datetime.fromisoformat(stamp), zone) == expected
+def test_due_month_follows_the_local_close_and_catches_up_after_a_missed_run(stamp, zone, last_closed, expected):
+    assert due_close_month(datetime.fromisoformat(stamp), zone, last_closed) == expected
+
+
+def test_due_month_needs_an_aware_clock():
+    with pytest.raises(ValueError, match="zona horaria"):
+        due_close_month(datetime(2026, 2, 28, 22), "America/Bogota", None)
 
 
 def test_historical_months_include_missing_months():
     assert months(date(2026, 1, 1), date(2026, 4, 1)) == ["2026-01", "2026-02", "2026-03"]
 
 
-def test_scheduled_non_last_day_does_not_read_runtime_or_the_mailbox(tmp_path, preferences, monkeypatch):
+def test_scheduled_without_a_pending_close_does_not_read_runtime_or_the_mailbox(tmp_path, preferences, monkeypatch):
     store = Store(tmp_path / "close.sqlite3")
     store.configure(preferences.to_dict())
+    store.record_close("2026-02")
 
     class Clock(datetime):
         @classmethod
@@ -1025,10 +1042,39 @@ def test_scheduled_close_persists_self_contained_summary(tmp_path, preferences, 
     monkeypatch.setattr(app, "datetime", Clock)
     monkeypatch.setattr(app, "runtime", lambda path: {})
     monkeypatch.setattr(app, "scan", lambda *args, **kwargs: scanned.append(args + (kwargs,)))
+    monkeypatch.setattr(app, "run_complements", lambda *args: None)
     app.run(Namespace(data_dir=tmp_path, command="scheduled"))
-    # The closing hour reads only what changed since the previous run.
-    assert scanned[0][-3:] == (date(2028, 2, 1), date(2028, 3, 1), {"incremental": True})
+    # The close reads only what changed since the previous run and may ask for a Gmail sign-in.
+    assert scanned[0][-3:] == (
+        date(2028, 2, 1), date(2028, 3, 1), {"incremental": True, "relogin_minutes": app.RELOGIN_MINUTES},
+    )
     assert "Cierre 2028-02" in (tmp_path / "last-close.txt").read_text(encoding="utf-8")
+    assert store.last_close() == "2028-02"
+    # Running again the same night finds nothing pending.
+    app.run(Namespace(data_dir=tmp_path, command="scheduled"))
+    assert len(scanned) == 1
+
+
+def test_a_failed_scheduled_close_is_not_recorded_and_runs_again(tmp_path, preferences, monkeypatch):
+    from monthly_close.gmail_client import GmailSessionError
+
+    store = Store(tmp_path / "close.sqlite3")
+    store.configure(preferences.to_dict())
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2028, 3, 1, 9, tzinfo=tz)  # the morning after a missed close
+
+    def expired(*args, **kwargs):
+        raise GmailSessionError("Nadie inicio sesion en Google a tiempo; la sesion sigue vencida.")
+
+    monkeypatch.setattr(app, "datetime", Clock)
+    monkeypatch.setattr(app, "runtime", lambda path: {})
+    monkeypatch.setattr(app, "scan", expired)
+    with pytest.raises(GmailSessionError):
+        app.run(Namespace(data_dir=tmp_path, command="scheduled"))
+    assert store.last_close() is None and not (tmp_path / "last-close.txt").exists()
 
 
 @pytest.fixture

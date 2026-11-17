@@ -7,7 +7,7 @@ implementa.
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
 | Organización y clasificación de facturas electrónicas en Hotmail | En implementación; piloto supervisado con resultado mixto | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
-| Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); conciliación y tarea pendientes; [varios buzones](#varios-buzones-y-gmail-de-manuela) con Gmail de Manuela en solo lectura y [lectura incremental](#lectura-incremental) de Outlook y Gmail (implementado; validado con los buzones reales: inicio de sesión en Gmail, importación de Manuela y ejecuciones incrementales); [extractos de Protección](#hogar-santiago-y-manuela): saldo, aportes, retiros y rendimientos de pensión voluntaria y cesantías (implementado y validado con los extractos reales de 2026) | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` / `scripts/agente-local.ps1 login -Mailbox manuela` |
+| Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); [tarea programada](#cobertura-cierre-y-tarea-persistente) del último día del mes con recuperación al encender el equipo y [registro de ejecuciones](#registro-de-ejecuciones) (implementado y probado; primera ejecución supervisada pendiente); [varios buzones](#varios-buzones-y-gmail-de-manuela) con Gmail de Manuela en solo lectura y [lectura incremental](#lectura-incremental) de Outlook y Gmail (implementado; validado con los buzones reales: inicio de sesión en Gmail, importación de Manuela y ejecuciones incrementales); [extractos de Protección](#hogar-santiago-y-manuela): saldo, aportes, retiros y rendimientos de pensión voluntaria y cesantías (implementado y validado con los extractos reales de 2026) | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` / `scripts/agente-local.ps1 login -Mailbox manuela` |
 
 ## Stack tecnológico
 
@@ -65,6 +65,7 @@ proyecto, que Git ignora:
 |---|---|
 | `.local\MonthlyCloseAgent\` | `runtime.json`, `close.sqlite3` (movimientos de ambos titulares, decisiones, reglas y auditoría), copias `close.sqlite3.backup-<fecha>` creadas antes de cada migración, `graph_token_cache.bin` (sesión de Microsoft) y `last-close.txt` |
 | `.local\MonthlyCloseAgent\statements.json` | Contraseña de los extractos PDF y remitentes exactos aprobados (texto plano, fuera de Git) |
+| `.local\MonthlyCloseAgent\logs\` | Un registro por ejecución del cierre mensual (`AAAAMMDD-HHMMSS-<comando>.log`); se conservan los 10 más recientes ([detalle](#registro-de-ejecuciones)) |
 | `.local\ImportManuela\` | Archivos exportados del panel de Manuela que lee `import-manuela` (movimientos, decisiones por destino y totales de paridad) |
 | `.local\MailInvoiceAgent\` | Perfil de Opera, copias de seguridad del libro, `tessdata`, decisiones de clasificación y estados de lotes |
 | `config\settings.yaml` | Configuración personal de facturas (también ignorada por Git) |
@@ -543,8 +544,8 @@ inicies sesión y concedas `Mail.Read`; el agente nunca ve tu contraseña ni
 controla ese navegador. Los tokens quedan en
 `.local\MonthlyCloseAgent\graph_token_cache.bin`: es un dato sensible
 local, fuera de Git; borrarlo cierra la sesión. `scan` y la tarea programada
-nunca abren un navegador: si la sesión falta o venció, se detienen y piden
-`login`. El token solo se envía a `graph.microsoft.com/v1.0`; cualquier otro
+nunca abren un navegador para Microsoft: si la sesión falta o venció, se detienen
+y piden `login`. El token solo se envía a `graph.microsoft.com/v1.0`; cualquier otro
 destino, incluido un enlace de paginación, detiene la ejecución.
 
 **Cobertura.** Recorre Bandeja de entrada, Correo no deseado, Elementos
@@ -648,6 +649,7 @@ el Outlook de Santiago, como antes. Ejemplo con el Gmail de Manuela:
 | `token_cache` | Opcional. Archivo de sesión en la carpeta de datos (por defecto `graph_token_cache.bin` y `gmail_token_<name>.json`). |
 | `client_secrets` | Opcional, solo Gmail. Cliente OAuth descargado de Google (por defecto `gmail_client_secret.json`). |
 | `origin` | Opcional. Entra en el hash de identidad de cada mensaje (por defecto `outlook.live.com` y `mail.google.com`). No lo cambies después de importar. |
+| `address` | Solo Gmail, opcional. Correo exacto de la cuenta: un inicio de sesión con otra cuenta de Google se rechaza y no se guarda. Es obligatorio para que la tarea programada pueda pedir un nuevo inicio de sesión. |
 | `accounts`, `excluded_accounts` | Opcional. Alias de cuentas de ese titular para Ollama; si faltan, se usan los del paso 0. |
 
 El Outlook de Santiago (`provider` `graph`, `owner` `santiago`) es obligatorio.
@@ -684,8 +686,17 @@ se guarda. El token queda en `.local\MonthlyCloseAgent\gmail_token_manuela.json`
 (dato sensible, fuera de Git; borrarlo cierra la sesión). El token de acceso
 solo se envía a `gmail.googleapis.com/gmail/v1/users/me/`; cualquier otro
 destino detiene la ejecución. La renovación del token habla con el servidor
-OAuth de Google a través de `google-auth`. `scan` y la tarea programada nunca
-abren un navegador: si la sesión falta o venció, se detienen y piden `login`.
+OAuth de Google a través de `google-auth`.
+
+Antes de leer cualquier buzón se comprueba la sesión de cada Gmail, así una
+sesión vencida detiene la ejecución antes de importar nada. `scan` e `import` se
+detienen y piden `login`. La **tarea programada**, en cambio, abre el inicio de
+sesión de Google en el navegador y espera **15 minutos** a que Manuela inicie
+sesión. Necesita `address` en su buzón y rechaza otra cuenta. Si nadie inicia
+sesión a tiempo, la tarea se detiene sin importar nada, muestra una notificación
+de Windows y lo intenta de nuevo en la siguiente ejecución. Con la app de Google
+en modo Testing la sesión vence cada 7 días, así que esto ocurrirá en casi todos
+los cierres.
 
 **Validar antes de importar.** Con `verified: false`:
 
@@ -1194,12 +1205,28 @@ Get-ScheduledTaskInfo -TaskName "AgenteLocal-MonthlyClose"
 ```
 
 Usa el **Programador de tareas de Windows**, no un cron de sesión ni herramientas
-de Claude. Persiste al cerrar VS Code. Una comprobación horaria solo inicia
-lectura **el último día del mes, durante las 22:00 de la zona configurada**.
-Python aplica las reglas de zona/horario de verano; las demás ejecuciones no
-leen el buzón. Requiere Windows con sesión interactiva abierta, equipo
-encendido y Ollama instalado (el lanzador lo inicia en la hora de cierre si no está activo). Si la sesión de Microsoft venció, falla
-sin continuar y pide `login`. No instala servicios ni tareas sin ejecutar este script.
+de Claude. Persiste al cerrar VS Code.
+
+- **Cuándo.** El último día de cada mes a las 22:00. Si a esa hora el equipo
+  estaba apagado o sin tu sesión de Windows abierta, la tarea corre en cuanto lo
+  enciendas e inicies sesión (opción «ejecutar lo antes posible si se perdió»).
+- **Qué mes cierra.** El último mes cuyo cierre ya venció (su último día desde las
+  22:00 en la zona configurada) y que todavía no se cerró. Por ejemplo, si el
+  equipo estuvo apagado el 30 de noviembre, el 1 de diciembre por la mañana se
+  cierra noviembre. Cada cierre completo queda en la tabla local `closes`,
+  auditado como `scheduled-close`, así que una ejecución repetida o atrasada
+  nunca cierra dos veces el mismo mes. Si se perdieron varios meses, solo se
+  cierra el más reciente; la lectura incremental igual importa todo lo pendiente.
+- **Qué hace.** Comprueba las sesiones (abre el inicio de sesión de Google si el
+  Gmail de Manuela venció), lee de forma incremental todos los buzones, concilia
+  extractos y créditos y escribe `last-close.txt`. Si algo falla, se detiene sin
+  registrar el cierre y muestra una notificación de Windows con la ruta del
+  registro; la siguiente ejecución lo reintenta.
+- **Requisitos.** Windows con tu sesión interactiva abierta y Ollama instalado (el
+  lanzador lo inicia si no está activo). Si la sesión de Microsoft venció, falla
+  sin continuar y pide `login`. La tarea no se detiene por estar con batería y
+  tiene un límite de 2 horas. No instala servicios ni tareas sin ejecutar este
+  script.
 
 Cada ejecución carga desde disco las respuestas, reglas, categorías y remitentes.
 No depende de memoria de chat ni de enlaces publicados. SQLite conserva el
@@ -1215,7 +1242,25 @@ También se consulta con:
 El resumen indica gasto confirmado, familiar y dudas, no totales del modelo sin
 aprobar. Un cierre a las 22:00 no incluye compras posteriores: vuelve a importar
 ese mes al día siguiente antes de conciliarlo. No hay envío de notificaciones
-por correo ni garantía de ejecución si el equipo está apagado.
+por correo; los avisos de fallo son notificaciones de Windows en este equipo.
+
+### Registro de ejecuciones
+
+Cada ejecución del cierre mensual, manual o programada, guarda su salida en
+`.local\MonthlyCloseAgent\logs\AAAAMMDD-HHMMSS-<comando>.log`, fuera de Git.
+
+- Incluye los mensajes del lanzador (`[lanzador]`, por ejemplo el arranque de
+  Ollama o la apertura del panel) y todo lo que imprime Python: buzones y
+  carpetas, avisos enviados a la cola de revisión (solo metadatos), extractos,
+  resumen y el motivo de una parada. Empieza y termina con la hora, y la última
+  línea indica `terminado` o `detenido`.
+- Nunca contiene cuerpos de correo, tokens ni contraseñas, porque el programa no
+  los imprime. La barra de progreso se ve en la terminal pero no se guarda.
+- Al terminar cada ejecución se borran los registros más antiguos y quedan los
+  **10 más recientes**. Un registro que sigue abierto, como el del panel en
+  marcha, se omite y se borra en una ejecución posterior. Puedes borrar la
+  carpeta a mano cuando quieras.
+- La función de facturas no escribe en esta carpeta.
 
 ### Privacidad, límites y validación
 
@@ -1252,8 +1297,15 @@ instalado por `bootstrap.ps1`: formulario inicial, cambios de configuración,
 totales con centavos, decisiones, etiquetas de los gráficos, reintento tras
 fallos de carga, bloqueo de guardados duplicados y contraste mínimo de 4,5:1 en
 ambos temas.
-**Pendiente de validar con el usuario:** conciliación contra extractos y
-ejecución de la tarea instalada.
+Para medir la cobertura (skill `pytest-coverage`, dependencia de desarrollo
+`pytest-cov`):
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\monthly_close --cov=monthly_close --cov-report=term-missing
+```
+
+**Pendiente de validar con el usuario:** la primera ejecución de la tarea
+instalada.
 
 ### Piloto de un solo aviso
 

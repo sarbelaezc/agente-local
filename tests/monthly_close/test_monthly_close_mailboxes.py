@@ -449,9 +449,15 @@ def test_gmail_session_is_required_and_only_read_only_scopes_are_kept(tmp_path):
 
 def test_login_with_a_gmail_mailbox_uses_its_client_and_session_files(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(gmail_client, "interactive_login", lambda *args: calls.append(args) or "persona@example.test")
-    message = app.login(tmp_path, graph_settings(mailboxes=[OUTLOOK_BOX, GMAIL_BOX]), "manuela")
-    assert calls == [(tmp_path / "gmail_client_secret.json", tmp_path / "gmail_token_manuela.json")]
+    monkeypatch.setattr(
+        gmail_client, "interactive_login", lambda *args, **kwargs: calls.append((args, kwargs)) or "persona@example.test",
+    )
+    message = app.login(tmp_path, graph_settings(mailboxes=[OUTLOOK_BOX, {**GMAIL_BOX, "address": "Persona@Example.test"}]), "manuela")
+    # The new session must belong to the configured account.
+    assert calls == [(
+        (tmp_path / "gmail_client_secret.json", tmp_path / "gmail_token_manuela.json"),
+        {"expected": "persona@example.test"},
+    )]
     assert "solo lectura de Gmail" in message
     with pytest.raises(ValueError, match="no configurado"):
         app.login(tmp_path, graph_settings(), "manuela")
