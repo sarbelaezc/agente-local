@@ -1,4 +1,4 @@
-"""Local web panel that replaces the Tkinter review windows of the invoice organizer.
+"""Local web panel where a person reviews and approves the invoices of a batch.
 
 It listens on 127.0.0.1 only, on a free port, with the same protections as the
 monthly close dashboard: exact Host and Origin, a per-run CSRF token and small
