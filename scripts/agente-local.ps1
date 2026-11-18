@@ -3,7 +3,7 @@
 param(
     [Parameter(Position = 0)]
     [ValidateSet(
-        "serve", "login", "check-config", "pilot", "scan", "import", "summary", "scheduled", "invoices",
+        "serve", "login", "check-config", "pilot", "scan", "import", "summary", "scheduled", "invoices", "invoices-cleanup",
         "import-manuela", "owner-account", "backfill-destinations", "reconcile-statements", "payroll-deduction", "import-credit-ledger", "merge-category"
     )]
     [string]$Command = "serve",
@@ -27,7 +27,10 @@ param(
     [int]$BatchSize = 10,
     [ValidateRange(1, 365)]
     [int]$Days = 90,
-    [switch]$Resume
+    [switch]$Resume,
+    [ValidateRange(0, 3650)]
+    [int]$OlderThanDays = 30,
+    [switch]$Apply
 )
 
 $ErrorActionPreference = "Stop"
@@ -142,10 +145,10 @@ if (-not (Test-Path -LiteralPath $python)) {
 }
 # One log per execution in each feature's local data folder; Python keeps the last 10.
 # Invoices follow AGENTE_LOCAL_DATA like shared.storage.data_root().
-if ($Command -eq "invoices") {
+if ($Command -in @("invoices", "invoices-cleanup")) {
     $localData = if ("$env:AGENTE_LOCAL_DATA".Trim()) { "$env:AGENTE_LOCAL_DATA".Trim() } else { Join-Path $root ".local" }
     $logDir = Join-Path $localData "MailInvoiceAgent\logs"
-    $logCommand = if ($Resume) { "resume" } else { "batch" }
+    $logCommand = if ($Command -eq "invoices-cleanup") { "cleanup" } elseif ($Resume) { "resume" } else { "batch" }
 } else {
     $logDir = Join-Path $DataDir "logs"
     $logCommand = $Command
@@ -161,6 +164,20 @@ $exitCode = 1
 Push-Location $root
 try {
     $env:PYTHONPATH = Join-Path $root "src"
+
+    if ($Command -eq "invoices-cleanup") {
+        # Preview by default; -Apply backs up the database and deletes. No Ollama, no mailbox.
+        if (-not (Test-Path -LiteralPath (Join-Path $root "config\settings.yaml") -PathType Leaf)) {
+            throw "Falta config\settings.yaml."
+        }
+        $cleanup = @(
+            "-u", "-m", "mail_invoices.main", "--config", "config\settings.yaml", "--cleanup-batches",
+            "--older-than-days", "$OlderThanDays", "--log-file", $script:logFile
+        )
+        if ($Apply) { $cleanup += "--apply" }
+        & $python @cleanup
+        exit $LASTEXITCODE
+    }
 
     if ($Command -eq "invoices") {
         $config = Join-Path $root "config\settings.yaml"

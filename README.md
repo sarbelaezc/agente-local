@@ -6,7 +6,7 @@ implementa.
 
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
-| Organización y clasificación de facturas electrónicas en Hotmail | Lectura y archivo por [Microsoft Graph](#acceso-al-buzón-de-facturas-por-microsoft-graph) con la misma app del cierre mensual (implementado, probado con un Graph simulado y validado con ejecuciones supervisadas en el buzón real); [registro de ejecuciones](#registro-de-ejecuciones) (implementado, probado y validado con una ejecución real); limpieza de los lotes ya archivados en `invoice-batches.sqlite3`, pendiente | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
+| Organización y clasificación de facturas electrónicas en Hotmail | Lectura y archivo por [Microsoft Graph](#acceso-al-buzón-de-facturas-por-microsoft-graph) con la misma app del cierre mensual (implementado, probado con un Graph simulado y validado con ejecuciones supervisadas en el buzón real); [registro de ejecuciones](#registro-de-ejecuciones) (implementado, probado y validado con una ejecución real); [limpieza de lotes](#limpieza-de-lotes) archivados, de remitentes excluidos y del lector retirado (implementada, probada y aplicada en la base real) | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` / `invoices-cleanup` |
 | Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); [tarea programada](#cobertura-cierre-y-tarea-persistente) del último día del mes con recuperación al encender el equipo y [registro de ejecuciones](#registro-de-ejecuciones) (implementado y probado; primera ejecución supervisada pendiente); [varios buzones](#varios-buzones-y-gmail-de-manuela) con Gmail de Manuela en solo lectura y [lectura incremental](#lectura-incremental) de Outlook y Gmail (implementado; validado con los buzones reales: inicio de sesión en Gmail, importación de Manuela y ejecuciones incrementales); [extractos de Protección](#hogar-santiago-y-manuela): saldo, aportes, retiros y rendimientos de pensión voluntaria y cesantías (implementado y validado con los extractos reales de 2026) | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` / `scripts/agente-local.ps1 login -Mailbox manuela` |
 
 ## Stack tecnológico
@@ -110,6 +110,7 @@ Sustituye a `run-monthly-close.ps1`, `import-monthly-close.ps1` y
 | `backfill-destinations` | Vuelve a leer por Graph (solo lectura) los avisos de Santiago para guardar el destino de sus pagos ya importados | No |
 | `scheduled` | Cierre de la tarea programada | Solo en la hora de cierre |
 | `invoices` | Lote de facturas (`-BatchSize`, `-Days`, `-Resume`) | Sí |
+| `invoices-cleanup [-OlderThanDays N] [-Apply]` | [Limpieza de lotes](#limpieza-de-lotes) de facturas: vista previa por defecto; con `-Apply`, copia de seguridad y borrado | No |
 
 Cuando un comando necesita Ollama, el lanzador reutiliza la instancia que ya
 responda en el endpoint configurado y no la cierra. Si no hay ninguna, inicia
@@ -1657,7 +1658,7 @@ separados por perfil, libro y hoja: `pending`, `approved`, `registered`, `moving
 registrar las facturas, extractos acotados de contexto, destino, confirmador,
 fecha de aprobación y último error. No se guardan adjuntos ni evidencia completa
 del PDF en esa base. Es información personal local: no la sincronice ni la suba
-a Git. Los registros se conservan hasta su eliminación manual; **no elimine la
+a Git. Los registros se conservan hasta la [limpieza de lotes](#limpieza-de-lotes); **no elimine la
 base para resolver un movimiento incierto**, porque perdería las autorizaciones
 y el estado de recuperación. Los adjuntos descargados solo existen durante la
 ejecución y se eliminan al cerrar, cancelar o fallar el flujo.
@@ -1708,6 +1709,40 @@ aprobación conjunta, persistencia, cancelación, recuperación sin duplicar reg
 bloqueo de ejecuciones simultáneas y, con un Graph simulado, la lectura, el
 movimiento y su verificación. Esto no valida la precisión general del modelo ni convierte el piloto
 mixto en una validación exitosa.
+
+### Limpieza de lotes
+
+```powershell
+.\scripts\agente-local.ps1 invoices-cleanup                     # vista previa, no borra nada
+.\scripts\agente-local.ps1 invoices-cleanup -Apply              # borra lo que mostró la vista previa
+.\scripts\agente-local.ps1 invoices-cleanup -OlderThanDays 90   # otra retención (0 a 3650 días)
+```
+
+Borra de `invoice-batches.sqlite3` lo que ya no hace falta conservar, y nada más:
+
+| Grupo | Se borra |
+|---|---|
+| Correos archivados (`moved`) de la configuración actual | Si se archivaron hace más de `-OlderThanDays` días (30 por defecto; 0 borra todos). Excel y el buzón ya tienen el resultado |
+| Pendientes de un remitente de `excluded_senders` | Siempre: el panel ya no los muestra |
+| Registros de otra configuración: el lector retirado de Opera, u otro libro u hoja | Todos, en cualquier estado: el agente nunca vuelve a usarlos |
+
+Nunca borra, en la configuración actual, un correo `approved`, `registered`,
+`moving` o `blocked`, ni un pendiente normal; tampoco toca el Excel, el buzón ni
+las decisiones de clasificación (`classification-decisions.sqlite3`).
+
+- Sin `-Apply` solo muestra cuántos registros hay en cada grupo y cuántos se
+  conservan. Con `-Apply`, primero copia la base a
+  `invoice-batches.sqlite3.backup-AAAAMMDD-HHMMSS` en la misma carpeta, borra
+  exactamente lo previsto (si no coincide, no aplica nada) y compacta el archivo
+  para que lo borrado no quede dentro. La copia sí conserva todo: bórrala a mano
+  cuando hayas comprobado el resultado.
+- El informe tiene solo cantidades, sin remitentes ni asuntos, y queda en el
+  [registro de ejecuciones](#registro-de-ejecuciones) con quién la aprobó
+  (`approver`) y cuándo.
+- No corre mientras haya un lote de facturas en curso: usa el mismo bloqueo.
+- Si un correo archivado vuelve a la bandeja después de borrar su registro, se
+  clasifica de nuevo como cualquier correo nuevo; al aprobarlo, el Excel reconoce
+  la factura ya registrada (mismo emisor y número) y no la agrega dos veces.
 
 ### Escanear la bandeja (solo lectura)
 
