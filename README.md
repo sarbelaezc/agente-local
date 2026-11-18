@@ -759,7 +759,8 @@ El panel local ofrece:
   celular la fila se desplaza sola hasta el mes elegido.
 - **Mes:** meses seleccionables y un resumen de cuatro cifras: **Gasto del mes**
   (con su reparto personal/familiar), **Ingresos**, **Balance** y **Por decidir**,
-  que lleva a la pestaña Decisión. Lo que no es gasto (inversiones, pagos a
+  que lleva a la pestaña Decisión y solo aparece si queda algo por decidir; sin
+  pendientes, las otras tres cifras van en una sola fila. Lo que no es gasto (inversiones, pagos a
   tarjetas, retiro en efectivo) aparece debajo en una fila compacta y solo si
   hubo movimientos. Siguen el calendario, la dona por categoría (con porcentaje
   de cada una, total en el centro y colores distintos y consistentes entre
@@ -791,7 +792,8 @@ El panel local ofrece:
 - **Año:** se lee como el resumen del mes. Arriba van cuatro cifras grandes:
   **Gasto del año** (rango de meses, movimientos y barra por titular y familiar),
   **Ingresos del año**, **Balance del año** (indica cuánto queda por decidir) y
-  **Por decidir**, que abre la pestaña Decisión. Debajo, en chips, el promedio de
+  **Por decidir**, que abre la pestaña Decisión y, como en el mes, se oculta
+  cuando todo el año está decidido (las otras tres van en una fila). Debajo, en chips, el promedio de
   gasto por mes cerrado (sin el mes en curso), el mes de mayor gasto, la inversión
   neta, los retiros de inversión, el retiro en efectivo y los abonos de terceros
   solo si existen, y la cobertura («X de N» meses verificados a mano). Siguen la

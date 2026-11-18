@@ -150,6 +150,8 @@
     .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 0 0 12px; }
     .month-summary { margin: 0 0 12px; }
     .month-summary .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+    .month-summary .metrics.single-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .month-summary .metrics.single-row .hero strong { font-size: clamp(22px, 2.4vw, 32px); overflow-wrap: normal; }
     .metric { padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--surf); }
     .metric .label { display: block; color: var(--ink2); font-size: 13px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
     .metric strong { display: block; margin-top: 6px; font-size: 22px; font-weight: 750; letter-spacing: -.5px; overflow-wrap: anywhere; }
@@ -278,7 +280,7 @@
       .topbar { align-items: flex-start; }
       .top-actions .button { min-height: 38px; padding: 7px 9px; font-size: 13px; }
       .config-form { grid-template-columns: 1fr; }
-      .metrics, .month-summary .metrics { grid-template-columns: 1fr; gap: 10px; }
+      .metrics, .month-summary .metrics, .month-summary .metrics.single-row { grid-template-columns: 1fr; gap: 10px; }
       .toolbar { align-items: flex-start; }
       .toolbar-group { width: 100%; }
       .month-chips { margin-right: -14px; padding-right: 14px; }
@@ -818,8 +820,16 @@
         });
         card.append(split);
       }
-      // "Por decidir" card that opens the Decision tab.
-      function pendingCard(pending, pendingIncomes, doneText) {
+      // Headline cards of the month and year summaries. "Por decidir" opens the Decision tab
+      // and only appears while something is pending; otherwise the other three share one row.
+      function summaryHeroes(cards, pending, pendingIncomes) {
+        const heroes = el("div", "metrics");
+        heroes.append(...cards);
+        if (pending.length + pendingIncomes.length) heroes.append(pendingCard(pending, pendingIncomes));
+        else heroes.classList.add("single-row");
+        return heroes;
+      }
+      function pendingCard(pending, pendingIncomes) {
         const toDecide = pending.length + pendingIncomes.length;
         const destinations = new Set([...pending, ...pendingIncomes].map(tx => `${tx.owner}|${tx.group}`)).size;
         const review = el("button", "metric hero action");
@@ -827,9 +837,7 @@
         review.append(
           el("span", "label", "Por decidir"),
           el("strong", "", String(toDecide)),
-          el("small", "", toDecide
-            ? `Faltan por decidir ${destinations} ${destinations === 1 ? "destino" : "destinos"} · ${formatMoney(sum(pending))} en gastos que aún no suman. Revisar →`
-            : doneText)
+          el("small", "", `Faltan por decidir ${destinations} ${destinations === 1 ? "destino" : "destinos"} · ${formatMoney(sum(pending))} en gastos que aún no suman. Revisar →`)
         );
         review.addEventListener("click", () => selectTab("decisions"));
         return review;
@@ -1233,9 +1241,7 @@
             : `${balance >= 0 ? "A favor" : "En contra"} · ingresos confirmados − gasto`
         );
         net.classList.add("hero");
-        const review = pendingCard(pending, pendingIncomes, "Todo lo de este mes está decidido");
-        const heroes = el("div", "metrics");
-        heroes.append(spend, income, net, review);
+        const heroes = summaryHeroes([spend, income, net], pending, pendingIncomes);
 
         const strip = el("div", "metric-strip");
         const minor = (label, value, note) => {
@@ -1707,8 +1713,7 @@
             : `${balance >= 0 ? "A favor" : "En contra"} · ingresos confirmados − gasto${pending.length ? ` · sin contar ${formatMoney(sum(pending))} por decidir` : ""}`
         );
         net.classList.add("hero");
-        const heroes = el("div", "metrics");
-        heroes.append(spend, income, net, pendingCard(pending, pendingIncomes, "Todo el año está decidido"));
+        const heroes = summaryHeroes([spend, income, net], pending, pendingIncomes);
 
         const strip = el("div", "metric-strip");
         const minor = (label, value, note) => {

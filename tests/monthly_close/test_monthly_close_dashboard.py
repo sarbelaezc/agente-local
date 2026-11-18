@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 import httpx
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 from monthly_close.server import create_server
 from monthly_close.store import Store
@@ -573,4 +573,28 @@ def test_year_category_legend_sits_under_the_chart(dashboard):
     legend = page.locator("#year-category-legend").bounding_box()
     assert legend["y"] >= chart["y"] + chart["height"] - 1
     assert legend["width"] > chart["width"] * .8  # it spans the card instead of a side column
+    assert not errors
+
+
+def test_pending_card_hides_when_everything_is_decided_and_the_rest_share_one_row(dashboard):
+    page, store, _, errors = dashboard
+    for panel in ("#month-metrics", "#year-metrics"):
+        if panel == "#year-metrics":
+            page.locator("#tab-year").click()
+        expect(page.locator(f"{panel} .metric.hero.action")).to_have_count(1)
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    with page.expect_response(
+        lambda response: response.url.endswith("/api/decision") and response.request.method == "POST"
+    ) as saved:
+        page.locator("#pending-list").get_by_role("button", name="Familiar", exact=True).click()
+    assert saved.value.status == 200
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    for tab, panel in (("#tab-month", "#month-metrics"), ("#tab-year", "#year-metrics")):
+        page.locator(tab).click()
+        heroes = page.locator(f"{panel} .metric.hero")
+        expect(heroes).to_have_count(3)
+        assert "Por decidir" not in page.locator(panel).inner_text()
+        tops = {round(heroes.nth(index).bounding_box()["y"]) for index in range(3)}
+        assert len(tops) == 1, (panel, tops)
     assert not errors
