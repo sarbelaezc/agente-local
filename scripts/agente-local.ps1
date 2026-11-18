@@ -145,10 +145,12 @@ if (-not (Test-Path -LiteralPath $python)) {
 }
 # One log per execution in each feature's local data folder; Python keeps the last 10.
 # Invoices follow AGENTE_LOCAL_DATA like shared.storage.data_root().
-if ($Command -in @("invoices", "invoices-cleanup")) {
+# "login -Mailbox facturas" signs in to the invoice mailbox; the name is reserved for it.
+$invoiceLogin = $Command -eq "login" -and $Mailbox -eq "facturas"
+if ($Command -in @("invoices", "invoices-cleanup") -or $invoiceLogin) {
     $localData = if ("$env:AGENTE_LOCAL_DATA".Trim()) { "$env:AGENTE_LOCAL_DATA".Trim() } else { Join-Path $root ".local" }
     $logDir = Join-Path $localData "MailInvoiceAgent\logs"
-    $logCommand = if ($Command -eq "invoices-cleanup") { "cleanup" } elseif ($Resume) { "resume" } else { "batch" }
+    $logCommand = if ($invoiceLogin) { "login" } elseif ($Command -eq "invoices-cleanup") { "cleanup" } elseif ($Resume) { "resume" } else { "batch" }
 } else {
     $logDir = Join-Path $DataDir "logs"
     $logCommand = $Command
@@ -164,6 +166,15 @@ $exitCode = 1
 Push-Location $root
 try {
     $env:PYTHONPATH = Join-Path $root "src"
+
+    if ($invoiceLogin) {
+        # Opens Microsoft's page in the system browser; the agent never sees the password.
+        if (-not (Test-Path -LiteralPath (Join-Path $root "config\settings.yaml") -PathType Leaf)) {
+            throw "Falta config\settings.yaml con invoices.graph_client_id."
+        }
+        & $python -u -m mail_invoices.main --config "config\settings.yaml" --login --log-file $script:logFile
+        exit $LASTEXITCODE
+    }
 
     if ($Command -eq "invoices-cleanup") {
         # Preview by default; -Apply backs up the database and deletes. No Ollama, no mailbox.
