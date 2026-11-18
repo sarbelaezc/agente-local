@@ -6,7 +6,7 @@ implementa.
 
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
-| Organización y clasificación de facturas electrónicas en Hotmail | Lectura y archivo por [Microsoft Graph](#acceso-al-buzón-de-facturas-por-microsoft-graph) con la misma app del cierre mensual (implementado, probado con un Graph simulado y validado con ejecuciones supervisadas en el buzón real); [registro de ejecuciones](#registro-de-ejecuciones) (implementado y probado; primera ejecución real pendiente); limpieza de los lotes ya archivados en `invoice-batches.sqlite3`, pendiente | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
+| Organización y clasificación de facturas electrónicas en Hotmail | Lectura y archivo por [Microsoft Graph](#acceso-al-buzón-de-facturas-por-microsoft-graph) con la misma app del cierre mensual (implementado, probado con un Graph simulado y validado con ejecuciones supervisadas en el buzón real); [registro de ejecuciones](#registro-de-ejecuciones) (implementado, probado y validado con una ejecución real); limpieza de los lotes ya archivados en `invoice-batches.sqlite3`, pendiente | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
 | Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); [tarea programada](#cobertura-cierre-y-tarea-persistente) del último día del mes con recuperación al encender el equipo y [registro de ejecuciones](#registro-de-ejecuciones) (implementado y probado; primera ejecución supervisada pendiente); [varios buzones](#varios-buzones-y-gmail-de-manuela) con Gmail de Manuela en solo lectura y [lectura incremental](#lectura-incremental) de Outlook y Gmail (implementado; validado con los buzones reales: inicio de sesión en Gmail, importación de Manuela y ejecuciones incrementales); [extractos de Protección](#hogar-santiago-y-manuela): saldo, aportes, retiros y rendimientos de pensión voluntaria y cesantías (implementado y validado con los extractos reales de 2026) | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` / `scripts/agente-local.ps1 login -Mailbox manuela` |
 
 ## Stack tecnológico
@@ -1422,6 +1422,12 @@ para probar otra feature).
 - `classification_decisions.py`: decisiones confirmadas y extractos de contexto en SQLite local.
 - `batch_state.py` y `batch_workflow.py`: estados persistentes y ejecución
   recuperable de lotes pequeños.
+
+El cliente de Ollama compartido (`src/shared/local_model.py`) tiene sus propias
+pruebas en `tests/shared/`, con un servidor HTTP simulado: solo acepta direcciones
+locales, no envía herramientas ni pasa por un proxy, y se detiene si Ollama no
+responde, devuelve un error, una respuesta sin texto o demasiado larga, o algo que
+no es un objeto JSON.
 
 Las reglas de aprobación se prueban sin navegador; el servidor del panel, con
 peticiones HTTP locales, y la página, en Chromium con Playwright y un libro

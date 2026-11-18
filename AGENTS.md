@@ -70,6 +70,7 @@ src/
   monthly_close/      monthly close through Microsoft Graph (Outlook) and the Gmail API
 tests/
   conftest.py         points every test at a temporary data folder
+  shared/
   mail_invoices/
   monthly_close/
 scripts/
