@@ -22,6 +22,10 @@ from mail_invoices.review_server import ReviewPanel
 from mail_invoices.settings import MailSettings, is_excluded_sender
 from mail_invoices.workbook import InvoiceWorkbook, WorkbookError
 
+# With Graph the mailbox is no longer the bottleneck: a batch is bounded by what a person
+# reviews at once in the panel and by local Ollama time (about 3-10 s per message).
+MAX_BATCH = 20
+
 
 class BatchReviewPanel:
     """Web review of a batch: run() returns True only after a valid approval was saved."""
@@ -152,8 +156,8 @@ def execute_message(
 def process_invoice_batch(
     settings: MailSettings, days: int, use_model: bool, batch_size: int, *, resume: bool = False,
 ) -> int:
-    if not 1 <= batch_size <= 5:
-        raise ValueError("Los lotes controlados admiten entre 1 y 5 correos")
+    if not 1 <= batch_size <= MAX_BATCH:
+        raise ValueError(f"Los lotes controlados admiten entre 1 y {MAX_BATCH} correos")
     settings.attachments_dir.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix="invoice-batch-", dir=settings.attachments_dir) as run_dir:
         return _process_invoice_batch(

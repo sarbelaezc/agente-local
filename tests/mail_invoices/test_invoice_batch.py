@@ -535,7 +535,7 @@ def test_cli_routes_batch_modes(monkeypatch, tmp_path, flag):
     assert calls == [((settings, 7, False, 2), {"resume": flag == "--resume-invoice-batch"})]
 
 
-@pytest.mark.parametrize("size", [0, 6])
+@pytest.mark.parametrize("size", [0, 21])
 def test_cli_rejects_unsafe_batch_sizes(monkeypatch, size):
     from mail_invoices import main
 

@@ -27,7 +27,7 @@ def main() -> int:
         help="List invoice candidates in the inbox (read-only, opens no message)",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=3, help="Controlled E2E batch size (1-5, default 3)",
+        "--batch-size", type=int, default=10, help="Controlled E2E batch size (1-20, default 10)",
     )
     parser.add_argument(
         "--history-folder", action="append", default=[],
@@ -38,8 +38,8 @@ def main() -> int:
         help="Only classify inbox candidates whose list preview contains this text.",
     )
     parser.add_argument(
-        "--days", type=int, default=30,
-        help="How many days back inbox modes look (1-365, default 30)",
+        "--days", type=int, default=90,
+        help="How many days back inbox modes look (1-365, default 90)",
     )
     parser.add_argument(
         "--no-model", action="store_true", help="Skip the local Ollama field completion"
@@ -47,8 +47,8 @@ def main() -> int:
     args = parser.parse_args()
     if not 1 <= args.days <= 365:
         parser.error("--days must be between 1 and 365")
-    if not 1 <= args.batch_size <= 5:
-        parser.error("--batch-size must be between 1 and 5")
+    if not 1 <= args.batch_size <= 20:
+        parser.error("--batch-size must be between 1 and 20")
     if args.history_folder and not args.classify_invoices:
         parser.error("--history-folder requires --classify-invoices")
     if args.candidate_text is not None and not args.classify_invoices:

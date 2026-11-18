@@ -128,18 +128,18 @@ contenido de los correos.
 ## Ejecución bajo demanda
 
 La función de facturas no tiene servicio residente ni tarea programada. Para iniciar manualmente una
-revisión de hasta 3 correos de los últimos 30 días:
+revisión de hasta 10 correos de los últimos 90 días:
 
 ```powershell
 .\scripts\agente-local.ps1 invoices
 ```
 
-Ajusta el tamaño (1 a 5) y el rango (1 a 365 días) cuando lo necesites; usa
+Ajusta el tamaño (1 a 20) y el rango (1 a 365 días) cuando lo necesites; usa
 `-Resume` para retomar aprobaciones persistidas sin volver a escanear:
 
 ```powershell
-.\scripts\agente-local.ps1 invoices -BatchSize 5 -Days 30
-.\scripts\agente-local.ps1 invoices -Resume -BatchSize 5
+.\scripts\agente-local.ps1 invoices -BatchSize 20 -Days 180
+.\scripts\agente-local.ps1 invoices -Resume -BatchSize 20
 ```
 
 El comando requiere `.venv`, `config/settings.yaml` y la sesión de facturas (`--login`); inicia Ollama en el
@@ -151,7 +151,7 @@ Si la política de PowerShell bloquea los scripts `.ps1`, ejecuta el mismo modo
 directamente desde la raíz del repositorio:
 
 ```powershell
-.\.venv\Scripts\python.exe -m mail_invoices.main --config config/settings.yaml --process-invoice-batch --batch-size 3 --days 30
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config/settings.yaml --process-invoice-batch --batch-size 10 --days 90
 ```
 
 ## Cierre mensual de gastos: Outlook y Ollama local
@@ -1595,10 +1595,12 @@ supervisado y la aprobación explícita de su destino.
 ### Lotes pequeños con revisión unificada y estados locales
 
 ```powershell
-.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --process-invoice-batch --batch-size 3 --days 30
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --process-invoice-batch --batch-size 10 --days 90
 ```
 
-Prepara hasta 3 correos por defecto (entre 1 y 5 con `--batch-size`, independiente
+Prepara hasta 10 correos por defecto (entre 1 y 20 con `--batch-size`; el límite
+anterior de 5 era para Opera: con Graph el tiempo lo marca Ollama, unos 3 a 10 s por
+correo, y lo que se puede revisar de una vez en el panel), independiente
 de `invoices.batch_limit`, que solo usa `--classify-invoices`). Cada ejecución abre
 una sola sesión de Graph y la reutiliza para clasificar, revisar y archivar;
 `--resume-invoice-batch` sin pendientes termina sin conectarse al buzón. El panel muestra las facturas
@@ -1643,7 +1645,7 @@ ejecución y se eliminan al cerrar, cancelar o fallar el flujo.
 Para retomar sin descargar ni clasificar de nuevo:
 
 ```powershell
-.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --resume-invoice-batch --batch-size 3
+.\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --resume-invoice-batch --batch-size 10
 ```
 
 El panel muestra los pendientes y las aprobaciones previas. Pulsar ejecutar
@@ -1694,7 +1696,7 @@ mixto en una validación exitosa.
 
 Lee la lista de la bandeja de Hotmail y muestra los correos con adjunto cuyo asunto
 o vista previa mencionan factura, invoice, recibo, CFDI o comprobante. Usa `--days`
-para la ventana (1 a 365, por defecto 30). No abre, descarga ni mueve correos. Los
+para la ventana (1 a 365, por defecto 90). No abre, descarga ni mueve correos. Los
 correos sin fecha reconocible se muestran para revisión.
 La búsqueda de un candidato recorre la lista virtualizada hasta que el scroll
 deja de avanzar, con un límite de 60 páginas. No interpreta un número constante
