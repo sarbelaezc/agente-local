@@ -6,7 +6,7 @@ implementa.
 
 | Feature | Estado | Módulo | Comando |
 |---|---|---|---|
-| Organización y clasificación de facturas electrónicas en Hotmail | Lectura y archivo por [Microsoft Graph](#acceso-al-buzón-de-facturas-por-microsoft-graph) con la misma app del cierre mensual (implementado y probado con un Graph simulado; **pendiente de validar con el buzón real**); el piloto anterior con Opera tuvo resultado mixto | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
+| Organización y clasificación de facturas electrónicas en Hotmail | Lectura y archivo por [Microsoft Graph](#acceso-al-buzón-de-facturas-por-microsoft-graph) con la misma app del cierre mensual (implementado, probado con un Graph simulado y validado con ejecuciones supervisadas en el buzón real); [registro de ejecuciones](#registro-de-ejecuciones) (implementado, probado y validado con una ejecución real); limpieza de los lotes ya archivados en `invoice-batches.sqlite3`, pendiente | `src/mail_invoices/` | `scripts/agente-local.ps1 invoices` / `-Resume` |
 | Cierre mensual de gastos de Outlook con Ollama local | Lectura del buzón por Microsoft Graph, validada con importaciones reales de 2026; ingresos, pagos de tarjeta y reglas por comercio; tasa manual USD/COP y cola de avisos sin extraer; [hogar Santiago + Manuela](#hogar-santiago-y-manuela): titular por movimiento, importación de Manuela desde archivo, vista Hogar y decisión por destino (implementado, probado con datos sintéticos e importado en la base real con paridad verificada); [tarea programada](#cobertura-cierre-y-tarea-persistente) del último día del mes con recuperación al encender el equipo y [registro de ejecuciones](#registro-de-ejecuciones) (implementado y probado; primera ejecución supervisada pendiente); [varios buzones](#varios-buzones-y-gmail-de-manuela) con Gmail de Manuela en solo lectura y [lectura incremental](#lectura-incremental) de Outlook y Gmail (implementado; validado con los buzones reales: inicio de sesión en Gmail, importación de Manuela y ejecuciones incrementales); [extractos de Protección](#hogar-santiago-y-manuela): saldo, aportes, retiros y rendimientos de pensión voluntaria y cesantías (implementado y validado con los extractos reales de 2026) | `src/monthly_close/` | `scripts/agente-local.ps1 <comando>` / `scripts/agente-local.ps1 import` / `scripts/agente-local.ps1 import-manuela` / `scripts/agente-local.ps1 login -Mailbox manuela` |
 
 ## Stack tecnológico
@@ -69,6 +69,7 @@ proyecto, que Git ignora:
 | `.local\MonthlyCloseAgent\logs\` | Un registro por ejecución del cierre mensual (`AAAAMMDD-HHMMSS-<comando>.log`); se conservan los 10 más recientes ([detalle](#registro-de-ejecuciones)) |
 | `.local\ImportManuela\` | Archivos exportados del panel de Manuela que lee `import-manuela` (movimientos, decisiones por destino y totales de paridad) |
 | `.local\MailInvoiceAgent\` | `graph_token_cache.bin` (sesión de Microsoft de facturas), copias de seguridad del libro, `tessdata`, decisiones de clasificación y estados de lotes. `OperaProfile\` es del lector retirado y se puede borrar |
+| `.local\MailInvoiceAgent\logs\` | Un registro por ejecución de facturas (`AAAAMMDD-HHMMSS-<modo>.log`); se conservan los 10 más recientes ([detalle](#registro-de-ejecuciones)) |
 | `config\settings.yaml` | Configuración personal de facturas (también ignorada por Git) |
 
 Las rutas relativas de `config/settings.yaml` se resuelven desde la raíz del
@@ -1267,8 +1268,11 @@ por correo; los avisos de fallo son notificaciones de Windows en este equipo.
 
 ### Registro de ejecuciones
 
-Cada ejecución del cierre mensual, manual o programada, guarda su salida en
-`.local\MonthlyCloseAgent\logs\AAAAMMDD-HHMMSS-<comando>.log`, fuera de Git.
+Cada ejecución, manual o programada, guarda su salida fuera de Git: el cierre
+mensual en `.local\MonthlyCloseAgent\logs\AAAAMMDD-HHMMSS-<comando>.log` y las
+facturas en `.local\MailInvoiceAgent\logs\AAAAMMDD-HHMMSS-<modo>.log` (`batch`,
+`resume`, `login`, `classify`, `scan-inbox` o `analyze-file`). Ambas usan el mismo
+módulo compartido, `src/shared/run_log.py`.
 
 - Incluye los mensajes del lanzador (`[lanzador]`, por ejemplo el arranque de
   Ollama o la apertura del panel) y todo lo que imprime Python: buzones y
@@ -1281,7 +1285,14 @@ Cada ejecución del cierre mensual, manual o programada, guarda su salida en
   **10 más recientes**. Un registro que sigue abierto, como el del panel en
   marcha, se omite y se borra en una ejecución posterior. Puedes borrar la
   carpeta a mano cuando quieras.
-- La función de facturas no escribe en esta carpeta.
+- En facturas, el lote anota sus pasos solo con cantidades y estados: correos
+  buscados y clasificados, panel abierto o cerrado sin ejecutar, «Correo 3 de 10:
+  moved» y los estados al terminar, más el informe final (identificador, estado,
+  carpeta y errores de cada correo). Una parada deja su motivo y el archivo y la
+  línea donde ocurrió (`Punto de parada`), sin traza completa. Los modos de solo
+  lectura `classify`, `scan-inbox` y `analyze-file` muestran en pantalla
+  remitentes, asuntos o campos de factura: su registro guarda solo el inicio, los
+  avisos y el resultado, no ese informe.
 
 ### Privacidad, límites y validación
 
@@ -1402,12 +1413,21 @@ para probar otra feature).
 - `batch_review.py`: lo que muestra el panel y las reglas de aprobación (correo completo, carpeta existente, aprobador, duplicados históricos), sin interfaz.
 - `review_server.py` y `review.html`: panel web local de revisión y aprobación.
 - `graph_mailbox.py`: buzón por Microsoft Graph (carpetas, candidatos, adjuntos, mover y verificar) y su sesión.
-- `documents.py`, `ocr.py`, `assist.py` y `local_model.py`: extracción y asistencia local.
+- `documents.py`, `ocr.py` y `assist.py`: extracción y asistencia local; el cliente
+  de Ollama (`local_model.py`), la carpeta de datos (`storage.py`) y el registro de
+  ejecuciones (`run_log.py`) están en `src/shared/`, porque los usa también el
+  cierre mensual.
 - `workbook.py`: validación, duplicados, respaldo y escritura verificada del Excel.
 - `settings.py`: lectura de la sección de facturas de la configuración unificada.
 - `classification_decisions.py`: decisiones confirmadas y extractos de contexto en SQLite local.
 - `batch_state.py` y `batch_workflow.py`: estados persistentes y ejecución
   recuperable de lotes pequeños.
+
+El cliente de Ollama compartido (`src/shared/local_model.py`) tiene sus propias
+pruebas en `tests/shared/`, con un servidor HTTP simulado: solo acepta direcciones
+locales, no envía herramientas ni pasa por un proxy, y se detiene si Ollama no
+responde, devuelve un error, una respuesta sin texto o demasiado larga, o algo que
+no es un objeto JSON.
 
 Las reglas de aprobación se prueban sin navegador; el servidor del panel, con
 peticiones HTTP locales, y la página, en Chromium con Playwright y un libro
@@ -1484,7 +1504,7 @@ Implementado y probado con datos sintéticos (aún no con facturas ni correos re
   páginas se renderizan en memoria con `pypdfium2` y se leen con Tesseract
   (`spa+eng`). Límites: 5 páginas, tamaño de página y texto acotados, tiempo
   máximo por página. Sin Tesseract, el PDF escaneado queda para revisión manual.
-- **Completado de campos con Ollama** (`assist.py`, `local_model.py`): para PDF
+- **Completado de campos con Ollama** (`assist.py`, `shared/local_model.py`): para PDF
   con texto u OCR, el modelo local propone solo los campos que las reglas no
   encontraron. Cada valor se acepta únicamente si aparece en el texto del
   documento (número, razón social, fecha, total y moneda COP); lo que no se
@@ -1675,13 +1695,14 @@ reintenta el movimiento automáticamente. Las demás aprobaciones quedan guardad
 revise manualmente ese correo antes de volver a aprobarlo. El agente no reemplaza
 el digest aprobado con el cuerpo nuevo ni mueve el correo usando una aprobación
 obsoleta.
-La ejecución programada y la aprobación automática sin supervisión siguen
-pendientes. Un piloto real supervisado **con el lector de Opera** terminó con
+No hay ejecución programada ni aprobación automática: cada lote necesita a una
+persona en el panel, por diseño. Historia: un piloto real supervisado **con el
+lector de Opera** (ya retirado) terminó con
 cuatro correos movidos y verificados y uno bloqueado porque su cuerpo, leído desde
 la página, cambió después de la revisión. El
 candidato con discrepancia entre asunto y PDF pudo corregirse en la UI; la factura
-se validó con su PDF. El piloto sigue teniendo resultado mixto y no habilita
-ejecución autónoma. El correo bloqueado requiere reconciliación manual antes de
+se validó con su PDF. Ese piloto tuvo resultado mixto; el lector por Graph lo
+reemplazó y sí se validó con el buzón real. El correo bloqueado requiere reconciliación manual antes de
 otra aprobación. Las pruebas cubren
 aprobación conjunta, persistencia, cancelación, recuperación sin duplicar registros,
 bloqueo de ejecuciones simultáneas y, con un Graph simulado, la lectura, el
@@ -1849,8 +1870,9 @@ rechaza antes de salir del equipo. El token solo se envía a
 **Estado.** Implementado y probado con un Graph simulado: lista de operaciones
 permitidas, reintentos, carpetas, candidatos, adjuntos, historial, cuerpo y su
 huella, movimiento y verificación, sesión y la clasificación de extremo a
-extremo sin mover nada. **Pendiente de validar con el buzón real**: requiere
-registrar la app y ejecutar `--login`.
+extremo sin mover nada. **Validado con el buzón real** en ejecuciones supervisadas
+completas: inicio de sesión, lectura, revisión en el panel, registro en Excel y
+movimiento verificado de los correos aprobados.
 
 ## Licencia
 

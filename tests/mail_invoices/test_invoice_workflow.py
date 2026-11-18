@@ -6,7 +6,7 @@ import pytest
 
 from mail_invoices import classification, main, workflow
 from mail_invoices.documents import DocumentError, InvoiceCandidate
-from mail_invoices.local_model import LocalModelError
+from shared.local_model import LocalModelError
 from mail_invoices.ocr import TesseractOcr
 from mail_invoices.settings import MailSettings
 

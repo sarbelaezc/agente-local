@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from mail_invoices.local_model import LocalModelError
+from shared.local_model import LocalModelError
 from monthly_close.model import SCHEMA, OllamaJsonModel
 
 USER = json.dumps({

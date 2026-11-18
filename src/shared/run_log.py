@@ -1,8 +1,9 @@
-"""Per-execution log of the monthly close: what each run printed, kept for the last runs.
+"""Per-execution log of a feature: what each run printed, kept for the last runs.
 
-Every command writes one file in the local data folder (outside Git). Only what the
-program already prints is kept: progress-bar redraws stay on screen, and message
-bodies are never printed, so they never reach a log.
+Every command writes one file in its feature's local data folder (outside Git). Only
+what the program already prints is kept: progress-bar redraws stay on screen, and
+message bodies are never printed, so they never reach a log. A command whose screen
+output lists personal data can keep only its errors and its result.
 """
 from __future__ import annotations
 
@@ -71,16 +72,26 @@ def prune(folder: Path, keep: int = KEEP) -> list[Path]:
 
 
 @contextmanager
-def run_log(data_dir: Path, command: str, path: Path | None = None) -> Iterator[Path]:
-    """Copy everything printed during the run to its log, then keep only the last runs."""
+def run_log(
+    data_dir: Path, command: str, path: Path | None = None, *,
+    feature: str = "cierre mensual", capture_output: bool = True,
+) -> Iterator[Path]:
+    """Copy what the run prints to its log, then keep only the last runs.
+
+    With ``capture_output=False`` only standard error (progress and stops) is kept,
+    not the standard output report.
+    """
     target = checked_log_path(data_dir, path) if path else new_log_path(data_dir, command)
     target.parent.mkdir(parents=True, exist_ok=True)
     out, err = sys.stdout, sys.stderr
     status = "error"
     try:
         with target.open("a", encoding="utf-8") as log:
-            log.write(f"== {datetime.now().isoformat(timespec='seconds')} cierre mensual: {command}\n")
-            sys.stdout, sys.stderr = _Tee(out, log), _Tee(err, log)
+            log.write(f"== {datetime.now().isoformat(timespec='seconds')} {feature}: {command}\n")
+            if not capture_output:
+                log.write("(el informe de pantalla no se guarda: puede listar datos personales)\n")
+            sys.stdout = _Tee(out, log) if capture_output else out
+            sys.stderr = _Tee(err, log)
             try:
                 yield target
                 status = "terminado"

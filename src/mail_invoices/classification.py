@@ -11,7 +11,7 @@ from mail_invoices.classification_decisions import ClassificationDecisionStore, 
 from mail_invoices.graph_mailbox import (
     MailboxError, discover_folders, filter_candidates, open_mailbox, read_history, scan_candidates,
 )
-from mail_invoices.local_model import LocalModelError, OllamaJsonModel
+from shared.local_model import LocalModelError, OllamaJsonModel
 from mail_invoices.settings import MailSettings, is_excluded_sender
 from mail_invoices.workbook import InvoiceWorkbook
 

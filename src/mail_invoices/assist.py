@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 from mail_invoices.documents import DocumentError, InvoiceCandidate, parse_money
-from mail_invoices.local_model import JsonModel
+from shared.local_model import JsonModel
 
 FIELDS = ("number", "legal_name", "issued", "amount", "currency")
 MONTHS = (

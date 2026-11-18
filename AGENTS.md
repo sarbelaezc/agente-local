@@ -64,10 +64,13 @@ Do not add unnecessary dependencies without a clear reason.
 
 ```text
 src/
-  mail_invoices/      Hotmail invoices; also hosts shared helpers (storage.py, local_model.py)
+  shared/             helpers every feature uses: storage.py (local data folder),
+                      local_model.py (Ollama client), run_log.py (per-run logs)
+  mail_invoices/      Hotmail invoices
   monthly_close/      monthly close through Microsoft Graph (Outlook) and the Gmail API
 tests/
   conftest.py         points every test at a temporary data folder
+  shared/
   mail_invoices/
   monthly_close/
 scripts/
@@ -76,7 +79,9 @@ config/               templates only; personal files are ignored by Git
 .local/               all local data and configuration, ignored by Git
 ```
 
-Each feature keeps its own data, state and Ollama usage; keep these separated within a feature:
+Code used by more than one feature lives in `src/shared/`, never inside one feature's
+package; it must not depend on any feature. Each feature keeps its own data, state and
+Ollama usage; keep these separated within a feature:
 
 - Mailbox access (Microsoft Graph for invoices; Microsoft Graph and the Gmail API for the monthly close).
 - Ollama integration.
@@ -129,7 +134,7 @@ No feature drives a browser today: invoices moved to Microsoft Graph. These rule
 ## Local data
 
 - All local data and configuration lives in `.local/` inside the project (`.local/MonthlyCloseAgent`, `.local/MailInvoiceAgent`) and in `config/settings.yaml`. Git ignores them; never stage, commit, or copy them into tracked files.
-- `mail_invoices.storage.data_root()` resolves that folder; `AGENTE_LOCAL_DATA` overrides it. Do not hardcode other locations.
+- `shared.storage.data_root()` resolves that folder; `AGENTE_LOCAL_DATA` overrides it. Do not hardcode other locations.
 - `.local/` holds real financial records and Microsoft and Google session tokens. Read it only when the task requires it, never print message bodies, tokens or cookies, and back up a database before changing it outside the normal commands.
 - Tests must never read or write `.local/`: `tests/conftest.py` redirects them to a temporary folder.
 

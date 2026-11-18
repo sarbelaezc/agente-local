@@ -46,7 +46,7 @@ function Get-PanelContent {
 }
 
 function Write-RunLog {
-    # Appends a launcher line to this run's log (monthly close only); Python appends its output.
+    # Appends a launcher line to this run's log; Python appends its output.
     param([string]$Message)
     if ($script:logFile) {
         Add-Content -LiteralPath $script:logFile -Value "[lanzador] $Message" -Encoding UTF8
@@ -140,13 +140,18 @@ $python = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $python)) {
     throw "Falta .venv. Ejecuta scripts\bootstrap.ps1."
 }
-# One log per monthly close execution in the local data folder; Python keeps the last 10.
-$script:logFile = $null
-if ($Command -ne "invoices") {
+# One log per execution in each feature's local data folder; Python keeps the last 10.
+# Invoices follow AGENTE_LOCAL_DATA like shared.storage.data_root().
+if ($Command -eq "invoices") {
+    $localData = if ("$env:AGENTE_LOCAL_DATA".Trim()) { "$env:AGENTE_LOCAL_DATA".Trim() } else { Join-Path $root ".local" }
+    $logDir = Join-Path $localData "MailInvoiceAgent\logs"
+    $logCommand = if ($Resume) { "resume" } else { "batch" }
+} else {
     $logDir = Join-Path $DataDir "logs"
-    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-    $script:logFile = Join-Path $logDir ("{0}-{1}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"), $Command)
+    $logCommand = $Command
 }
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$script:logFile = Join-Path $logDir ("{0}-{1}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"), $logCommand)
 $previousEnvironment = @{}
 foreach ($key in @("PYTHONPATH", "OLLAMA_HOST", "OLLAMA_NUM_PARALLEL")) {
     $previousEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
@@ -172,11 +177,12 @@ try {
         $ollamaProcess = Start-SharedOllama $endpoint
         Wait-OllamaModels $endpoint $ollamaProcess | Out-Null
         $mode = if ($Resume) { "--resume-invoice-batch" } else { "--process-invoice-batch" }
-        & $python -m mail_invoices.main --config "config\settings.yaml" $mode `
-            --batch-size "$BatchSize" --days "$Days"
+        & $python -u -m mail_invoices.main --config "config\settings.yaml" $mode `
+            --batch-size "$BatchSize" --days "$Days" --log-file $script:logFile
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 0) {
-            Write-Warning "El lote de facturas termino con codigo $exitCode. Revisa su informe antes de repetir."
+            Write-Warning "El lote de facturas termino con codigo $exitCode. Revisa su informe antes de repetir: $($script:logFile)"
+            Write-RunLog "El lote termino con codigo $exitCode."
         }
         exit $exitCode
     }

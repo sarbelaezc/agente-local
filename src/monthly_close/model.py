@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from mail_invoices.local_model import MAX_RESPONSE_CHARS, LocalModelError, validate_local_url
+from shared.local_model import MAX_RESPONSE_CHARS, LocalModelError, validate_local_url
 from monthly_close.domain import KINDS, notice_currency
 
 EVENT_PROPERTIES = {

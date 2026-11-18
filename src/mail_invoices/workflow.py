@@ -9,7 +9,7 @@ from mail_invoices.documents import (
     InvoiceCandidate,
     parse_document,
 )
-from mail_invoices.local_model import LocalModelError, OllamaJsonModel
+from shared.local_model import LocalModelError, OllamaJsonModel
 from mail_invoices.ocr import TesseractOcr
 from mail_invoices.review import ReviewItem
 from mail_invoices.settings import MailSettings

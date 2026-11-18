@@ -6,7 +6,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from mail_invoices.local_model import JsonModel
+from shared.local_model import JsonModel
 
 MAX_EXAMPLES = 40
 MIN_HISTORY_MATCHES = 2

@@ -14,7 +14,7 @@ import pytest
 
 from monthly_close import gmail_client
 from monthly_close import main as app
-from monthly_close import run_log
+from shared import run_log
 from monthly_close.domain import Preferences
 from monthly_close.mailboxes import load_mailboxes
 from monthly_close.store import Store
