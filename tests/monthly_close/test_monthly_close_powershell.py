@@ -201,3 +201,36 @@ def test_launcher_rejects_an_invalid_mailbox_name(tmp_path):
         capture_output=True, text=True, timeout=30,
     )
     assert result.returncode != 0
+
+
+def test_launcher_signs_in_to_the_invoice_mailbox_with_its_own_log(tmp_path):
+    powershell = shutil.which("powershell.exe")
+    if not powershell:
+        pytest.skip("Requires Windows PowerShell.")
+    root = tmp_path / "project"
+    (root / "scripts").mkdir(parents=True)
+    (root / "config").mkdir()
+    (root / "config" / "settings.yaml").write_text("invoices: {}\n", encoding="utf-8")
+    original = Path(__file__).parents[2] / "scripts" / "agente-local.ps1"
+    (root / "scripts" / original.name).write_text(
+        original.read_text(encoding="utf-8-sig").replace(".venv\\Scripts\\python.exe", ".venv\\Scripts\\python.ps1"),
+        encoding="utf-8",
+    )
+    fake = root / ".venv" / "Scripts" / "python.ps1"
+    fake.parent.mkdir(parents=True)
+    fake.write_text(
+        "$args | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'args.json')\n"
+        "exit 0\n", encoding="utf-8",
+    )
+    data = tmp_path / "datos"
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-ExecutionPolicy", "RemoteSigned",
+         "-File", str(root / "scripts" / original.name), "login", "-Mailbox", "facturas"],
+        env=os.environ | {"LOCALAPPDATA": str(root), "AGENTE_LOCAL_DATA": str(data)},
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    args = json.loads((root / "args.json").read_text(encoding="utf-8-sig"))
+    assert args[2] == "mail_invoices.main" and "--login" in args and "monthly_close.main" not in args
+    log = Path(args[args.index("--log-file") + 1])
+    assert log.parent == data / "MailInvoiceAgent" / "logs" and log.name.endswith("-login.log")

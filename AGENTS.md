@@ -37,13 +37,16 @@ The local agent groups several features (for example, Hotmail invoices and the m
 - Do not read code in detail, edit files, install dependencies, or run automations until the user answers.
 - Limit the work to the chosen feature. If a task requires touching another feature, warn the user and ask for confirmation first.
 
-### Declaring in the README
+### Declaring in the README and docs/
 
-- Every new feature or change requested by the user must be declared in the `README.md` in the same change in which it is implemented.
-- Each feature must appear in the feature table with its name, status, module, and run command, and have its own section covering scope, configuration, usage, and security restrictions.
-- If a change alters a feature's behavior, commands, configuration, dependencies, or status, update the `README.md` to reflect it.
-- In the `README.md`, distinguish what is implemented and verified from what is pending or not validated.
-- If the `README.md` describes something different from what the user is requesting now, the user's request prevails: implement it and update the `README.md`. If the request contradicts a security rule in these instructions, report the conflict before continuing.
+The documentation has two levels: `README.md` is the entry point and `docs/` holds the detail.
+
+- `README.md`: what the project is, the feature table (name, short status, main command, link to its guide), quick start, the launcher command table, local data and privacy, and one short section per feature covering scope, configuration, usage and security restrictions, linking to its guide.
+- `docs/<feature>.md` (today `docs/cierre-mensual.md` and `docs/facturas.md`): how it works, task guides, reference, and a single **Estado** section that separates what is verified with real data from what is pending or not validated.
+- `docs/configuracion.md` holds installation and configuration; `docs/desarrollo.md` holds architecture, tests and assistant tooling.
+- Every new feature or change requested by the user must be documented in the same change in which it is implemented: in its README section when scope, commands, configuration or status change, and always in its guide in `docs/`. A new feature gets its row in the feature table, its README section and its own guide.
+- Write the documentation in Spanish, for the user and for someone reproducing the project on another Windows machine. Keep history out of it: document what the project does now.
+- If the documentation describes something different from what the user is requesting now, the user's request prevails: implement it and update the documentation. If the request contradicts a security rule in these instructions, report the conflict before continuing.
 
 ## Preferred technologies
 
@@ -75,6 +78,7 @@ tests/
   monthly_close/
 scripts/
   agente-local.ps1    single launcher for both features
+docs/                 configuration, one guide per feature, and development
 config/               templates only; personal files are ignored by Git
 .local/               all local data and configuration, ignored by Git
 ```
@@ -142,9 +146,9 @@ No feature drives a browser today: invoices moved to Microsoft Graph. These rule
 
 - Keep configuration files out of the source code.
 - Provide clear scripts for setup, execution, and testing.
-- Keep the README Windows installation instructions up to date.
+- Keep the Windows installation instructions in `docs/configuracion.md` up to date.
 - Setup: `.\scripts\bootstrap.ps1`. Tests: `.\.venv\Scripts\python.exe -m pytest` (a feature: `... -m pytest tests\monthly_close`).
-- Run: `.\scripts\agente-local.ps1 <command>`; the README table lists the commands and which ones use Ollama.
+- Run: `.\scripts\agente-local.ps1 <command>`; the launcher table in the README lists the commands and which ones use Ollama.
 - The shell is Windows PowerShell 5.1: no `&&`, and `$PSScriptRoot` is empty while parameter defaults are evaluated under `-File`.
 
 ## Assistant tooling
@@ -161,6 +165,7 @@ none fits.
 | Skill | Use for |
 |---|---|
 | [agent-browser](.claude/skills/agent-browser/SKILL.md) | Browser or Electron automation, site testing, and browser-based QA. Follow the browser automation rules; no feature automates a mailbox through a browser. |
+| [documentation-writer](.claude/skills/documentation-writer/SKILL.md) | Writing or restructuring the README and `docs/` with the Diátaxis types (tutorial, how-to, reference, explanation). Its "do not copy" rule does not apply when moving this project's own documentation; propose the outline before rewriting. |
 | [find-skills](.claude/skills/find-skills/SKILL.md) | Finding skills when the user asks to discover or extend agent capabilities. Do not install or replace skills without the user's request; keep project skills in the canonical directory. |
 | [frontend-design](.claude/skills/frontend-design/SKILL.md) | Building or substantially redesigning a user interface. |
 | [pdf](.claude/skills/pdf/SKILL.md) | Explicitly requested PDF reading, extraction, creation, conversion, or form work. Follow approval, privacy, and no-generated-code rules; a skill does not authorize file writes or external sharing. |

@@ -348,6 +348,7 @@ def test_an_invalid_log_file_stops_before_running(tmp_path, monkeypatch, capsys)
 
 @pytest.mark.parametrize("box,message", [
     ({"name": "Manuela"}, "name"),
+    ({"name": "facturas"}, "reservado"),
     ({"origin": "otra origen"}, "origin"),
 ])
 def test_mailbox_names_and_origins_are_validated(box, message):

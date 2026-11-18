@@ -10,6 +10,8 @@ from monthly_close.graph_reader import DEFAULT_ORIGIN as GRAPH_ORIGIN
 
 PROVIDERS = {"graph", "gmail"}
 NAME = re.compile(r"[a-z][a-z0-9-]{1,30}")
+# The launcher's "login -Mailbox facturas" signs in to the invoice mailbox instead.
+RESERVED_NAMES = {"facturas"}
 FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}")
 ORIGIN = re.compile(r"[a-z0-9.-]+(?:/[a-z0-9-]+)?")
 KEYS = {
@@ -69,6 +71,8 @@ def _mailbox(raw: object, settings: dict) -> Mailbox:
     name, provider = raw.get("name"), raw.get("provider")
     if not isinstance(name, str) or not NAME.fullmatch(name):
         raise ValueError("name del buzon: minusculas, numeros y guiones.")
+    if name in RESERVED_NAMES:
+        raise ValueError(f"name del buzon: {name} esta reservado para el buzon de facturas.")
     if provider not in PROVIDERS:
         raise ValueError(f"provider del buzon {name} debe ser graph o gmail.")
     origin = raw.get("origin", GRAPH_ORIGIN if provider == "graph" else GMAIL_ORIGIN)
