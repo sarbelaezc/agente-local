@@ -181,7 +181,6 @@ def parse_savings(text: str) -> Statement:
     return statement
 
 
-CARD_PERIOD = re.compile(r"(\d{2}) (\w{3}) - (\d{2}) (\w{3})\s*\.?\s*(\d{4})", re.I)
 CARD_LINE = re.compile(r"^(?P<desc>.+?) (?P<day>\d{2}/\d{2}/\d{4}) \$ (?P<amount>-?[\d.]+,\d{2})\b")
 CARD_CURRENCY = re.compile(r"cuenta en\s*:\s*(pesos|d[oó]lares)", re.I)
 INTERNAL_CARD = re.compile(r"saldo a diferir|traslado saldo", re.I)
