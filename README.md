@@ -1799,8 +1799,7 @@ como se indica arriba.
 
 La configuración personal está en `config/settings.yaml`, excluida de Git.
 La sección `invoices` contiene Hotmail, Excel (incluidos `ocr` y `approver`) y
-el endpoint compartido de Ollama para facturas y cierre mensual. Una sección
-`teams` heredada de versiones anteriores se ignora y puede borrarse.
+el endpoint compartido de Ollama para facturas y cierre mensual.
 El lector conserva compatibilidad con archivos planos anteriores mediante
 `--config`; para migrarlos, agrupe sus ajustes en `invoices` y conserve todos los
 valores personales. En configuraciones antiguas, el bloque global `ollama` se
