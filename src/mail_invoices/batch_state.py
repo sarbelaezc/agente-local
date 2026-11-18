@@ -27,11 +27,7 @@ def batch_state_path() -> Path:
 
 
 def batch_scope(settings: MailSettings) -> str:
-    """Batches of one mailbox app, workbook and sheet.
-
-    The Graph reader uses message ids, not Outlook Web conversation ids, so records of
-    the retired Opera reader live in another scope and are never acted on.
-    """
+    """Batches of one mailbox app, workbook and sheet; records of another scope are never acted on."""
     identity = f"graph\n{settings.graph_client_id}\n{settings.workbook.resolve()}\n{settings.sheet}"
     return sha256(identity.casefold().encode("utf-8")).hexdigest()
 

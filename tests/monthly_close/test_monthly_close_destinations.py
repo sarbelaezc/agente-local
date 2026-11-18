@@ -202,17 +202,3 @@ def test_merge_category_moves_movements_and_rules_and_removes_it(preferences, tm
     with pytest.raises(ValueError):
         store.merge_category("Predial", "Vivienda")
 
-
-def test_suggested_rate_prefills_pending_usd_without_deciding(preferences, tmp_path):
-    store = Store(tmp_path / "close.sqlite3")
-    store.configure(preferences.to_dict())
-    store.import_message("u1", [{**santiago_row("u1", 1234, kind="purchase"), "currency": "USD"}])
-    store.suggest_exchange_rate("u1", "3700", "promedio de tasas del mes")
-    row = store.state()["transactions"][0]
-    assert (row["decision"], row["exchange_rate"], row["cop_amount_minor"]) == (None, "3700", 4565800)
-    store.decide("u1", "personal", "Compras")  # the person decides; the suggested rate is used
-    assert store.state()["transactions"][0]["cop_amount_minor"] == 4565800
-    with pytest.raises(ValueError, match="pendientes"):
-        store.suggest_exchange_rate("u1", "3800", "otra")
-    with pytest.raises(ValueError):
-        store.suggest_exchange_rate("u1", "-1", "invalida")

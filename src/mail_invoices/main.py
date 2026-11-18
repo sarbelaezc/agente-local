@@ -33,6 +33,8 @@ def _command_name(args: argparse.Namespace) -> str:
         return "classify"
     if args.scan_inbox:
         return "scan-inbox"
+    if args.cleanup_batches:
+        return "cleanup"
     return "analyze-file"
 
 
@@ -54,6 +56,18 @@ def main() -> int:
     mode.add_argument(
         "--scan-inbox", action="store_true",
         help="List invoice candidates in the inbox (read-only, opens no message)",
+    )
+    mode.add_argument(
+        "--cleanup-batches", action="store_true",
+        help="Report (or with --apply delete) archived, excluded and retired batch records",
+    )
+    parser.add_argument(
+        "--older-than-days", type=int,
+        help="With --cleanup-batches, archived messages older than this are deleted (0-3650, default 30)",
+    )
+    parser.add_argument(
+        "--apply", action="store_true",
+        help="With --cleanup-batches, back up and delete; without it only a preview",
     )
     parser.add_argument(
         "--batch-size", type=int, default=10, help="Controlled E2E batch size (1-20, default 10)",
@@ -86,6 +100,12 @@ def main() -> int:
         parser.error("--history-folder requires --classify-invoices")
     if args.candidate_text is not None and not args.classify_invoices:
         parser.error("--candidate-text requires --classify-invoices")
+    if (args.apply or args.older_than_days is not None) and not args.cleanup_batches:
+        parser.error("--apply and --older-than-days require --cleanup-batches")
+    if args.older_than_days is None:
+        args.older_than_days = 30
+    if not 0 <= args.older_than_days <= 3650:
+        parser.error("--older-than-days must be between 0 and 3650")
     command = _command_name(args)
     try:
         with run_log(
@@ -134,6 +154,10 @@ def _run(args: argparse.Namespace) -> int:
         return workflow.login(settings)
     if args.scan_inbox:
         return workflow.scan_inbox(settings, args.days)
+    if args.cleanup_batches:
+        from mail_invoices.batch_cleanup import cleanup_batches
+
+        return cleanup_batches(settings, args.older_than_days, args.apply)
     return workflow.analyze_file(settings, args.analyze_file, not args.no_model)
 
 

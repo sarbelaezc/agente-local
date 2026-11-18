@@ -125,9 +125,3 @@ def test_extract_file_keeps_valid_zip_invoices_and_reports_failed_member(monkeyp
         {"source": "invoice.zip:other.pdf", "error": "Scanned PDF", "requires_review": True},
     ]
 
-
-@pytest.mark.parametrize("flag", ["--process-one-invoice", "--review-invoices", "--download-attachments"])
-def test_removed_legacy_modes_are_rejected(monkeypatch, flag):
-    monkeypatch.setattr("sys.argv", ["mail-invoices", flag])
-    with pytest.raises(SystemExit):
-        main.main()

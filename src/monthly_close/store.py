@@ -701,24 +701,6 @@ class Store:
                 raise ValueError("Regla de destino inexistente.")
             self._audit(db, "group-rule-delete-local-user", f"{owner}/{group}", "deleted")
 
-    def suggest_exchange_rate(self, event_id: str, rate: str, origin: str) -> None:
-        """Prefill the COP-per-USD rate of a pending USD movement without deciding it.
-
-        The panel shows the suggested rate; the decision still belongs to a person.
-        """
-        if not isinstance(rate, str) or not re.fullmatch(r"\d{1,8}(?:\.\d{1,6})?", rate) or Decimal(rate) <= 0:
-            raise ValueError("Tasa sugerida invalida.")
-        with self.connect() as db:
-            row = db.execute("SELECT * FROM transactions WHERE id=?", (event_id,)).fetchone()
-            if row is None or row["currency"] != "USD" or row["decision"] is not None:
-                raise ValueError("Solo se sugiere tasa a movimientos USD pendientes.")
-            converted = int((Decimal(row["amount_minor"]) * Decimal(rate)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-            db.execute(
-                "UPDATE transactions SET exchange_rate=?, cop_amount_minor=? WHERE id=?",
-                (rate, converted, event_id),
-            )
-            self._audit(db, "exchange-suggested", event_id, f"{rate}: {clean_text(origin, 120)}")
-
     def merge_category(self, source: str, target: str) -> dict[str, int]:
         """Fold one spending category into another, in one audited transaction.
 
