@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,6 +26,16 @@ from mail_invoices.workbook import InvoiceWorkbook, WorkbookError
 # With Graph the mailbox is no longer the bottleneck: a batch is bounded by what a person
 # reviews at once in the panel and by local Ollama time (about 3-10 s per message).
 MAX_BATCH = 20
+
+
+def progress(text: str) -> None:
+    """A step of the run on standard error (kept in the run log): counts and states only,
+    never subjects, senders or invoice data."""
+    print(text, file=sys.stderr, flush=True)
+
+
+def _plural(count: int, one: str, many: str) -> str:
+    return f"{count} {one if count == 1 else many}"
 
 
 class BatchReviewPanel:
@@ -177,11 +188,15 @@ def _process_invoice_batch(
         active = _active_messages(list(stored.values()), batch_size, settings.excluded_senders)
         missing_identity = []
         if resume and not active:
+            progress("Sin correos pendientes para retomar; no se abre el buzón.")
             print(to_json({"messages": [], "message": "No hay correos pendientes"}))
             return 0
         # One Graph session per run, always closed, including cancellation.
         with open_mailbox(settings) as mailbox:
-            if not resume:
+            if resume:
+                progress(f"Retomando {_plural(len(active), 'correo guardado', 'correos guardados')}.")
+            else:
+                progress(f"Buscando facturas de los últimos {days} días (lote de hasta {batch_size}).")
                 report = simulate_classification(
                     replace(settings, batch_limit=batch_size), days, [], use_model,
                     include_review_items=True, attachment_dir=attachment_dir, mailbox=mailbox,
@@ -196,28 +211,40 @@ def _process_invoice_batch(
                         journal.save([prepared])
                         stored[prepared.conversation] = prepared
                 active = _active_messages(list(stored.values()), batch_size, settings.excluded_senders)
+                progress(f"Clasificados {_plural(len(report['messages']), 'correo', 'correos')}.")
                 if missing_identity:
+                    progress(f"{_plural(len(missing_identity), 'correo', 'correos')} sin identificador: no se pueden seguir.")
                     print(to_json({"untracked_errors": missing_identity}))
             if not active:
+                progress("Sin correos pendientes de revisión.")
                 print(to_json({"messages": [], "message": "No hay correos pendientes"}))
                 return 1 if missing_identity else 0
             folders = [folder.path for folder in discover_folders(mailbox)]
             window = BatchReviewPanel(active, folders, settings, journal, attachment_dir)
+            progress(f"Panel de revisión abierto con {_plural(len(active), 'correo', 'correos')}.")
             if not window.run():
+                progress("Panel cerrado sin ejecutar: no se escribió Excel ni se movió ningún correo.")
                 print(to_json({"executed": False, "message": "Lote cerrado sin ejecutar"}))
                 return 1
             window.executing()
             decisions = ClassificationDecisionStore(decisions_path())
             workbook = InvoiceWorkbook(settings.workbook, settings.backup_dir, settings.sheet)
             failed = False
-            for message in active:
+            progress("Aprobación guardada; ejecutando los correos aprobados.")
+            for position, message in enumerate(active, 1):
                 try:
                     execute_message(message, journal, workbook, decisions, mailbox)
-                except (OSError, ValueError, LookupError, sqlite3.Error, MailboxError):
+                except (OSError, ValueError, LookupError, sqlite3.Error, MailboxError) as error:
+                    progress(f"Correo {position} de {len(active)}: {message.state}; detenido: {error}")
                     failed = True
                     # Stop the batch on failures; remaining durable approvals can be resumed.
                     break
+                progress(f"Correo {position} de {len(active)}: {message.state}.")
             window.finish(batch_result(active, failed))
+        states: dict[str, int] = {}
+        for message in active:
+            states[message.state] = states.get(message.state, 0) + 1
+        progress("Estados al terminar: " + ", ".join(f"{state} {count}" for state, count in sorted(states.items())) + ".")
         print(to_json({
             "messages": [
                 {"conversation": message.conversation, "state": message.state,

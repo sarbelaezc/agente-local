@@ -1,10 +1,39 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
+import sys
+import traceback
 from pathlib import Path
 
 from mail_invoices import workflow
+from mail_invoices.graph_mailbox import MailboxError
 from mail_invoices.settings import load_settings
+from shared.local_model import LocalModelError
+from shared.run_log import run_log
+from shared.storage import data_root
+
+# Read-only diagnostics print invoice fields, senders or subjects: their log keeps
+# only progress, stops and the result, never that report.
+REPORT_ONLY_ON_SCREEN = {"classify", "scan-inbox", "analyze-file"}
+
+
+def invoice_data_dir() -> Path:
+    return data_root() / "MailInvoiceAgent"
+
+
+def _command_name(args: argparse.Namespace) -> str:
+    if args.process_invoice_batch:
+        return "batch"
+    if args.resume_invoice_batch:
+        return "resume"
+    if args.login:
+        return "login"
+    if args.classify_invoices:
+        return "classify"
+    if args.scan_inbox:
+        return "scan-inbox"
+    return "analyze-file"
 
 
 def main() -> int:
@@ -44,6 +73,10 @@ def main() -> int:
     parser.add_argument(
         "--no-model", action="store_true", help="Skip the local Ollama field completion"
     )
+    parser.add_argument(
+        "--log-file", type=Path,
+        help="This run's log inside the logs folder of the invoice data (the launcher sets it)",
+    )
     args = parser.parse_args()
     if not 1 <= args.days <= 365:
         parser.error("--days must be between 1 and 365")
@@ -53,6 +86,39 @@ def main() -> int:
         parser.error("--history-folder requires --classify-invoices")
     if args.candidate_text is not None and not args.classify_invoices:
         parser.error("--candidate-text requires --classify-invoices")
+    command = _command_name(args)
+    try:
+        with run_log(
+            invoice_data_dir(), command, args.log_file,
+            feature="facturas", capture_output=command not in REPORT_ONLY_ON_SCREEN,
+        ):
+            return _run_reporting(args)
+    except ValueError as exc:  # an invalid --log-file, before anything ran
+        print(f"Detenido: {exc}", file=sys.stderr)
+        return 1
+
+
+def _run_reporting(args: argparse.Namespace) -> int:
+    """Run a command and report failures without message bodies; the run log keeps them."""
+    try:
+        code = _run(args)
+    except KeyboardInterrupt:
+        print("Detenido por el usuario.", file=sys.stderr)
+        return 130
+    except (ValueError, OSError, LookupError, sqlite3.Error, MailboxError, LocalModelError) as exc:
+        print(f"Detenido: {exc}", file=sys.stderr)
+        frames = [
+            frame for frame in traceback.extract_tb(exc.__traceback__)
+            if Path(frame.filename).parent.name in {"mail_invoices", "shared"}
+        ]
+        for frame in frames[-2:]:
+            print(f"Punto de parada: {Path(frame.filename).name}:{frame.lineno}.", file=sys.stderr)
+        return 1
+    print(f"Resultado: {'sin errores' if code == 0 else f'con pendientes o errores (codigo {code})'}.", file=sys.stderr)
+    return code
+
+
+def _run(args: argparse.Namespace) -> int:
     settings = load_settings(args.config)
     if args.process_invoice_batch or args.resume_invoice_batch:
         from mail_invoices.batch_workflow import process_invoice_batch
