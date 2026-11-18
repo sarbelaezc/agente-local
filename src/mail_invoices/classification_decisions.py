@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
-from mail_invoices.storage import data_root
+from shared.storage import data_root
 from mail_invoices.folders import ConfirmedExample, IncomingMessage, bounded_context
 
 

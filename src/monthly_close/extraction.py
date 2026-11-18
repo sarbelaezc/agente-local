@@ -8,7 +8,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from mail_invoices.local_model import JsonModel
+from shared.local_model import JsonModel
 from monthly_close.destinations import assign_destinations
 from monthly_close.statements import is_statement_notice
 from monthly_close.domain import (

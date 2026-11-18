@@ -7,8 +7,8 @@ from pathlib import Path
 
 import yaml
 
-from mail_invoices.local_model import validate_local_url
-from mail_invoices.storage import REPO_ROOT
+from shared.local_model import validate_local_url
+from shared.storage import REPO_ROOT
 
 DEFAULT_TESSERACT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 CLIENT_ID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")

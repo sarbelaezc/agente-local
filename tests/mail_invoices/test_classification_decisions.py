@@ -111,7 +111,7 @@ def test_corrupt_store_is_reported_not_ignored(tmp_path):
 
 
 def test_default_path_is_the_project_local_folder_unless_overridden(monkeypatch, tmp_path):
-    from mail_invoices.storage import REPO_ROOT
+    from shared.storage import REPO_ROOT
 
     monkeypatch.setenv("AGENTE_LOCAL_DATA", str(tmp_path))
     assert decisions_path() == tmp_path / "MailInvoiceAgent" / "classification-decisions.sqlite3"

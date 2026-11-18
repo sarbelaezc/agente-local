@@ -18,8 +18,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
-from mail_invoices.local_model import LocalModelError, validate_local_url
-from mail_invoices.storage import data_root
+from shared.local_model import LocalModelError, validate_local_url
+from shared.storage import data_root
 from monthly_close.model import OllamaJsonModel
 from monthly_close import credit_ledger
 from monthly_close import statements as statements_module
@@ -34,7 +34,7 @@ from monthly_close import gmail_client
 from monthly_close.gmail_client import GmailClient
 from monthly_close.gmail_reader import GmailSourceReader
 from monthly_close.mailboxes import Mailbox, find, load_mailboxes, primary_graph
-from monthly_close.run_log import run_log
+from shared.run_log import run_log
 from monthly_close.household_import import PARITY_FILE, import_member, parity_report
 from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.server import create_server

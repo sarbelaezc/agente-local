@@ -25,7 +25,7 @@ import httpx
 
 from mail_invoices.documents import MAX_FILE_BYTES
 from mail_invoices.folders import FiledMessage
-from mail_invoices.storage import data_root
+from shared.storage import data_root
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 SCOPES = ["Mail.ReadWrite"]
