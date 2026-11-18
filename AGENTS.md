@@ -161,6 +161,7 @@ none fits.
 | Skill | Use for |
 |---|---|
 | [agent-browser](.claude/skills/agent-browser/SKILL.md) | Browser or Electron automation, site testing, and browser-based QA. Follow the browser automation rules; no feature automates a mailbox through a browser. |
+| [documentation-writer](.claude/skills/documentation-writer/SKILL.md) | Writing or restructuring the README and `docs/` with the Diátaxis types (tutorial, how-to, reference, explanation). Its "do not copy" rule does not apply when moving this project's own documentation; propose the outline before rewriting. |
 | [find-skills](.claude/skills/find-skills/SKILL.md) | Finding skills when the user asks to discover or extend agent capabilities. Do not install or replace skills without the user's request; keep project skills in the canonical directory. |
 | [frontend-design](.claude/skills/frontend-design/SKILL.md) | Building or substantially redesigning a user interface. |
 | [pdf](.claude/skills/pdf/SKILL.md) | Explicitly requested PDF reading, extraction, creation, conversion, or form work. Follow approval, privacy, and no-generated-code rules; a skill does not authorize file writes or external sharing. |
