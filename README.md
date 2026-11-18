@@ -83,9 +83,6 @@ Los estados de lotes de facturas se asocian a la app de Graph
 guardados dejan de reconocerse: quedan en su propio ámbito, el flujo nunca actúa
 sobre ellos y la [limpieza de lotes](#limpieza-de-lotes) los borra.
 
-Antes estos datos estaban en `%LOCALAPPDATA%\MonthlyCloseAgent` y
-`%LOCALAPPDATA%\MailInvoiceAgent`; esas carpetas ya no se usan.
-
 ## Lanzador único
 
 `scripts/agente-local.ps1` es el único punto de entrada de ambos features.
