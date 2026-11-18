@@ -150,6 +150,8 @@
     .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 0 0 12px; }
     .month-summary { margin: 0 0 12px; }
     .month-summary .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+    .month-summary .metrics.single-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .month-summary .metrics.single-row .hero strong { font-size: clamp(22px, 2.4vw, 32px); overflow-wrap: normal; }
     .metric { padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--surf); }
     .metric .label { display: block; color: var(--ink2); font-size: 13px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
     .metric strong { display: block; margin-top: 6px; font-size: 22px; font-weight: 750; letter-spacing: -.5px; overflow-wrap: anywhere; }
@@ -167,6 +169,17 @@
     .metric.minor strong { display: inline; margin: 0; font-size: inherit; letter-spacing: 0; }
     .metric.minor small { display: inline; margin: 0; font-size: 12px; }
     .decision-summary { margin-bottom: 12px; }
+    /* Year view: monthly table with the month always visible while scrolling sideways. */
+    #year-table table { min-width: 860px; }
+    #year-table caption { caption-side: top; padding: 0 0 6px; color: var(--mut); font-size: 12px; text-align: left; }
+    #year-table th:first-child, #year-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surf); }
+    #year-table tfoot td { border-top: 2px solid var(--line); color: var(--ink); font-weight: 700; }
+    #year-table td.spend { font-weight: 700; }
+    td.positive { color: var(--good); }
+    td.negative { color: var(--bad); }
+    .month-tag { margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--soft); color: var(--ink2); font-size: 10.5px; font-weight: 600; }
+    #year-categories .bar-row { grid-template-columns: minmax(0, 170px) minmax(0, 1fr) auto; }
+    .axis-label.current { fill: var(--ink); font-weight: 700; }
     .decision-summary strong { font-size: 30px; }
 
     /* Charts and lists */
@@ -267,7 +280,7 @@
       .topbar { align-items: flex-start; }
       .top-actions .button { min-height: 38px; padding: 7px 9px; font-size: 13px; }
       .config-form { grid-template-columns: 1fr; }
-      .metrics, .month-summary .metrics { grid-template-columns: 1fr; gap: 10px; }
+      .metrics, .month-summary .metrics, .month-summary .metrics.single-row { grid-template-columns: 1fr; gap: 10px; }
       .toolbar { align-items: flex-start; }
       .toolbar-group { width: 100%; }
       .month-chips { margin-right: -14px; padding-right: 14px; }
@@ -420,24 +433,24 @@
               <span class="select-button"><select id="year-select" name="year" aria-label="Año para mostrar"></select></span>
             </div>
           </div>
-          <div class="metrics" id="year-metrics"></div>
+          <div id="year-metrics" class="month-summary"></div>
           <article class="card">
-            <div class="card-header"><div><h3>Ingresos y gastos</h3><p>Ingresos confirmados frente al gasto decidido de cada mes.</p></div></div>
+            <div class="card-header"><div><h3>Ingresos y gastos</h3><p>Ingresos confirmados frente al gasto decidido de cada mes. El mes en curso se ve más claro: aún pueden llegar avisos.</p></div></div>
             <div id="year-income-chart" class="chart-wrap"></div>
           </article>
           <article class="card">
-            <div class="card-header"><div><h3>Totales mensuales por categoría</h3><p>Las columnas apiladas representan las categorías decididas.</p></div></div>
+            <div class="card-header"><div><h3>Categorías del año</h3><p>Gasto personal y familiar decidido; el porcentaje es sobre el total de categorías.</p></div></div>
+            <div id="year-categories" class="rank-list"></div>
+          </article>
+          <article class="card">
+            <div class="card-header"><div><h3>Totales mensuales por categoría</h3><p>Cada columna apila las categorías decididas, de mayor a menor gasto del año.</p></div></div>
             <div id="year-chart" class="chart-wrap"></div>
             <div id="year-category-legend" class="legend-inline"></div>
           </article>
-          <article class="card" style="margin-top:14px">
-            <div class="card-header"><div><h3>Resumen por mes</h3><p>Pendiente se muestra aparte y no se incluye en los totales decididos.</p></div></div>
+          <article class="card">
+            <div class="card-header"><div><h3>Resumen por mes</h3><p>Toca un mes para abrirlo. Lo pendiente no suma en el gasto hasta que lo decidas.</p></div></div>
             <p id="year-coverage-note" class="alert warning" role="note"></p>
             <div id="year-table" class="table-wrap"></div>
-          </article>
-          <article class="card" style="margin-top:14px">
-            <div class="card-header"><div><h3>Categorías del año</h3><p>Solo decisiones personales y familiares en la moneda seleccionada.</p></div></div>
-            <div id="year-categories" class="rank-list"></div>
           </article>
         </section>
 
@@ -772,6 +785,69 @@
         detail.append(body);
         return detail;
       }
+      // Bar and legend of a spending card: in the household view personal spending is shown
+      // per member; family is one item.
+      function appendSpendSplit(card, personal, family) {
+        const parts = state.owner === "hogar"
+          ? [
+            ...safeArray(state.data.owners).map((owner, index) => [
+              `Personal ${owner.label}`, personal.filter(tx => tx.owner === owner.id), index ? palette[3] : palette[0]
+            ]),
+            ["Familiar", family, palette[1]]
+          ]
+          : [["Personal", personal, palette[0]], ["Familiar", family, palette[1]]];
+        if (sum(personal) + sum(family) > 0) {
+          const bar = el("div", "split-bar");
+          bar.setAttribute("role", "img");
+          bar.setAttribute("aria-label", parts.map(([name, rows]) => `${name} ${formatMoney(sum(rows))}`).join(", "));
+          parts.forEach(([, rows, color]) => {
+            const amount = sum(rows);
+            if (amount <= 0) return;
+            const part = el("span");
+            part.style.flex = `${amount} 0 0`;
+            part.style.backgroundColor = color;
+            bar.append(part);
+          });
+          card.append(bar);
+        }
+        const split = el("div", "split-legend");
+        parts.forEach(([name, rows, color]) => {
+          const item = el("span");
+          const swatch = el("span", "swatch");
+          swatch.style.backgroundColor = color;
+          item.append(swatch, el("span", "", `${name} ${formatMoney(sum(rows))} · ${rows.length}`));
+          split.append(item);
+        });
+        card.append(split);
+      }
+      // Headline cards of the month and year summaries. "Por decidir" opens the Decision tab
+      // and only appears while something is pending; otherwise the other three share one row.
+      function summaryHeroes(cards, pending, pendingIncomes) {
+        const heroes = el("div", "metrics");
+        heroes.append(...cards);
+        if (pending.length + pendingIncomes.length) heroes.append(pendingCard(pending, pendingIncomes));
+        else heroes.classList.add("single-row");
+        return heroes;
+      }
+      function pendingCard(pending, pendingIncomes) {
+        const toDecide = pending.length + pendingIncomes.length;
+        const destinations = new Set([...pending, ...pendingIncomes].map(tx => `${tx.owner}|${tx.group}`)).size;
+        const review = el("button", "metric hero action");
+        review.type = "button";
+        review.append(
+          el("span", "label", "Por decidir"),
+          el("strong", "", String(toDecide)),
+          el("small", "", `Faltan por decidir ${destinations} ${destinations === 1 ? "destino" : "destinos"} · ${formatMoney(sum(pending))} en gastos que aún no suman. Revisar →`)
+        );
+        review.addEventListener("click", () => selectTab("decisions"));
+        return review;
+      }
+      // Amount without the currency, for tables whose caption names it once.
+      function formatAmount(minor) {
+        const amount = Number.isSafeInteger(minor) ? minor / 100 : 0;
+        return new Intl.NumberFormat("es", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+      }
+      const capitalize = text => text.charAt(0).toLocaleUpperCase("es") + text.slice(1);
       function makeMetric(label, value, note = "") {
         const box = el("div", "metric");
         box.append(el("span", "label", label), document.createTextNode(" "), el("strong", "", value));
@@ -1148,38 +1224,7 @@
             : "Total decidido: personal + familiar"
         );
         spend.classList.add("hero");
-        // In the household view personal spending is shown per member; family is one item.
-        const parts = state.owner === "hogar"
-          ? [
-            ...safeArray(state.data.owners).map((owner, index) => [
-              `Personal ${owner.label}`, personal.filter(tx => tx.owner === owner.id), index ? palette[3] : palette[0]
-            ]),
-            ["Familiar", family, palette[1]]
-          ]
-          : [["Personal", personal, palette[0]], ["Familiar", family, palette[1]]];
-        if (gross > 0) {
-          const bar = el("div", "split-bar");
-          bar.setAttribute("role", "img");
-          bar.setAttribute("aria-label", parts.map(([name, rows]) => `${name} ${formatMoney(sum(rows))}`).join(", "));
-          parts.forEach(([, rows, color]) => {
-            const amount = sum(rows);
-            if (amount <= 0) return;
-            const part = el("span");
-            part.style.flex = `${amount} 0 0`;
-            part.style.backgroundColor = color;
-            bar.append(part);
-          });
-          spend.append(bar);
-        }
-        const split = el("div", "split-legend");
-        parts.forEach(([name, rows, color]) => {
-          const item = el("span");
-          const swatch = el("span", "swatch");
-          swatch.style.backgroundColor = color;
-          item.append(swatch, el("span", "", `${name} ${formatMoney(sum(rows))} · ${rows.length}`));
-          split.append(item);
-        });
-        spend.append(split);
+        appendSpendSplit(spend, personal, family);
 
         const income = makeMetric(
           "Ingresos", formatMoney(incomeTotal),
@@ -1196,20 +1241,7 @@
             : `${balance >= 0 ? "A favor" : "En contra"} · ingresos confirmados − gasto`
         );
         net.classList.add("hero");
-        const toDecide = pending.length + pendingIncomes.length;
-        const destinations = new Set([...pending, ...pendingIncomes].map(tx => `${tx.owner}|${tx.group}`)).size;
-        const review = el("button", "metric hero action");
-        review.type = "button";
-        review.append(
-          el("span", "label", "Por decidir"),
-          el("strong", "", String(toDecide)),
-          el("small", "", toDecide
-            ? `Faltan por decidir ${destinations} ${destinations === 1 ? "destino" : "destinos"} · ${formatMoney(sum(pending))} en gastos que aún no suman. Revisar →`
-            : "Todo lo de este mes está decidido")
-        );
-        review.addEventListener("click", () => selectTab("decisions"));
-        const heroes = el("div", "metrics");
-        heroes.append(spend, income, net, review);
+        const heroes = summaryHeroes([spend, income, net], pending, pendingIncomes);
 
         const strip = el("div", "metric-strip");
         const minor = (label, value, note) => {
@@ -1627,41 +1659,88 @@
             buckets[index].categories.set(category, (buckets[index].categories.get(category) || 0) + tx.amount_minor);
           }
         });
+        const current = currentMonth();
         const available = buckets.filter(bucket => items.some(tx => monthOf(tx) === bucket.month));
         const bucketTotal = bucket => sum(bucket.personal) + sum(bucket.family) - sum(bucket.third);
-        const completedTotals = available.map(bucketTotal);
-        const average = completedTotals.length ? Math.round(completedTotals.reduce((a, b) => a + b, 0) / completedTotals.length) : 0;
+        const yearSpend = available.reduce((total, bucket) => total + bucketTotal(bucket), 0);
+        // The month in progress would pull the average down, so it only counts closed months.
+        const closed = available.filter(bucket => bucket.month < current);
+        const average = closed.length ? Math.round(closed.reduce((total, bucket) => total + bucketTotal(bucket), 0) / closed.length) : 0;
         const highest = available.length ? available.reduce((best, bucket) => bucketTotal(bucket) > bucketTotal(best) ? bucket : best) : null;
         const categoryTotals = new Map();
         counted(items).forEach(tx => {
           const category = itemText(tx.category);
           categoryTotals.set(category, (categoryTotals.get(category) || 0) + tx.amount_minor);
         });
-        const leadingCategory = Array.from(categoryTotals).sort((a, b) => b[1] - a[1])[0];
         const yearIncome = buckets.reduce((total, bucket) => total + sum(bucket.incomes), 0);
-        const yearSpend = completedTotals.reduce((a, b) => a + b, 0);
         const incomeMonths = buckets.filter(bucket => bucket.incomes.length).length;
-        const yearMetrics = $("#year-metrics");
-        yearMetrics.replaceChildren(
-          makeMetric("Ingresos del año", formatMoney(yearIncome), incomeMonths ? `Promedio ${formatMoney(Math.round(yearIncome / incomeMonths))} en ${incomeMonths} meses con ingresos confirmados` : "Sin ingresos confirmados"),
-          makeMetric("Ingresos − gastos", formatMoney(yearIncome - yearSpend), `${yearIncome - yearSpend >= 0 ? "A favor" : "En contra"} · acumulado del año`),
-          makeMetric("Promedio mensual", formatMoney(average), `${available.length} meses con importaciones`),
-          makeMetric("Mes más alto", highest ? formatMoney(bucketTotal(highest)) : "—", highest ? monthLabel(highest.month) : "Sin datos"),
-          makeMetric("Categoría principal", leadingCategory ? leadingCategory[0] : "—", leadingCategory ? formatMoney(leadingCategory[1]) : "Sin decisiones"),
-          makeMetric("Total decidido", formatMoney(completedTotals.reduce((a, b) => a + b, 0)), thirdParty(items).length ? `${counted(items).length} movimientos − ${formatMoney(sum(thirdParty(items)))} en abonos de terceros` : `${counted(items).length} movimientos`),
-          makeMetric("Inversiones", formatMoney(netInvestments(items)), "Aportes menos retiros · neto, no saldo"),
-          makeMetric("Retiros de inversión", formatMoney(sum(items.filter(tx => tx.decision === "investment_withdrawal"))), "Fuera de gastos"),
-          makeMetric("Retiro en efectivo", formatMoney(sum(counted(items).filter(tx => tx.category === "Retiro en efectivo"))), "Incluido en gastos")
-        );
+        const personal = buckets.flatMap(bucket => bucket.personal);
+        const family = buckets.flatMap(bucket => bucket.family);
+        const paidBack = buckets.flatMap(bucket => bucket.third);
+        const cash = buckets.flatMap(bucket => bucket.cash);
+        const investments = items.filter(tx => tx.decision === "investment");
+        const withdrawals = items.filter(tx => tx.decision === "investment_withdrawal");
+        const pending = items.filter(tx => tx.decision == null && tx.kind !== "income");
+        const pendingIncomes = items.filter(tx => tx.decision == null && tx.kind === "income");
+        const coverage = renderYearTable(buckets, bucketTotal);
         renderYearIncomeChart(buckets, bucketTotal);
         renderYearChart(buckets);
-        renderYearTable(buckets);
+
+        // Same four headline figures as the month; everything else goes in the slim row below.
+        const shortMonth = bucket => capitalize(monthNames[Number(bucket.month.slice(5, 7)) - 1].slice(0, 3));
+        const range = !available.length ? "Sin meses importados"
+          : available.length === 1 ? shortMonth(available[0])
+            : `${shortMonth(available[0])}–${shortMonth(available[available.length - 1])}`;
+        const moves = personal.length + family.length;
+        const spend = makeMetric(
+          "Gasto del año", formatMoney(yearSpend),
+          `${range} · ${paidBack.length ? `personal + familiar ${formatMoney(sum(personal) + sum(family))} − abonos de terceros ${formatMoney(sum(paidBack))}` : "personal + familiar"} · ${moves} ${moves === 1 ? "movimiento" : "movimientos"}`
+        );
+        spend.classList.add("hero");
+        appendSpendSplit(spend, personal, family);
+        const income = makeMetric(
+          "Ingresos del año", formatMoney(yearIncome),
+          (incomeMonths
+            ? `Promedio ${formatMoney(Math.round(yearIncome / incomeMonths))} en ${incomeMonths} ${incomeMonths === 1 ? "mes" : "meses"} con ingresos confirmados`
+            : "Sin ingresos confirmados")
+            + (pendingIncomes.length ? ` · ${pendingIncomes.length} por confirmar (${formatMoney(sum(pendingIncomes))})` : "")
+        );
+        income.classList.add("hero");
+        const balance = yearIncome - yearSpend;
+        const net = makeMetric(
+          "Balance del año", formatMoney(balance),
+          yearIncome === 0 && yearSpend === 0 ? "Sin ingresos ni gastos decididos"
+            : `${balance >= 0 ? "A favor" : "En contra"} · ingresos confirmados − gasto${pending.length ? ` · sin contar ${formatMoney(sum(pending))} por decidir` : ""}`
+        );
+        net.classList.add("hero");
+        const heroes = summaryHeroes([spend, income, net], pending, pendingIncomes);
+
+        const strip = el("div", "metric-strip");
+        const minor = (label, value, note) => {
+          const chip = makeMetric(label, value, note);
+          chip.classList.add("minor");
+          strip.append(chip);
+        };
+        if (closed.length) minor("Promedio de gasto", formatMoney(average), `por mes cerrado · ${closed.length} ${closed.length === 1 ? "mes" : "meses"}`);
+        if (highest && bucketTotal(highest) > 0) minor("Mes de mayor gasto", formatMoney(bucketTotal(highest)), capitalize(monthLabel(highest.month)));
+        if (investments.length || withdrawals.length) {
+          minor("Inversión neta", formatMoney(netInvestments(items)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo · fuera del gasto`);
+        }
+        if (withdrawals.length) minor("Retiros de inversión", formatMoney(sum(withdrawals)), "fuera del gasto");
+        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "ya incluido en el gasto");
+        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
+        if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed}`, "meses transcurridos verificados a mano");
+        $("#year-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
+
         const categoryHost = $("#year-categories");
         categoryHost.replaceChildren();
-        if (!leadingCategory) categoryHost.append(el("div", "empty-state", "Sin categorías decididas este año."));
-        Array.from(categoryTotals).sort((a, b) => b[1] - a[1]).slice(0, 10).forEach(([name, total]) => {
-          const row = el("div", "rank-row");
-          row.append(el("span", "legend-label", name), el("strong", "", formatMoney(total)));
+        const ranked = Array.from(categoryTotals).filter(([, total]) => total > 0).sort((a, b) => b[1] - a[1]);
+        if (!ranked.length) categoryHost.append(el("div", "empty-state", "Sin categorías decididas este año."));
+        const categorySum = ranked.reduce((total, [, amount]) => total + amount, 0);
+        ranked.slice(0, 12).forEach(([name, total]) => {
+          const share = Math.round(100 * total / categorySum);
+          const row = barRow(`${name} · ${share} %`, total, ranked[0][1], `${name}: ${formatMoney(total)} · ${share} % del gasto por categorías`);
+          row.querySelector(".bar-fill").style.backgroundColor = categoryColor(name);
           categoryHost.append(row);
         });
       }
@@ -1684,10 +1763,10 @@
         const chartWidth = width - left - right, chartHeight = height - top - bottom;
         const svg = svgEl("svg", { id: "year-income-chart-svg", viewBox: `0 0 ${width} ${height}`, class: "chart", role: "img", "aria-label": "Barras mensuales de ingresos y gastos" });
         const title = svgEl("title"); title.textContent = `Ingresos y gastos de ${state.year}`; svg.append(title);
-        for (let tick = 0; tick <= 2; tick++) {
-          const y = top + chartHeight * tick / 2;
+        for (let tick = 0; tick <= 4; tick++) {
+          const y = top + chartHeight * tick / 4;
           svg.append(svgEl("line", { x1: left, y1: y, x2: width - right, y2: y, class: "chart-grid" }));
-          const label = axisAmount(Math.round(max * (2 - tick) / 2));
+          const label = axisAmount(Math.round(max * (4 - tick) / 4));
           label.setAttribute("x", String(left - 8));
           label.setAttribute("y", String(y + 4));
           label.setAttribute("text-anchor", "end");
@@ -1695,20 +1774,22 @@
         }
         const band = chartWidth / 12;
         const colors = [cssColor("--s6"), cssColor("--s2")];
+        const current = currentMonth();
         buckets.forEach((bucket, index) => {
           const barWidth = band * .34;
+          const inProgress = bucket.month === current;
           [[sum(bucket.incomes), "Ingresos"], [Math.max(0, spendOf(bucket)), "Gastos"]].forEach(([amount, name], position) => {
             const barHeight = chartHeight * amount / max;
             if (!barHeight) return;
             const rect = svgEl("rect", {
               x: left + band * index + band * .12 + position * (barWidth + 2), y: top + chartHeight - barHeight,
-              width: barWidth, height: barHeight, fill: colors[position]
+              width: barWidth, height: barHeight, fill: colors[position], "fill-opacity": inProgress ? .45 : 1
             });
-            setTip(rect, `${monthLabel(bucket.month)} · ${name}: ${formatMoney(amount)}`);
+            setTip(rect, `${monthLabel(bucket.month)}${inProgress ? " (en curso)" : ""} · ${name}: ${formatMoney(amount)}`);
             jumpToMonth(rect, bucket.month);
             svg.append(rect);
           });
-          const label = svgEl("text", { x: left + band * index + band / 2, y: height - 12, "text-anchor": "middle", class: "axis-label" });
+          const label = svgEl("text", { x: left + band * index + band / 2, y: height - 12, "text-anchor": "middle", class: inProgress ? "axis-label current" : "axis-label" });
           label.textContent = monthNames[index].slice(0, 3);
           svg.append(label);
         });
@@ -1727,7 +1808,9 @@
       function renderYearChart(buckets) {
         const host = $("#year-chart");
         host.replaceChildren();
-        const categories = Array.from(new Set(buckets.flatMap(bucket => Array.from(bucket.categories.keys())))).sort((a, b) => a.localeCompare(b, "es"));
+        const yearly = new Map();
+        buckets.forEach(bucket => bucket.categories.forEach((amount, category) => yearly.set(category, (yearly.get(category) || 0) + amount)));
+        const categories = Array.from(yearly.keys()).sort((a, b) => yearly.get(b) - yearly.get(a) || a.localeCompare(b, "es"));
         const legend = $("#year-category-legend");
         legend.replaceChildren();
         categories.forEach(category => {
@@ -1753,9 +1836,11 @@
           svg.append(label);
         }
         const band = chartWidth / 12;
+        const current = currentMonth();
         buckets.forEach((bucket, index) => {
           const barWidth = band * .54;
           const x = left + band * index + (band - barWidth) / 2;
+          const inProgress = bucket.month === current;
           let stackedHeight = 0;
           categories.forEach(category => {
             const amount = Math.max(0, bucket.categories.get(category) || 0);
@@ -1763,51 +1848,76 @@
             if (segmentHeight) {
               const rect = svgEl("rect", {
                 x, y: top + chartHeight - stackedHeight - segmentHeight, width: barWidth, height: segmentHeight,
-                fill: categoryColor(category)
+                fill: categoryColor(category), "fill-opacity": inProgress ? .45 : 1
               });
-              setTip(rect, `${monthLabel(bucket.month)} · ${category}: ${formatMoney(amount)}`);
+              setTip(rect, `${monthLabel(bucket.month)}${inProgress ? " (en curso)" : ""} · ${category}: ${formatMoney(amount)}`);
               jumpToMonth(rect, bucket.month);
               svg.append(rect);
             }
             stackedHeight += segmentHeight;
           });
-          const label = svgEl("text", { x: left + band * index + band / 2, y: height - 13, "text-anchor": "middle", class: "axis-label" });
+          const label = svgEl("text", { x: left + band * index + band / 2, y: height - 13, "text-anchor": "middle", class: inProgress ? "axis-label current" : "axis-label" });
           label.textContent = monthNames[index].slice(0, 3);
           svg.append(label);
         });
         host.append(svg);
       }
 
-      function renderYearTable(buckets) {
+      // One row per month plus the year's total. Amounts go without the currency, which the
+      // caption names once. Returns how many elapsed months were verified by hand.
+      function renderYearTable(buckets, bucketTotal) {
         const host = $("#year-table");
         host.replaceChildren();
         const current = currentMonth();
-        const elapsedUnverified = [];
         const coverageByMonth = new Map(safeArray(state.data.coverage).filter(entry => entry && typeof entry.month === "string").map(entry => [entry.month, entry]));
         const importedMonths = new Set(transactions().map(monthOf).filter(Boolean));
-        $("#year-coverage-note").textContent = `Los meses transcurridos que no aparecen como verificados manualmente no deben interpretarse como gasto cero. Un guion (—) y “Sin importación” indican que no hay movimientos de esta moneda registrados para ese mes.`;
         const table = document.createElement("table");
+        table.append(el("caption", "", `Importes en ${state.currency}. Un guion (—) significa que no hubo movimientos de ese tipo, nunca gasto cero.`));
         const head = document.createElement("thead");
         const header = document.createElement("tr");
-        ["Mes", "Personal", "Familiar", "Abonos de terceros", "Ingresos", "Balance", "Inversiones", "Retiro en efectivo", "Pendiente", "Cobertura"].forEach((label, index) => {
-          const th = el("th", index > 0 && index < 9 ? "numeric" : "", label);
+        const columns = ["Mes", "Gasto", "Personal", "Familiar", "Abonos", "Ingresos", "Balance", "Inversiones", "Efectivo", "Pendiente", "Cobertura"];
+        columns.forEach((label, index) => {
+          const th = el("th", index > 0 && index < columns.length - 1 ? "numeric" : "", label);
+          th.scope = "col";
           header.append(th);
         });
         head.append(header);
+        // A kind of movement the month did not have shows a dash, not 0,00; the balance is always computed.
+        const amountCell = (rows, amount, text = formatAmount(amount)) => rows.length
+          ? el("td", "numeric", text)
+          : el("td", "numeric empty-cell", "—");
+        const balanceCell = amount => el("td", `numeric ${amount > 0 ? "positive" : amount < 0 ? "negative" : ""}`.trim(),
+          `${amount > 0 ? "+" : amount < 0 ? "−" : ""}${formatAmount(Math.abs(amount))}`);
+        const pill = (text, kind = "") => {
+          const cell = el("td");
+          cell.append(el("span", `status-pill ${kind}`.trim(), text));
+          return cell;
+        };
+        const cells = (rows, balance) => [
+          amountCell([...rows.personal, ...rows.family, ...rows.third], balance.spend),
+          amountCell(rows.personal, sum(rows.personal)),
+          amountCell(rows.family, sum(rows.family)),
+          amountCell(rows.third, sum(rows.third), `−${formatAmount(sum(rows.third))}`),
+          amountCell(rows.incomes, sum(rows.incomes)),
+          balanceCell(sum(rows.incomes) - balance.spend),
+          amountCell(rows.investments, netInvestments(rows.investments)),
+          amountCell(rows.cash, sum(rows.cash)),
+          amountCell(rows.pending, sum(rows.pending))
+        ];
+        let elapsed = 0, reviewed = 0;
         const body = document.createElement("tbody");
         buckets.forEach(bucket => {
           const tr = document.createElement("tr");
           const coverage = coverageByMonth.get(bucket.month);
           const hasImports = importedMonths.has(bucket.month);
-          const isFuture = bucket.month > current;
-          const status = isFuture ? "Futuro"
-            : !hasImports ? `Sin importación · ${coverage && coverage.status === "reviewed" ? "revisado manualmente" : coverage && coverage.status === "partial" ? "parcial" : "sin verificar"}`
-              : coverage && coverage.status === "reviewed" ? "Revisado manualmente"
-                : coverage && coverage.status === "partial" ? "Parcial" : "Sin verificar";
-          if (bucket.month < current && status !== "Revisado manualmente") elapsedUnverified.push(`${monthLabel(bucket.month)}: ${status.toLocaleLowerCase("es")}`);
+          const isReviewed = Boolean(coverage && coverage.status === "reviewed");
+          const isPartial = Boolean(coverage && coverage.status === "partial");
+          if (bucket.month < current) {
+            elapsed++;
+            if (isReviewed) reviewed++;
+          }
           const monthCell = el("td");
-          const name = monthLabel(bucket.month);
-          const title = name.charAt(0).toLocaleUpperCase("es") + name.slice(1);
+          const title = capitalize(monthLabel(bucket.month));
           if (safeArray(state.months).includes(bucket.month)) {
             const open = el("button", "link-button", title);
             open.type = "button";
@@ -1815,43 +1925,50 @@
             open.addEventListener("click", () => goToMonth(bucket.month));
             monthCell.append(open);
           } else monthCell.textContent = title;
+          if (bucket.month === current) monthCell.append(el("span", "month-tag", "en curso"));
           // A month without movements is not a month that cost zero: the current and coming
           // months wait for the bank's notices, and an elapsed one shows a dash.
           if (!hasImports && bucket.month >= current) {
             const waiting = el("td", "waiting", "Sin notificaciones del banco aún");
-            waiting.colSpan = 9;
+            waiting.colSpan = columns.length - 1;
             tr.append(monthCell, waiting);
             body.append(tr);
             return;
           }
+          const status = bucket.month > current ? pill("Futuro")
+            : isReviewed ? pill("Revisado", "reviewed")
+              : isPartial ? pill("Parcial", "partial")
+                : pill(hasImports ? "Sin verificar" : "Sin importación");
           if (!hasImports) {
-            tr.append(monthCell, ...Array.from({ length: 8 }, () => el("td", "numeric empty-cell", "—")), el("td", "", status));
+            tr.append(monthCell, ...Array.from({ length: columns.length - 2 }, () => el("td", "numeric empty-cell", "—")), status);
             body.append(tr);
             return;
           }
-          // A kind of movement the month did not have shows a dash, not 0,00; the balance is always computed.
-          const amountCell = (rows, text) => rows.length
-            ? el("td", "numeric", text)
-            : el("td", "numeric empty-cell", "—");
-          tr.append(
-            monthCell,
-            amountCell(bucket.personal, formatMoney(sum(bucket.personal))),
-            amountCell(bucket.family, formatMoney(sum(bucket.family))),
-            amountCell(bucket.third, `−${formatMoney(sum(bucket.third))}`),
-            amountCell(bucket.incomes, formatMoney(sum(bucket.incomes))),
-            el("td", "numeric", formatMoney(sum(bucket.incomes) - sum(bucket.personal) - sum(bucket.family) + sum(bucket.third))),
-            amountCell(bucket.investments, formatMoney(netInvestments(bucket.investments))),
-            amountCell(bucket.cash, formatMoney(sum(bucket.cash))),
-            amountCell(bucket.pending, formatMoney(sum(bucket.pending))),
-            el("td", "", status)
-          );
+          const spend = bucketTotal(bucket);
+          tr.append(monthCell, ...cells(bucket, { spend }), status);
+          tr.children[1].classList.add("spend");
           body.append(tr);
         });
-        table.append(head, body);
+        const all = key => buckets.flatMap(bucket => bucket[key]);
+        const totals = { personal: all("personal"), family: all("family"), third: all("third"), incomes: all("incomes"), investments: all("investments"), cash: all("cash"), pending: all("pending") };
+        const foot = document.createElement("tfoot");
+        const totalRow = document.createElement("tr");
+        totalRow.append(
+          el("td", "", "Total del año"),
+          ...cells(totals, { spend: buckets.reduce((total, bucket) => total + bucketTotal(bucket), 0) }),
+          el("td", "", elapsed ? `${reviewed} de ${elapsed} revisados` : "")
+        );
+        totalRow.children[1].classList.add("spend");
+        foot.append(totalRow);
+        table.append(head, body, foot);
         host.append(table);
-        if (elapsedUnverified.length) {
-          $("#year-coverage-note").textContent += ` Meses transcurridos sin verificación manual completa: ${elapsedUnverified.join("; ")}.`;
-        }
+        const note = $("#year-coverage-note");
+        note.hidden = elapsed === 0;
+        note.className = reviewed < elapsed ? "alert warning" : "alert";
+        note.textContent = reviewed < elapsed
+          ? `${reviewed} de ${elapsed} ${elapsed === 1 ? "mes transcurrido está verificado" : "meses transcurridos están verificados"} a mano. En los demás pudo faltar algún aviso del banco: un mes sin verificar no es un mes completo.`
+          : `${elapsed === 1 ? "El mes transcurrido está verificado" : `Los ${elapsed} meses transcurridos están verificados`} a mano.`;
+        return { elapsed, reviewed };
       }
 
       function renderDecisions() {
