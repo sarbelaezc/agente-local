@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 from mail_invoices.documents import InvoiceCandidate, parse_money
-from mail_invoices.workbook import InvoiceWorkbook, RecordResult, ReviewedInvoice
+from mail_invoices.workbook import ReviewedInvoice
 
 
 @dataclass(frozen=True)
@@ -38,14 +38,3 @@ def suggested_company(suggestions: dict[str, str], legal_name: str) -> str:
     """Uses a unique historical company or falls back to the document legal name."""
     normalized_name = " ".join(legal_name.split())
     return suggestions.get(normalized_name.casefold(), "") or normalized_name
-
-
-def record_approved_batch(
-    store: InvoiceWorkbook,
-    invoices: list[ReviewedInvoice],
-    *,
-    approved: bool,
-) -> list[RecordResult] | None:
-    if not approved:
-        return None
-    return store.record(invoices)

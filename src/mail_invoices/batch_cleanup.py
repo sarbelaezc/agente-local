@@ -5,8 +5,8 @@ Three groups are deleted, and nothing else:
 - messages of the current configuration already archived (``moved``) more than
   ``older_than_days`` ago: Excel and the mailbox already hold the result;
 - pending messages from an ``excluded_senders`` entry, which the panel never shows;
-- every record of another configuration (the retired Opera reader, or another
-  workbook or sheet), which the agent never acts on.
+- every record of another configuration (another app, workbook or sheet, such as
+  the records of the reader that preceded Graph), which the agent never acts on.
 
 Approved, registered, moving and blocked messages of the current configuration are
 never deleted. Without ``apply`` it only reports counts; with it, the database is
@@ -98,7 +98,7 @@ def cleanup_batches(
         print(f"- Archivados hace mas de {older_than_days} dias: {len(plan.archived)}")
         print(f"- Pendientes de remitentes excluidos: {len(plan.excluded_pending)}")
         print(
-            f"- De otra configuracion (lector retirado de Opera u otro libro u hoja): "
+            f"- De otra configuracion (otra app, libro u hoja): "
             f"{len(plan.other_configuration)}{f' ({others})' if others else ''}"
         )
         print(f"- Se conservan: {plan.kept}")

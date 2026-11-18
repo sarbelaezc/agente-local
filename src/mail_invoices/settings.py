@@ -100,8 +100,7 @@ def load_settings(path: Path) -> MailSettings:
     client_id = str(raw.get("graph_client_id") or "").strip()
     if not CLIENT_ID.fullmatch(client_id):
         raise ValueError(
-            "Configure invoices.graph_client_id with the Application (client) ID of the invoice "
-            "app in Azure; the Opera reader was retired and opera_executable/profile_dir are ignored"
+            "Configure invoices.graph_client_id with the Application (client) ID of the Azure app"
         )
     authority = str(raw.get("graph_authority", "consumers"))
     if authority not in AUTHORITIES:

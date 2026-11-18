@@ -68,7 +68,7 @@ proyecto, que Git ignora:
 | `.local\MonthlyCloseAgent\statements.json` | Contraseña de los extractos PDF y remitentes exactos aprobados (texto plano, fuera de Git) |
 | `.local\MonthlyCloseAgent\logs\` | Un registro por ejecución del cierre mensual (`AAAAMMDD-HHMMSS-<comando>.log`); se conservan los 10 más recientes ([detalle](#registro-de-ejecuciones)) |
 | `.local\ImportManuela\` | Archivos exportados del panel de Manuela que lee `import-manuela` (movimientos, decisiones por destino y totales de paridad) |
-| `.local\MailInvoiceAgent\` | `graph_token_cache.bin` (sesión de Microsoft de facturas), copias de seguridad del libro, `tessdata`, decisiones de clasificación y estados de lotes. `OperaProfile\` es del lector retirado y se puede borrar |
+| `.local\MailInvoiceAgent\` | `graph_token_cache.bin` (sesión de Microsoft de facturas), copias de seguridad del libro, `tessdata`, decisiones de clasificación y estados de lotes |
 | `.local\MailInvoiceAgent\logs\` | Un registro por ejecución de facturas (`AAAAMMDD-HHMMSS-<modo>.log`); se conservan los 10 más recientes ([detalle](#registro-de-ejecuciones)) |
 | `config\settings.yaml` | Configuración personal de facturas (también ignorada por Git) |
 
@@ -80,9 +80,8 @@ siempre una carpeta temporal y nunca leen ni escriben `.local`.
 
 Los estados de lotes de facturas se asocian a la app de Graph
 (`invoices.graph_client_id`), al libro y a la hoja. Si cambias alguno, los lotes
-guardados dejan de reconocerse. Los lotes del lector de Opera quedaron en su
-propio ámbito: se conservan en la base, pero el flujo nuevo nunca actúa sobre
-ellos.
+guardados dejan de reconocerse: quedan en su propio ámbito, el flujo nunca actúa
+sobre ellos y la [limpieza de lotes](#limpieza-de-lotes) los borra.
 
 Antes estos datos estaban en `%LOCALAPPDATA%\MonthlyCloseAgent` y
 `%LOCALAPPDATA%\MailInvoiceAgent`; esas carpetas ya no se usan.
@@ -436,11 +435,6 @@ capital, intereses, seguros y total), se configura en
   un pago del registro queda anotado para que lo marques «No cuenta».
 - **Contexto del modelo:** los créditos registrados se le pasan a Ollama como
   `known_credits`, para que un aviso de pago a esos créditos sea `loan`.
-
-**Tasa USD sugerida.** Un movimiento USD pendiente puede llevar una tasa sugerida
-(por ejemplo, el promedio de las tasas que asignaste ese mes). Queda guardada y
-auditada como `exchange-suggested`, aparece en el campo de tasa del panel y solo se
-usa cuando una persona decide el movimiento.
 
 **Ingresos en la vista Año.** Muestra los ingresos del año, el balance del año, una
 gráfica mensual de ingresos frente a gastos y las columnas Ingresos y Balance en el
@@ -1378,7 +1372,7 @@ Todas las reglas del proyecto están en un solo archivo, [`AGENTS.md`](AGENTS.md
 | [`AGENTS.md`](AGENTS.md) | Copilot directamente; Claude Code a través de `CLAUDE.md` | Reglas del proyecto, seguridad y catálogo/selección de skills |
 | [`CLAUDE.md`](CLAUDE.md) | Claude Code | Una sola línea, `@AGENTS.md`, porque Claude Code no lee `AGENTS.md` por sí solo |
 | [`.claude/skills/`](.claude/skills/) | Ambos | Única ubicación de las skills compartidas |
-| [`.claude/settings.json`](.claude/settings.json) | Claude Code | Permisos compartidos: impide leer los tokens de Microsoft y de Google, el cliente OAuth de Gmail y el perfil de Opera retirado |
+| [`.claude/settings.json`](.claude/settings.json) | Claude Code | Permisos compartidos: impide leer los tokens de Microsoft y de Google y el cliente OAuth de Gmail |
 
 Para cambiar una regla, edita solo `AGENTS.md`. Los ajustes
 personales de Claude Code van en `.claude/settings.local.json`, que Git ignora.
@@ -1389,7 +1383,7 @@ El catálogo y los criterios para elegir la skill adecuada se mantienen solo en
 
 ## Aviso
 
-Proyecto personal y experimental, sin relación con Microsoft ni con Opera.
+Proyecto personal y experimental, sin relación con Microsoft ni con Google.
 Automatiza interfaces web de terceros: cada usuario es responsable de cumplir los
 términos de servicio de esos productos y las políticas de su organización.
 Nunca subas al repositorio tus archivos de configuración personales, Excel,
@@ -1619,9 +1613,9 @@ supervisado y la aprobación explícita de su destino.
 .\.venv\Scripts\python.exe -m mail_invoices.main --config config\settings.yaml --process-invoice-batch --batch-size 10 --days 90
 ```
 
-Prepara hasta 10 correos por defecto (entre 1 y 20 con `--batch-size`; el límite
-anterior de 5 era para Opera: con Graph el tiempo lo marca Ollama, unos 3 a 10 s por
-correo, y lo que se puede revisar de una vez en el panel), independiente
+Prepara hasta 10 correos por defecto (entre 1 y 20 con `--batch-size`; el tiempo
+lo marca Ollama, unos 3 a 10 s por correo, y lo que se puede revisar de una vez en
+el panel), independiente
 de `invoices.batch_limit`, que solo usa `--classify-invoices`). Cada ejecución abre
 una sola sesión de Graph y la reutiliza para clasificar, revisar y archivar;
 `--resume-invoice-batch` sin pendientes termina sin conectarse al buzón. El panel muestra las facturas
@@ -1697,18 +1691,11 @@ revise manualmente ese correo antes de volver a aprobarlo. El agente no reemplaz
 el digest aprobado con el cuerpo nuevo ni mueve el correo usando una aprobación
 obsoleta.
 No hay ejecución programada ni aprobación automática: cada lote necesita a una
-persona en el panel, por diseño. Historia: un piloto real supervisado **con el
-lector de Opera** (ya retirado) terminó con
-cuatro correos movidos y verificados y uno bloqueado porque su cuerpo, leído desde
-la página, cambió después de la revisión. El
-candidato con discrepancia entre asunto y PDF pudo corregirse en la UI; la factura
-se validó con su PDF. Ese piloto tuvo resultado mixto; el lector por Graph lo
-reemplazó y sí se validó con el buzón real. El correo bloqueado requiere reconciliación manual antes de
-otra aprobación. Las pruebas cubren
-aprobación conjunta, persistencia, cancelación, recuperación sin duplicar registros,
-bloqueo de ejecuciones simultáneas y, con un Graph simulado, la lectura, el
-movimiento y su verificación. Esto no valida la precisión general del modelo ni convierte el piloto
-mixto en una validación exitosa.
+persona en el panel, por diseño. Las pruebas cubren aprobación conjunta,
+persistencia, cancelación, recuperación sin duplicar registros, bloqueo de
+ejecuciones simultáneas y, con un Graph simulado, la lectura, el movimiento y su
+verificación; además se validó con ejecuciones supervisadas en el buzón real.
+Esto no valida la precisión general del modelo: cada campo se revisa en el panel.
 
 ### Limpieza de lotes
 
@@ -1724,7 +1711,7 @@ Borra de `invoice-batches.sqlite3` lo que ya no hace falta conservar, y nada má
 |---|---|
 | Correos archivados (`moved`) de la configuración actual | Si se archivaron hace más de `-OlderThanDays` días (30 por defecto; 0 borra todos). Excel y el buzón ya tienen el resultado |
 | Pendientes de un remitente de `excluded_senders` | Siempre: el panel ya no los muestra |
-| Registros de otra configuración: el lector retirado de Opera, u otro libro u hoja | Todos, en cualquier estado: el agente nunca vuelve a usarlos |
+| Registros de otra configuración: otra app, libro u hoja (incluidos los del lector anterior a Graph) | Todos, en cualquier estado: el agente nunca vuelve a usarlos |
 
 Nunca borra, en la configuración actual, un correo `approved`, `registered`,
 `moving` o `blocked`, ni un pendiente normal; tampoco toca el Excel, el buzón ni
@@ -1770,16 +1757,6 @@ por el modelo y los rechazados. No escribe en el Excel ni toca el correo.
 
 Usa `--no-model` para ver solo el resultado de reglas y OCR, sin Ollama.
 
-### Modos retirados
-
-`--process-one-invoice`, `--download-attachments` y `--review-invoices` se
-eliminaron. El lote supervisado (`--process-invoice-batch`, con `--batch-size 1`
-para un solo correo) cubre descarga, revisión, registro y archivo, y además usa
-el bloqueo de ejecución única y los estados recuperables. Una prueba real previa
-con `--process-one-invoice` registró y movió un correo verificado; ese resultado
-no se ha repetido con el lote de un correo. Para consultas de solo lectura siguen
-`--scan-inbox`, `--classify-invoices` y `--analyze-file`.
-
 ### Requisitos de OCR
 
 1. `winget install --id UB-Mannheim.TesseractOCR -e`
@@ -1817,8 +1794,7 @@ valores y el formato antes de reemplazar el libro. No agrega filas.
 
 Las pruebas del escritor usan únicamente libros sintéticos en directorios temporales;
 nunca escriben en el Excel real. La interfaz solicita aprobación explícita antes de
-llamar al registro. La simulación de carpetas se probó con Outlook real usando el
-lector de Opera; con Graph falta validarla con el buzón real. Los lotes pequeños exigen aprobación para el movimiento real,
+llamar al registro. La simulación de carpetas se validó con el buzón real por Graph. Los lotes pequeños exigen aprobación para el movimiento real,
 como se indica arriba.
 
 La configuración personal está en `config/settings.yaml`, excluida de Git.
@@ -1836,9 +1812,7 @@ están bajo `.local\MailInvoiceAgent`.
 ### Acceso al buzón de facturas por Microsoft Graph
 
 Facturas lee los correos y archiva los aprobados por la API de Microsoft Graph,
-sin navegador. El lector anterior, que automatizaba Outlook Web en Opera con
-Playwright, se retiró: sus selectores, desplazamientos con esperas fijas y la
-lectura del cuerpo desde la página causaban el resultado mixto del piloto.
+sin navegador.
 
 **La misma app del cierre mensual (una sola vez).** Facturas necesita mover
 correos, así que usa el permiso delegado `Mail.ReadWrite`. Por decisión del
@@ -1854,8 +1828,7 @@ solo lee y mueve (ver abajo). Cada función guarda su propia sesión.
 En `config/settings.yaml`, dentro de `invoices`, define `graph_client_id` con el
 mismo `Application (client) ID` de `graph_client_id` en
 `.local\MonthlyCloseAgent\runtime.json` y, opcionalmente,
-`graph_authority: consumers` (por defecto) o `common`. Las claves
-`opera_executable` y `profile_dir` se ignoran y puedes borrarlas.
+`graph_authority: consumers` (por defecto) o `common`.
 
 **Remitentes excluidos.** `invoices.excluded_senders` es una lista de direcciones
 exactas o `@dominio` cuyos correos nunca son facturas para registrar; por ejemplo,
