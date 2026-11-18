@@ -440,7 +440,7 @@ capital, intereses, seguros y total), se configura en
 auditada como `exchange-suggested`, aparece en el campo de tasa del panel y solo se
 usa cuando una persona decide el movimiento.
 
-**Ingresos en la vista Año.** Muestra los ingresos del año, ingresos − gastos, una
+**Ingresos en la vista Año.** Muestra los ingresos del año, el balance del año, una
 gráfica mensual de ingresos frente a gastos y las columnas Ingresos y Balance en el
 resumen por mes, para Santiago, Manuela y Hogar.
 
@@ -788,8 +788,21 @@ El panel local ofrece:
 - Borrar una regla o descartar un aviso de la cola pide confirmación.
 - El panel permite compartir la vista seleccionada mediante la URL, incluye un
   enlace para saltar al contenido y muestra decisiones en tandas de hasta 50.
-- **Año:** comparativa mensual, promedios, mes de mayor gasto, categoría líder y
-  tabla personal/familiar/pendiente. Los meses no conciliados llevan advertencia.
+- **Año:** se lee como el resumen del mes. Arriba van cuatro cifras grandes:
+  **Gasto del año** (rango de meses, movimientos y barra por titular y familiar),
+  **Ingresos del año**, **Balance del año** (indica cuánto queda por decidir) y
+  **Por decidir**, que abre la pestaña Decisión. Debajo, en chips, el promedio de
+  gasto por mes cerrado (sin el mes en curso), el mes de mayor gasto, la inversión
+  neta, los retiros de inversión, el retiro en efectivo y los abonos de terceros
+  solo si existen, y la cobertura («X de N» meses verificados a mano). Siguen la
+  gráfica de ingresos y gastos, **Categorías del año** con barras y porcentaje,
+  las columnas por categoría (de mayor a menor gasto, mismos colores que el mes)
+  y la tabla. En las gráficas el mes en curso se ve más claro.
+  «Resumen por mes» tiene columnas Gasto, Personal, Familiar, Abonos, Ingresos,
+  Balance (con signo y color), Inversiones, Efectivo, Pendiente y Cobertura, una
+  fila «Total del año», importes sin moneda (la nombra el encabezado de la tabla),
+  el mes visible al desplazar en horizontal y la etiqueta «en curso». Si hay meses
+  transcurridos sin verificar, una nota corta lo advierte.
   En «Resumen por mes» los meses empiezan en mayúscula y no se muestra 0,00 donde
   no hubo movimientos: una columna sin movimientos de ese tipo en el mes (por
   ejemplo, sin retiros en efectivo) lleva un guion largo (—), y el Balance siempre
