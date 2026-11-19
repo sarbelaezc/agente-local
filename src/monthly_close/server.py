@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from monthly_close.store import Store
 
 # Changes that can complete or reopen a month, so its reconciliation is checked again.
-RECONCILE_AFTER = {"/api/decision", "/api/decision-group", "/api/failure/dismiss"}
+RECONCILE_AFTER = {"/api/decision", "/api/decision-group", "/api/failure/dismiss", "/api/card-series"}
 
 
 def create_server(store: Store, port: int = 8766) -> HTTPServer:
@@ -134,6 +134,15 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                     if not isinstance(raw.get("message_id"), str):
                         raise ValueError("Aviso invalido.")
                     store.dismiss_failure(raw["message_id"])
+                elif self.path == "/api/card-series":
+                    owner, product, suffix, replaces = (
+                        raw.get("owner"), raw.get("product"), raw.get("suffix"), raw.get("replaces"),
+                    )
+                    if not all(isinstance(value, str) for value in (owner, product, suffix)) or not (
+                        replaces is None or isinstance(replaces, str)
+                    ):
+                        raise ValueError("Respuesta de tarjeta invalida.")
+                    store.decide_card_series(owner, product, suffix, replaces)
                 elif self.path == "/api/coverage":
                     if raw.get("status") != "reviewed":
                         raise ValueError("Solo se permite confirmar una revision manual.")

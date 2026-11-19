@@ -604,3 +604,45 @@ def test_pending_card_hides_when_everything_is_decided_and_the_rest_share_one_ro
         tops = {round(heroes.nth(index).bounding_box()["y"]) for index in range(3)}
         assert len(tops) == 1, (panel, tops)
     assert not errors
+
+
+def test_a_new_card_number_is_asked_in_decisions_with_the_option_of_a_new_card(dashboard):
+    page, store, _, errors = dashboard
+
+    def card(product: str, suffix: str, start: str) -> dict:
+        return {
+            "identity": f"{product}|{suffix}|{start}", "owner": "santiago", "product": product, "suffix": suffix,
+            "period_start": start, "period_end": start[:8] + "28", "movements": 0, "matched": 0, "missing": 0,
+            "balance_minor": None,
+        }
+
+    store.record_statements([
+        card("TARJETA_VISA", "0002", "2026-01-01"), card("TARJETA_VISA", "0002", "2026-02-01"),
+        card("TARJETA_AMEX", "0005", "2026-01-01"), card("TARJETA_VISA", "0009", "2026-03-01"),
+    ], [])
+    store.update_reconciled_coverage(date(2026, 4, 15))
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.locator("#tab-decisions").click()
+    review = page.locator("#card-review")
+    expect(review).to_be_visible()
+    assert "Visa *0009" in review.inner_text()
+    assert "2026-03" in review.inner_text()
+    assert review.locator("option").all_inner_texts() == [
+        "Es la Visa *0002 con número nuevo, último extracto 2026-02",
+        "Es la Amex *0005 con número nuevo, último extracto 2026-01",
+        "Es una tarjeta de crédito nueva",
+    ]
+    # Cancelling the confirmation saves nothing.
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    review.get_by_role("button", name=re.compile("Guardar")).click()
+    assert len(store.state()["card_questions"]) == 1
+    review.locator("select").select_option("TARJETA_VISA:0002")
+    page.once("dialog", lambda dialog: dialog.accept())
+    with page.expect_response(lambda response: response.url.endswith("/api/card-series")) as saved:
+        review.get_by_role("button", name=re.compile("Guardar")).click()
+    assert saved.value.status == 200
+    review.wait_for(state="hidden")
+    with store.connect() as db:
+        assert db.execute("SELECT replaces FROM card_series WHERE suffix='0009'").fetchone()[0] == "TARJETA_VISA:0002"
+    assert not errors
