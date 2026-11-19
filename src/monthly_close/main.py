@@ -23,7 +23,7 @@ from shared.storage import data_root
 from monthly_close.model import OllamaJsonModel
 from monthly_close import credit_ledger
 from monthly_close import statements as statements_module
-from monthly_close.domain import EMAIL, Preferences, received_local
+from monthly_close.domain import EMAIL, OWNERS, Preferences, received_local
 from monthly_close.extraction import EvidenceError, extract, income_category
 from monthly_close.graph_client import (
     AUTHORITIES, CLIENT_ID, GraphClient, interactive_login, silent_token,
@@ -586,57 +586,70 @@ STATEMENTS_FILE = "statements.json"
 
 
 def statement_settings(data_dir: Path) -> dict:
-    """Local statement settings: the PDF password and the exact approved senders.
+    """Local statement settings: each owner's PDF password and the exact approved senders.
 
-    The file lives in the local data folder, outside Git; its values are never printed.
+    passwords maps each owner to the password of their statements; the older
+    password key is Santiago's. The file lives in the local data folder, outside
+    Git; its values are never printed.
     """
     path = data_dir / STATEMENTS_FILE
     if not path.is_file():
         raise ValueError(f"Falta {STATEMENTS_FILE} en la carpeta de datos local.")
     raw = json.loads(path.read_text(encoding="utf-8"))
-    senders = raw.get("approved_senders") if isinstance(raw, dict) else None
+    if not isinstance(raw, dict):
+        raise ValueError(f"{STATEMENTS_FILE} debe ser un objeto.")
+    senders = raw.get("approved_senders")
+    passwords = raw.get("passwords", {})
+    if not isinstance(passwords, dict) or set(passwords) - set(OWNERS) or (
+        "password" in raw and "santiago" in passwords
+    ):
+        raise ValueError(f"{STATEMENTS_FILE}: passwords debe tener una contrasena por titular ({', '.join(OWNERS)}).")
+    passwords = {**({"santiago": raw["password"]} if "password" in raw else {}), **passwords}
     if (
-        not isinstance(raw.get("password"), str) or not raw["password"]
+        not passwords or any(not isinstance(item, str) or not item for item in passwords.values())
         or not isinstance(senders, list) or not senders
         or any(not isinstance(item, str) or not EMAIL.fullmatch(item) for item in senders)
     ):
-        raise ValueError(f"{STATEMENTS_FILE} necesita password y remitentes exactos aprobados.")
-    return {"password": raw["password"], "approved_senders": [item.lower() for item in senders]}
+        raise ValueError(f"{STATEMENTS_FILE} necesita passwords por titular y remitentes exactos aprobados.")
+    return {"passwords": passwords, "approved_senders": [item.lower() for item in senders]}
 
 
 def reconcile_statements(
     store: Store, data_dir: Path, settings: dict, preferences: Preferences,
     start: date, read_only: bool,
 ) -> dict:
-    """Read Santiago's statements in memory, reconcile them and import what only they show.
+    """Read the statements of every mailbox in memory, reconcile them and import what only they show.
 
-    Read-only mode reports without writing. Any statement that cannot be read exactly
-    stops the run: nothing is imported from a partial reading.
+    Each statement belongs to the owner of the mailbox it arrived in. Read-only mode
+    reports without writing. Any statement that cannot be read exactly stops the run:
+    nothing is imported from a partial reading.
     """
     config = statement_settings(data_dir)
     since = datetime.combine(start - timedelta(days=31), datetime.min.time(), ZoneInfo(preferences.timezone))
     found: dict[str, statements_module.Statement] = {}
-    with open_source(data_dir, settings, preferences.approved_senders) as reader:
-        for sender in config["approved_senders"]:
-            for name, content in reader.statement_files(
-                sender, since, statements_module.STATEMENT_NAME, statements_module.MAX_PDF_BYTES,
-            ):
-                found_name = statements_module.identify(name)
-                if found_name is None:
-                    continue
-                product, period = found_name
-                if product not in statements_module.PRODUCTS or period < start.strftime("%Y%m"):
-                    continue
-                try:
-                    statement = statements_module.parse(
-                        product, period, statements_module.decrypt_text(content, config["password"]),
-                    )
-                except statements_module.StatementError as exc:
-                    raise ValueError(f"Extracto {product} {period}: {exc}") from exc
-                found.setdefault(statement.identity, statement)
-    with_register = {(config.product, config.suffix) for config in credit_ledger.load_configs(data_dir)}
+    owners: dict[tuple, str] = {}  # whose mailbox each numbered product's statement came from
+    for box in load_mailboxes(settings):
+        with open_source(data_dir, settings, preferences.approved_senders, box) as reader:
+            for sender in config["approved_senders"]:
+                for name, content in reader.statement_files(
+                    sender, since, statements_module.STATEMENT_NAME, statements_module.MAX_PDF_BYTES,
+                ):
+                    statement = _read_statement(name, content, config["passwords"], start, box)
+                    if statement is None:
+                        continue
+                    key = (statement.product, statement.suffix, statement.period_end)
+                    known = owners.setdefault(key, statement.owner) if statement.suffix else statement.owner
+                    if known != statement.owner:
+                        # A shared product would count twice or for the wrong person.
+                        raise ValueError(
+                            f"El extracto {statement.product} *{statement.suffix} con corte "
+                            f"{statement.period_end.isoformat()} llega a los buzones de {known} y "
+                            f"{statement.owner}; no se sabe de quien es. Detenido sin importar."
+                        )
+                    found.setdefault(statement.identity, statement)
+    with_register = {(config.owner, config.product, config.suffix) for config in credit_ledger.load_configs(data_dir)}
     for statement in found.values():
-        if (statement.product, statement.suffix) in with_register:
+        if (statement.owner, statement.product, statement.suffix) in with_register:
             statement.movements = []  # its payment register is the source; balances still count
     report = statements_module.reconcile(list(found.values()), store.state()["transactions"], start)
     events = [
@@ -654,6 +667,36 @@ def reconcile_statements(
         "imported": imported, "balances": sum(s.balance_minor is not None for s in found.values()),
         "reclassified": reclassified,
     }
+
+
+def _read_statement(
+    name: str, content: bytes, passwords: dict[str, str], start: date, box: Mailbox,
+) -> statements_module.Statement | None:
+    """One statement attachment of a mailbox, or None when it is not a statement to reconcile.
+
+    It opens only with the password of the mailbox's owner: a statement of another
+    person in that mailbox stops the run instead of being counted as the owner's.
+    """
+    found_name = statements_module.identify(name)
+    if found_name is None:
+        return None
+    product, period = found_name
+    if product not in statements_module.PRODUCTS or period < start.strftime("%Y%m"):
+        return None
+    if box.owner not in passwords:
+        raise ValueError(f"Falta la contrasena de los extractos de {box.owner} en {STATEMENTS_FILE} (buzon {box.name}).")
+    try:
+        statement = statements_module.parse(
+            product, period,
+            statements_module.decrypt_text(content, passwords[box.owner], layout=product == "CTA_AHORROS"),
+        )
+    except statements_module.StatementError as exc:
+        raise ValueError(
+            f"Extracto {product} {period} del buzon {box.name}: {exc} Se probo solo la de {box.owner}: "
+            "si el extracto es de otra persona, no se cuenta como suyo."
+        ) from exc
+    statement.owner = box.owner
+    return statement
 
 
 def _statement_kinds(report, preferences: Preferences) -> dict[str, str]:
@@ -714,6 +757,16 @@ def import_credit_ledgers(store: Store, data_dir: Path, preferences: Preferences
     return lines
 
 
+def refresh_reconciled_coverage(store: Store, preferences: Preferences) -> None:
+    """Mark the closed months the statements reconcile, and undo those that stopped qualifying."""
+    today = datetime.now(ZoneInfo(preferences.timezone)).date()
+    changed = store.update_reconciled_coverage(today)
+    if changed["reconciled"]:
+        print("Meses conciliados con los extractos: " + ", ".join(changed["reconciled"]) + ".", flush=True)
+    if changed["revoked"]:
+        print("Meses que dejaron de estar conciliados: " + ", ".join(changed["revoked"]) + ".", flush=True)
+
+
 def run_complements(store: Store, data_dir: Path, settings: dict, preferences: Preferences, start: date) -> None:
     """After a mailbox scan: reconcile the bank statements, then import the credit registers.
 
@@ -730,6 +783,7 @@ def run_complements(store: Store, data_dir: Path, settings: dict, preferences: P
         )
     if credit_ledger.load_configs(data_dir):
         print("\n".join(import_credit_ledgers(store, data_dir, preferences)), flush=True)
+    refresh_reconciled_coverage(store, preferences)
 
 
 def run_member_import(store: Store, folder: Path) -> None:
@@ -768,6 +822,7 @@ def run(args: argparse.Namespace) -> None:
         return
     if args.command == "import-manuela":
         run_member_import(store, args.source_dir.expanduser().resolve())
+        refresh_reconciled_coverage(store, store.preferences())
         return
     if args.command == "merge-category":
         if not args.source_category or not args.target_category:
@@ -780,6 +835,7 @@ def run(args: argparse.Namespace) -> None:
         return
     if args.command == "import-credit-ledger":
         print("\n".join(import_credit_ledgers(store, data_dir, store.preferences())))
+        refresh_reconciled_coverage(store, store.preferences())
         return
     if args.command == "payroll-deduction":
         if not args.owner or not args.suffix:
@@ -828,6 +884,8 @@ def run(args: argparse.Namespace) -> None:
                f"{result['imported']} importados como pendientes; decidelos en el panel."
                + (f" {result['reclassified']} pendientes reclasificados." if result["reclassified"] else ""))
         )
+        if not args.read_only:
+            refresh_reconciled_coverage(store, preferences)
         return
     if args.command == "check-config":
         if not preferences.approved_senders or settings.get("folder_scan_verified") is not True:

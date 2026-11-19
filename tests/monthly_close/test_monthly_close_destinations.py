@@ -180,6 +180,27 @@ def test_received_transfer_is_income_with_its_sender(preferences):
     ]
 
 
+def test_fixed_sentences_wrapped_across_lines_are_still_read_without_the_model(preferences):
+    """The real case: the mail wraps the sentence ("...hizo\\nun abono...") and Ollama got it wrong."""
+    abono = extract(notice(
+        "Todo salio bien con tus movimientos Bancolombia: PERSONA FICTICIA hizo\r\nun abono por $482,000 a tu "
+        "tarjeta de credito\nterminada en **1234, el 11/04/2026"
+    ), preferences, NoModel())
+    assert [(e["merchant"], e["amount_minor"], e["day"]) for e in abono] == [
+        ("Abono de PERSONA FICTICIA a la tarjeta *1234", 48200000, "2026-04-11"),
+    ]
+    key = extract(notice(
+        "Bancolombia: USUARIO, transferiste $69,244.00 a la\nllave @ficticia547 desde tu\ncuenta *0001 "
+        "a PERSONA DE PRUEBA el 06/05/26"
+    ), preferences, NoModel())
+    assert [(e["merchant"], e["day"]) for e in key] == [("PERSONA DE PRUEBA", "2026-05-06")]
+    received = extract(notice(
+        "Bancolombia: USUARIO, recibiste una\ntransferencia de PERSONA FICTICIA por $17,000.00 en tu\n"
+        "cuenta *0001 el 02/11/26"
+    ), preferences, NoModel())
+    assert [(e["kind"], e["merchant"]) for e in received] == [("income", "PERSONA FICTICIA")]
+
+
 def test_transfer_to_an_own_registered_account_is_an_own_transfer(preferences):
     mail = notice("Transferiste $800,000.00 desde tu cuenta 0001 a la cuenta *3000005586 el 09/07/2026 a las 16:50.")
     assert extract(mail, preferences, NoModel())[0]["kind"] == "transfer"

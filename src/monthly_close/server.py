@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import secrets
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from importlib.resources import files
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from monthly_close.store import Store
+
+# Changes that can complete or reopen a month, so its reconciliation is checked again.
+RECONCILE_AFTER = {"/api/decision", "/api/decision-group", "/api/failure/dismiss"}
 
 
 def create_server(store: Store, port: int = 8766) -> HTTPServer:
@@ -137,6 +141,10 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                 else:
                     self.json_response(404, {"error": "Ruta inexistente."})
                     return
+                if self.path in RECONCILE_AFTER:
+                    store.update_reconciled_coverage(
+                        datetime.now(ZoneInfo(store.preferences().timezone)).date(),
+                    )
             except (ValueError, TypeError, ZoneInfoNotFoundError) as exc:
                 self.json_response(400, {"error": str(exc)})
                 return

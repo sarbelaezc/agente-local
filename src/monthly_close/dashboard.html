@@ -237,7 +237,7 @@
     td.numeric, th.numeric { text-align: right; }
     td.empty-cell, td.waiting { color: var(--mut); }
     .status-pill { display: inline-flex; padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--ink2); font-size: 11px; font-weight: 600; }
-    .status-pill.reviewed { background: var(--green-soft); color: var(--good); }
+    .status-pill.reviewed, .status-pill.reconciled { background: var(--green-soft); color: var(--good); }
     .status-pill.partial { background: var(--orange-soft); color: var(--warn); }
     details.category-detail { border-top: 1px solid var(--line); padding: 2px 0; }
     details.category-detail:first-of-type { border-top: 0; }
@@ -250,6 +250,13 @@
 
     /* Decision cards, after Manuela's destination cards */
     .decision-list { display: grid; gap: 10px; }
+    #extraction-review { margin: 4px 0 22px; padding: 14px; border-radius: 18px; background: color-mix(in srgb, var(--s4) 10%, transparent); }
+    #extraction-review h3, #pending-heading { margin: 0 0 6px; font-size: 15px; }
+    #extraction-review > p { margin: 0 0 12px; color: var(--ink2); font-size: 13.5px; line-height: 1.45; }
+    #extraction-review .decision-card { border-color: color-mix(in srgb, var(--s4) 45%, var(--line)); }
+    .failure-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0 10px; font-size: 13.5px; }
+    .failure-facts dt { color: var(--mut); }
+    .failure-facts dd { margin: 0; overflow-wrap: anywhere; }
     .decision-card, .group-card { padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surf); }
     .decision-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; color: var(--ink2); font-size: 13px; }
     .decision-meta > span, .detail-row > span { min-width: 0; overflow-wrap: anywhere; }
@@ -459,9 +466,10 @@
           <div id="decision-summary" class="metric hero decision-summary" aria-live="polite"></div>
           <section id="extraction-review" hidden>
             <h3>Avisos sin extraer · revisión pendiente</h3>
-            <p>No se importaron sus propuestas. Busca el aviso en Outlook por estos datos y repite su rango para reintentar. Si el aviso no trae ningún movimiento (por ejemplo, es solo informativo), pulsa «Descartar aviso» para sacarlo de la lista. No se incluyen en los totales ni permiten aprobar datos inválidos.</p>
+            <p>Ollama propuso un movimiento que no aparece tal cual en el aviso, así que no se importó y el agente no guarda esa propuesta ni el texto del correo: solo estos datos para encontrarlo. Ábrelo en Outlook por su fecha, hora y remitente. Si trae un movimiento, déjalo: cada lectura lo vuelve a intentar. Si no trae ninguno (por ejemplo, es solo informativo), pulsa «Descartar aviso».</p>
             <div id="extraction-list" class="decision-list"></div>
           </section>
+          <h3 id="pending-heading" hidden>Movimientos por decidir</h3>
           <div id="pending-list" class="decision-list"></div>
           <details class="history-detail" id="rules-detail">
             <summary>Reglas por comercio · decidir sin preguntar</summary>
@@ -482,7 +490,7 @@
             <div id="history-list" class="decision-list" style="margin-top:12px"></div>
           </details>
         </section>
-        <p class="footer-note">Importes en unidades de la moneda seleccionada. No se combinan monedas. La cobertura se actualiza solo mediante revisión manual.</p>
+        <p class="footer-note">Importes en unidades de la moneda seleccionada. No se combinan monedas. Un mes queda verificado cuando lo revisas a mano o cuando cuadra con los extractos de Santiago.</p>
       </section>
     </main>
   </div>
@@ -671,6 +679,27 @@
         const [year, month] = key.split("-").map(Number);
         return monthYearFormatter.format(new Date(Date.UTC(year, month - 1, 1)));
       }
+      // Date and time of a notice in the configured zone, to find it among the same day's alerts.
+      function formatDateTime(value) {
+        const date = new Date(typeof value === "string" ? value : "");
+        if (Number.isNaN(date.getTime())) return formatDate(value);
+        const config = state.data && state.data.config ? state.data.config : {};
+        const options = { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" };
+        try {
+          return new Intl.DateTimeFormat("es", { ...options, timeZone: config.timezone || undefined }).format(date);
+        } catch {
+          return new Intl.DateTimeFormat("es", options).format(date);
+        }
+      }
+      function failureReason(field) {
+        const reasons = {
+          merchant: "el comercio que propuso Ollama no aparece en el aviso",
+          amount_text: "el monto que propuso Ollama no aparece en el aviso",
+          events: "el aviso dice que salió dinero, pero no se extrajo ningún movimiento",
+          correction: "la propuesta no coincidía con el aviso y la corrección cambió otros datos o quitó movimientos",
+        };
+        return reasons[field] || `el campo ${field} no coincide con el aviso`;
+      }
       function formatDate(value) {
         if (typeof value !== "string") return "Fecha no disponible";
         const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -698,7 +727,7 @@
       function updateCoverageSummary(month) {
         const coverage = safeArray(state.data && state.data.coverage).find(entry => entry && entry.month === month);
         $("#coverage-summary").textContent = coverage
-          ? `Cobertura: ${coverage.status === "reviewed" ? "revisada manualmente" : coverage.status === "partial" ? "parcial" : "sin verificar"}${coverage.note ? ` · ${coverage.note}` : ""}`
+          ? `Cobertura: ${coverage.status === "reviewed" ? "revisada manualmente" : coverage.status === "reconciled" ? "conciliada con los extractos" : coverage.status === "partial" ? "parcial" : "sin verificar"}${coverage.note ? ` · ${coverage.note}` : ""}`
           : "Cobertura: sin verificar";
       }
       function itemText(item) {
@@ -1286,16 +1315,16 @@
           figure("rendimientos", check.returns_minor)
         ].filter(Boolean).join(" · ");
       }
-      // Statements are Santiago's only; the household view includes them too.
+      // Each owner sees the statements of their own mailbox; the household view sees them all.
       function renderStatements() {
-        const checks = safeArray(state.data && state.data.statement_checks).filter(check => check && typeof check.period_end === "string");
+        const checks = safeArray(state.data && state.data.statement_checks).filter(check => check && typeof check.period_end === "string" && inOwnerView(check));
         const card = $("#statements-card");
-        card.hidden = state.owner === "manuela" || !checks.length || state.currency !== "COP";
+        card.hidden = !checks.length || state.currency !== "COP";
         if (card.hidden) return;
         const monthEnd = `${state.month}-31`;
         const latest = new Map();
         checks.filter(check => check.period_end <= monthEnd && Number.isSafeInteger(check.balance_minor)).forEach(check => {
-          latest.set(`${check.product}|${check.suffix}`, check);
+          latest.set(`${check.owner}|${check.product}|${check.suffix}`, check);
         });
         const balances = $("#statement-balances");
         balances.replaceChildren();
@@ -1315,7 +1344,7 @@
         if (!inMonth.length) { host.append(el("p", "hint", "No hay extractos con corte en este mes.")); return; }
         inMonth.forEach(check => {
           const row = el("div", "rank-row");
-          const name = `${productNames[check.product] || check.product}${check.suffix ? ` *${check.suffix}` : ""}`;
+          const name = `${productNames[check.product] || check.product}${check.suffix ? ` *${check.suffix}` : ""}${state.owner === "hogar" ? ` · ${ownerLabel(check.owner)}` : ""}`;
           const figures = investmentFigures(check);
           const status = check.missing ? `${check.missing} no llegaron por aviso (importados como pendientes)` : "todo coincide con los avisos";
           row.append(el("span", "legend-label", figures ? `${name} · ${figures}` : `${name} · ${check.matched}/${check.movements} coinciden · ${status}`));
@@ -1729,7 +1758,7 @@
         if (withdrawals.length) minor("Retiros de inversión", formatMoney(sum(withdrawals)), "fuera del gasto");
         if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "ya incluido en el gasto");
         if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
-        if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed}`, "meses transcurridos verificados a mano");
+        if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed}`, "meses transcurridos revisados o conciliados");
         $("#year-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
 
         const categoryHost = $("#year-categories");
@@ -1911,10 +1940,11 @@
           const coverage = coverageByMonth.get(bucket.month);
           const hasImports = importedMonths.has(bucket.month);
           const isReviewed = Boolean(coverage && coverage.status === "reviewed");
+          const isReconciled = Boolean(coverage && coverage.status === "reconciled");
           const isPartial = Boolean(coverage && coverage.status === "partial");
           if (bucket.month < current) {
             elapsed++;
-            if (isReviewed) reviewed++;
+            if (isReviewed || isReconciled) reviewed++;
           }
           const monthCell = el("td");
           const title = capitalize(monthLabel(bucket.month));
@@ -1937,6 +1967,7 @@
           }
           const status = bucket.month > current ? pill("Futuro")
             : isReviewed ? pill("Revisado", "reviewed")
+              : isReconciled ? pill("Conciliado", "reconciled")
               : isPartial ? pill("Parcial", "partial")
                 : pill(hasImports ? "Sin verificar" : "Sin importación");
           if (!hasImports) {
@@ -1956,7 +1987,7 @@
         totalRow.append(
           el("td", "", "Total del año"),
           ...cells(totals, { spend: buckets.reduce((total, bucket) => total + bucketTotal(bucket), 0) }),
-          el("td", "", elapsed ? `${reviewed} de ${elapsed} revisados` : "")
+          el("td", "", elapsed ? `${reviewed} de ${elapsed} verificados` : "")
         );
         totalRow.children[1].classList.add("spend");
         foot.append(totalRow);
@@ -1966,8 +1997,8 @@
         note.hidden = elapsed === 0;
         note.className = reviewed < elapsed ? "alert warning" : "alert";
         note.textContent = reviewed < elapsed
-          ? `${reviewed} de ${elapsed} ${elapsed === 1 ? "mes transcurrido está verificado" : "meses transcurridos están verificados"} a mano. En los demás pudo faltar algún aviso del banco: un mes sin verificar no es un mes completo.`
-          : `${elapsed === 1 ? "El mes transcurrido está verificado" : `Los ${elapsed} meses transcurridos están verificados`} a mano.`;
+          ? `${reviewed} de ${elapsed} ${elapsed === 1 ? "mes transcurrido está revisado" : "meses transcurridos están revisados"} a mano o conciliados con los extractos. En los demás pudo faltar algún aviso del banco: un mes sin verificar no es un mes completo.`
+          : `${elapsed === 1 ? "El mes transcurrido está revisado" : `Los ${elapsed} meses transcurridos están revisados`} a mano o conciliados con los extractos.`;
         return { elapsed, reviewed };
       }
 
@@ -1978,12 +2009,14 @@
         failureHost.replaceChildren();
         failures.slice(0, state.failureLimit).forEach(failure => {
           const card = el("article", "decision-card");
-          card.append(
-            el("h4", "", itemText(failure.subject)),
-            el("p", "", `${formatDate(failure.received)} · ${failure.sender}`),
-            el("p", "", `Carpeta: ${failure.folder}`),
-            el("p", "hint", `Evidencia no literal: ${failure.field === "amount_text" ? "monto" : failure.field === "merchant" ? "comercio" : failure.field === "events" ? "el aviso indica una salida de dinero y no se extrajo" : failure.field === "correction" ? "la corrección cambió otros datos o eliminó movimientos" : failure.field}. Sin movimientos importados.`)
-          );
+          const facts = el("dl", "failure-facts");
+          [
+            ["Recibido", formatDateTime(failure.received)],
+            ["Remitente", failure.sender],
+            ["Carpeta", failure.folder],
+            ["Motivo", failureReason(failure.field)],
+          ].forEach(([term, value]) => facts.append(el("dt", "", term), el("dd", "", value)));
+          card.append(el("h4", "", itemText(failure.subject)), facts);
           const dismiss = el("button", "button small danger", "Descartar aviso");
           dismiss.type = "button";
           dismiss.setAttribute("aria-label", `Descartar el aviso ${itemText(failure.subject)} del ${failure.day}`);
@@ -2006,6 +2039,8 @@
           (state.currency === "COP" && txCurrency(tx) === "USD")
         ));
         const pending = groupsOf(all.filter(tx => tx.decision == null));
+        // With notices in the queue above, a heading keeps the two lists apart.
+        $("#pending-heading").hidden = pending.length === 0 || failures.length === 0;
         const pendingAmount = pending.reduce((total, entry) => total + entry.total, 0);
         // Destinations to decide stay visible from any tab, as in Manuela's dashboard.
         const badge = $("#decision-badge");

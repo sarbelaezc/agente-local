@@ -15,6 +15,7 @@ from pypdf import PdfWriter
 from monthly_close import main as app
 from monthly_close import statements as st
 from monthly_close.domain import Preferences
+from monthly_close.gmail_reader import GmailSourceReader
 from monthly_close.graph_reader import GraphSourceReader
 from monthly_close.outlook import OutlookError
 from monthly_close.store import Store
@@ -23,6 +24,10 @@ SAVINGS = """Extracto de cuenta
 DESDE: 2026/01/01 HASTA: 2026/03/31
 CUENTA DE AHORROS
 NÚMERO 12345670001
+SALDO ANTERIOR $ 1,000,000.00 SALDO PROMEDIO $ 900,000
+TOTAL ABONOS $ 300,000.25 CUENTAS X COBRAR $ .00
+TOTAL CARGOS $ 350,000.00 VALOR INTERESES PAGADOS $ .25
+SALDO ACTUAL $ 950,000.25 RETEFUENTE $ .00
 FECHA DESCRIPCIÓN SUCURSAL DCTO. VALOR SALDO
 2/01 PAGO PSE EMPRESA FICTICIA -100,000.00 900,000.00
 5/01 PAGO SUC VIRT TC MASTER DOLAR -50,000.00 850,000.00
@@ -99,6 +104,31 @@ def test_savings_statement_is_read_and_checked_by_running_balance():
     broken = SAVINGS.replace("850,000.00", "851,000.00")
     with pytest.raises(st.StatementError, match="saldo corrido"):
         st.parse("CTA_AHORROS", "202603", broken)
+
+
+def test_savings_statement_with_lines_left_out_stops():
+    """The real case: from page two on, rows were not read and nothing complained."""
+    last = "10/03 TRANSFERENCIA DESDE PERSONA FICTICIA 300,000.00 950,000.25\n"
+    with pytest.raises(st.StatementError, match="no cuadran con su resumen"):
+        st.parse("CTA_AHORROS", "202603", SAVINGS.replace(last, ""))
+    with pytest.raises(st.StatementError, match="resumen de saldos"):
+        st.parse("CTA_AHORROS", "202603", SAVINGS.replace("SALDO ACTUAL", "SALDO"))
+
+
+def test_only_the_savings_statement_is_read_in_layout_mode(monkeypatch, tmp_path, store, preferences):
+    modes = []
+    monkeypatch.setattr(st, "parse", lambda product, period, text: (_ for _ in ()).throw(st.StatementError("x")))
+
+    def decrypt(content, password, layout=False):
+        modes.append((content.decode(), layout))
+        return ""
+
+    monkeypatch.setattr(st, "decrypt_text", decrypt)
+    box = app.load_mailboxes({})[0]
+    for name in ("Extracto_1_202603_CTA_AHORROS_0001.pdf", "Extracto_1_202603_TARJETA_AMEX_0002.pdf"):
+        with pytest.raises(ValueError):
+            app._read_statement(name, name.encode(), {"santiago": "clave"}, date(2026, 1, 1), box)
+    assert modes == [("Extracto_1_202603_CTA_AHORROS_0001.pdf", True), ("Extracto_1_202603_TARJETA_AMEX_0002.pdf", False)]
 
 
 def test_card_statement_keeps_currency_sections_and_skips_internal_lines():
@@ -228,23 +258,166 @@ def test_statement_files_only_come_from_the_approved_sender():
         list(other.statement_files("banco@example.test", since, st.FILE_NAME, st.MAX_PDF_BYTES))
 
 
-def run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only):
+class FakeGmailStatements:
+    """Gmail answers for one statement e-mail; the PDF sits two levels deep."""
+
+    def __init__(self, sender: str, size: int = 4, data: object = "JVBERg"):
+        self.sender, self.size, self.data, self.urls = sender, size, data, []
+
+    def get_json(self, url, params=None):
+        self.urls.append(url)
+        if url.endswith("/messages"):
+            assert params["q"].startswith('from:("banco@example.test") has:attachment after:')
+            return {"messages": [{"id": "g1"}]}
+        if url.endswith("/attachments/att-1"):
+            return {"data": self.data}
+        assert params["format"] == "full" and "data" not in params["fields"]  # never the message text
+        return {"id": "g1", "payload": {
+            "headers": [{"name": "From", "value": f"Banco <{self.sender}>"}],
+            "parts": [{"filename": "", "body": {"size": 10}, "parts": [
+                {"filename": "Extracto_1_202601_TARJETA_VISA_0002.pdf", "body": {"attachmentId": "att-1", "size": self.size}},
+                {"filename": "logo.png", "body": {"attachmentId": "att-2", "size": 10}},
+            ]}],
+        }}
+
+
+def test_gmail_statement_files_only_come_from_the_approved_sender():
+    since = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    client = FakeGmailStatements("banco@example.test")
+    reader = GmailSourceReader(client, ["avisos@example.test"])
+    files = list(reader.statement_files("banco@example.test", since, st.STATEMENT_NAME, st.MAX_PDF_BYTES))
+    assert files == [("Extracto_1_202601_TARJETA_VISA_0002.pdf", b"%PDF")]
+    assert not any(url.endswith("att-2") for url in client.urls)  # other attachments are not downloaded
+    other = GmailSourceReader(FakeGmailStatements("otro@example.test"), ["avisos@example.test"])
+    with pytest.raises(OutlookError, match="otro remitente"):
+        list(other.statement_files("banco@example.test", since, st.STATEMENT_NAME, st.MAX_PDF_BYTES))
+    large = GmailSourceReader(FakeGmailStatements("banco@example.test", size=st.MAX_PDF_BYTES + 1), ["avisos@example.test"])
+    with pytest.raises(OutlookError, match="tamano"):
+        list(large.statement_files("banco@example.test", since, st.STATEMENT_NAME, st.MAX_PDF_BYTES))
+
+
+@pytest.mark.parametrize(("sender", "since", "data", "limit", "error", "message"), [
+    ('banco"@example.test', datetime(2026, 1, 1, tzinfo=timezone.utc), "JVBERg", 10, ValueError, "Remitente"),
+    ("banco@example.test", datetime(2026, 1, 1), "JVBERg", 10, ValueError, "zona horaria"),
+    ("banco@example.test", datetime(2026, 1, 1, tzinfo=timezone.utc), None, 10, OutlookError, "no reconocido"),
+    ("banco@example.test", datetime(2026, 1, 1, tzinfo=timezone.utc), "J", 10, OutlookError, "no valido"),
+    # The declared size fits, the downloaded content does not.
+    ("banco@example.test", datetime(2026, 1, 1, tzinfo=timezone.utc), "JVBERi0xLjcK", 4, OutlookError, "tamano"),
+])
+def test_gmail_statement_files_refuse_what_cannot_be_verified(sender, since, data, limit, error, message):
+    reader = GmailSourceReader(FakeGmailStatements("banco@example.test", data=data), ["avisos@example.test"])
+    with pytest.raises(error, match=message):
+        list(reader.statement_files(sender, since, st.STATEMENT_NAME, limit))
+
+
+TWO_MAILBOXES = {"mailboxes": [
+    {"name": "santiago", "provider": "graph", "owner": "santiago"},
+    {"name": "manuela", "provider": "gmail", "owner": "manuela", "verified": True},
+]}
+
+
+def run_reconcile(
+    store, tmp_path, preferences, monkeypatch, texts, read_only, settings=None, by_mailbox=None, opens=None,
+    tried=None,
+):
+    """Reconcile with fake mailboxes; by_mailbox gives each mailbox its own attachment names.
+
+    opens maps an attachment name to the only password that opens it; tried records
+    which password each attachment was opened with, when given.
+    """
     (tmp_path / "statements.json").write_text(json.dumps({
-        "password": "clave-ficticia", "approved_senders": ["banco@example.test"],
+        "passwords": {"santiago": "clave-santiago", "manuela": "clave-manuela"},
+        "approved_senders": ["banco@example.test"],
     }), encoding="utf-8")
+    tried = [] if tried is None else tried
 
     class Reader:
+        def __init__(self, names):
+            self.names = names
+
         def statement_files(self, sender, since, pattern, limit):
-            for name in texts:
+            for name in self.names:
                 yield name, name.encode()
 
     @contextmanager
-    def fake_source(*args):
-        yield Reader()
+    def fake_source(data_dir, settings, senders, box=None):
+        yield Reader(list(texts) if by_mailbox is None else by_mailbox.get(box.name, []))
 
     monkeypatch.setattr(app, "open_source", fake_source)
-    monkeypatch.setattr(st, "decrypt_text", lambda content, password: texts[content.decode()])
-    return app.reconcile_statements(store, tmp_path, {}, preferences, date(2026, 1, 1), read_only)
+    def decrypt(content, password, layout=False):
+        name = content.decode()
+        if opens and opens.get(name) != password:
+            raise st.StatementError("La contraseña configurada no abre el extracto.")
+        tried.append((name, password))
+        return texts[name]
+
+    monkeypatch.setattr(st, "decrypt_text", decrypt)
+    return app.reconcile_statements(store, tmp_path, settings or {}, preferences, date(2026, 1, 1), read_only)
+
+
+def test_each_mailbox_statements_reconcile_against_its_owners_movements(store, tmp_path, preferences, monkeypatch):
+    store.import_message("m-1", [{
+        "id": "visa-purchase", "message_id": "m-1", "day": "2026-01-03", "merchant": "TIENDA FICTICIA",
+        "account": "Tarjeta A", "amount_minor": 4500000, "currency": "COP", "category": "Compras",
+        "kind": "purchase", "decision": "personal", "reason": "sintetico",
+    }], owner="manuela")
+    texts = {"Extracto_1_202601_TARJETA_VISA_0002.pdf": CARD, "Extracto_1_202601_FIDUCUENTA_0003.pdf": FUND}
+    tried = []
+    result = run_reconcile(
+        store, tmp_path, preferences, monkeypatch, texts, read_only=False, settings=TWO_MAILBOXES,
+        by_mailbox={"santiago": ["Extracto_1_202601_FIDUCUENTA_0003.pdf"], "manuela": ["Extracto_1_202601_TARJETA_VISA_0002.pdf"]},
+        tried=tried,
+    )
+    assert result["statements"] == 2 and result["matched"] == 1
+    # Each mailbox's statements are opened only with its owner's password.
+    assert sorted(tried) == [
+        ("Extracto_1_202601_FIDUCUENTA_0003.pdf", "clave-santiago"),
+        ("Extracto_1_202601_TARJETA_VISA_0002.pdf", "clave-manuela"),
+    ]
+    checks = {row["product"]: row["owner"] for row in store.state()["statement_checks"]}
+    assert checks == {"TARJETA_VISA": "manuela", "FIDUCUENTA": "santiago"}
+    owners = {row["account"]: row["owner"] for row in store.state()["transactions"] if row["id"].startswith("stmt:")}
+    assert owners == {"Tarjeta de crédito Visa": "manuela", "Fiducuenta": "santiago"}
+
+
+def test_a_statement_in_two_owners_mailboxes_stops_without_importing(store, tmp_path, preferences, monkeypatch):
+    texts = {"Extracto_1_202601_TARJETA_VISA_0002.pdf": CARD}
+    with pytest.raises(ValueError, match="buzones de santiago y manuela"):
+        run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False, settings=TWO_MAILBOXES)
+    assert store.state()["transactions"] == [] and store.state()["statement_checks"] == []
+
+
+def test_a_statement_that_does_not_open_with_its_owners_password_stops(store, tmp_path, preferences, monkeypatch):
+    """A statement of Santiago that reaches Manuela's mailbox is never counted as hers."""
+    name = "Extracto_1_202601_TARJETA_VISA_0002.pdf"
+    with pytest.raises(ValueError, match="buzon manuela: .*Se probo solo la de manuela"):
+        run_reconcile(
+            store, tmp_path, preferences, monkeypatch, {name: CARD}, read_only=False,
+            settings=TWO_MAILBOXES, by_mailbox={"manuela": [name]}, opens={name: "clave-santiago"},
+        )
+    assert store.state()["transactions"] == [] and store.state()["statement_checks"] == []
+
+
+def test_a_mailbox_without_its_owners_password_stops(store, tmp_path, preferences, monkeypatch):
+    monkeypatch.setattr(app, "statement_settings", lambda data_dir: {
+        "passwords": {"santiago": "clave-santiago"}, "approved_senders": ["banco@example.test"],
+    })
+    with pytest.raises(ValueError, match="Falta la contrasena de los extractos de manuela"):
+        run_reconcile(
+            store, tmp_path, preferences, monkeypatch, {"Extracto_1_202601_TARJETA_VISA_0002.pdf": CARD},
+            read_only=False, settings=TWO_MAILBOXES,
+            by_mailbox={"manuela": ["Extracto_1_202601_TARJETA_VISA_0002.pdf"]},
+        )
+
+
+def test_each_owners_proteccion_statement_is_kept_apart(store, tmp_path, preferences, monkeypatch):
+    """Protección statements carry no product number; the mailbox tells whose they are."""
+    texts = {"123_PensionesCesantias_202606.pdf": SEVERANCE}
+    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False, settings=TWO_MAILBOXES)
+    assert result["statements"] == 2
+    checks = sorted((row["owner"], row["identity"]) for row in store.state()["statement_checks"])
+    assert [owner for owner, _ in checks] == ["manuela", "santiago"]
+    assert checks[0][1] == checks[1][1] + ":manuela"
 
 
 def test_reconcile_command_reports_read_only_then_imports(store, tmp_path, preferences, monkeypatch):
@@ -266,7 +439,7 @@ def test_unreadable_statement_stops_without_importing(store, tmp_path, preferenc
         "Extracto_1_202601_TARJETA_MASTERCARD_0002.pdf": CARD,
         "Extracto_1_202602_CREDITO_4444.pdf": "formato desconocido",
     }
-    with pytest.raises(ValueError, match="CREDITO 202602"):
+    with pytest.raises(ValueError, match="CREDITO 202602 del buzon santiago"):
         run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
     assert store.state()["transactions"] == []
 
@@ -278,6 +451,22 @@ def test_statement_settings_require_password_and_exact_senders(tmp_path):
     with pytest.raises(ValueError, match="password") as error:
         app.statement_settings(tmp_path)
     assert "clave" not in str(error.value)
+    # The older single password is Santiago's.
+    (tmp_path / "statements.json").write_text(json.dumps({
+        "password": "clave-a", "passwords": {"manuela": "clave-b"}, "approved_senders": ["Banco@Example.test"],
+    }), encoding="utf-8")
+    assert app.statement_settings(tmp_path) == {
+        "passwords": {"santiago": "clave-a", "manuela": "clave-b"}, "approved_senders": ["banco@example.test"],
+    }
+    for passwords in (["clave-a"], {"otra": "clave"}, {"manuela": 7}, {"manuela": ""}):
+        (tmp_path / "statements.json").write_text(json.dumps({
+            "passwords": passwords, "approved_senders": ["banco@example.test"],
+        }), encoding="utf-8")
+        with pytest.raises(ValueError, match="passwords"):
+            app.statement_settings(tmp_path)
+    (tmp_path / "statements.json").write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="objeto"):
+        app.statement_settings(tmp_path)
 
 
 def test_panel_shows_statement_checks_and_balances(store):
@@ -285,7 +474,9 @@ def test_panel_shows_statement_checks_and_balances(store):
     from monthly_close.server import create_server
 
     statements = [st.parse("FIDUCUENTA", "202601", FUND), st.parse("HIPOTECARIO", "202601", MORTGAGE)]
-    report = st.reconcile(statements, [], date(2026, 1, 1))
+    visa = st.parse("TARJETA_VISA", "202601", CARD)
+    visa.owner = "manuela"
+    report = st.reconcile(statements + [visa], [], date(2026, 1, 1))
     store.record_statements(report.checks(), [])
     server = create_server(store, 0)
     thread = threading.Thread(target=server.serve_forever)
@@ -301,9 +492,13 @@ def test_panel_shows_statement_checks_and_balances(store):
             text = page.locator("#statements-card").inner_text()
             assert "Inversiones" in text and "Créditos" in text
             assert re.search(r"1[.\s]?204[.\s]?950,00", text)
-            assert "Fiducuenta *0003" in text
+            assert "Fiducuenta *0003" in text and "Visa" not in text
             page.locator("#owner-switch").get_by_role("button", name="Manuela").click()
-            assert page.locator("#statements-card").is_hidden()
+            text = page.locator("#statements-card").inner_text()
+            assert "Visa *0002" in text and "Fiducuenta" not in text
+            page.locator("#owner-switch").get_by_role("button", name="Hogar").click()
+            text = page.locator("#statements-card").inner_text()
+            assert "Visa *0002 · Manuela" in text and "Fiducuenta *0003 · Santiago" in text
             assert not errors
             browser.close()
     finally:
@@ -550,7 +745,11 @@ def test_a_protection_statement_mail_is_never_sent_to_ollama(preferences):
 SAVINGS_TOPUP = """Extracto de cuenta
 DESDE: 2026/01/01 HASTA: 2026/03/31
 CUENTA DE AHORROS
-NÚMERO 12345670001
+CALLE FICTICIA 1 # 2-3 NÚMERO 12345670001
+SALDO ANTERIOR $ 1,000,000.00 SALDO PROMEDIO $ 950,000
+TOTAL ABONOS $ .00 CUENTAS X COBRAR $ .00
+TOTAL CARGOS $ 86,860.00 VALOR INTERESES PAGADOS $ .00
+SALDO ACTUAL $ 913,140.00 RETEFUENTE $ .00
 FECHA DESCRIPCIÓN SUCURSAL DCTO. VALOR SALDO
 23/01 RECARGA DE TARJETA CIVICA -18,430.00 981,570.00
 24/01 RECARGA DE TARJETA CIVICA -18,430.00 963,140.00

@@ -139,7 +139,7 @@ def test_statement_instalments_are_not_imported_again_for_a_credit_with_register
         yield Reader()
 
     monkeypatch.setattr(app, "open_source", fake_source)
-    monkeypatch.setattr(st, "decrypt_text", lambda content, password: texts[content.decode()])
+    monkeypatch.setattr(st, "decrypt_text", lambda content, password, layout=False: texts[content.decode()])
     result = app.reconcile_statements(store, folder, {}, preferences, date(2026, 1, 1), False)
     assert result["imported"] == 0
     assert statement_instalments(store) == 0
@@ -221,10 +221,12 @@ def test_after_a_scan_statements_then_registers_run_when_configured(tmp_path, mo
     monkeypatch.setattr(app, "reconcile_statements", lambda *args, **kwargs: calls.append("extractos") or {
         "statements": 0, "matched": 0, "imported": 0})
     monkeypatch.setattr(app, "import_credit_ledgers", lambda *args: calls.append("registros") or [])
+    monkeypatch.setattr(app, "refresh_reconciled_coverage", lambda *args: calls.append("conciliacion"))
     app.run_complements(None, tmp_path, {}, None, date(2026, 3, 1))
-    assert calls == []  # nothing configured: the scan alone
+    assert calls == ["conciliacion"]  # nothing configured: only the coverage check
+    calls.clear()
     (tmp_path / "statements.json").write_text("{}", encoding="utf-8")
     (tmp_path / credit_ledger.LEDGERS_FILE).write_text(json.dumps([{
         "owner": "santiago", "suffix": "4444", "name": "x", "path": "x.xlsx", "sheet": "Hoja1"}]), encoding="utf-8")
     app.run_complements(None, tmp_path, {}, None, date(2026, 3, 1))
-    assert calls == ["extractos", "registros"]
+    assert calls == ["extractos", "registros", "conciliacion"]

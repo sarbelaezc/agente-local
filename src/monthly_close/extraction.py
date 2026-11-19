@@ -325,10 +325,16 @@ def _fixed_event(mail: Mail, preferences: Preferences, source: str, merchant: st
 
 
 AMOUNT_TEXT = r"(?P<amount>\$\s?\d[\d.,]*\d|\$\s?\d)"
-CARD_ABONO = re.compile(
+
+
+def _sentence(pattern: str) -> re.Pattern:
+    """A fixed bank sentence whose words the mail may wrap onto the next line."""
+    return re.compile(pattern.replace(" ", r"\s+"), re.IGNORECASE)
+
+
+CARD_ABONO = _sentence(
     r"(?:Bancolombia:\s*)(?P<payer>[^:\n$]{3,80}?)\s+hizo un abono por\s+" + AMOUNT_TEXT
-    + r"\s+a tu tarjeta de cr[eé]dito terminada en\s+\*+(?P<card>\d{4}),?\s+el\s+(?P<day>\d{2}/\d{2}/\d{4})(?:\s+(?P<time>\d{2}:\d{2}))?",
-    re.IGNORECASE,
+    + r"\s+a tu tarjeta de cr[eé]dito terminada en\s+\*+(?P<card>\d{4}),?\s+el\s+(?P<day>\d{2}/\d{2}/\d{4})(?:\s+(?P<time>\d{2}:\d{2}))?"
 )
 
 
@@ -351,10 +357,9 @@ def _card_abonos(mail: Mail, preferences: Preferences, source: str) -> list[dict
     return list(proposals.values())
 
 
-KEY_TRANSFER = re.compile(
+KEY_TRANSFER = _sentence(
     r"transferiste\s+" + AMOUNT_TEXT + r"\s+a la llave\s+(?P<key>\S+)\s+desde tu cuenta\s+\*?\d{4}\s+a\s+"
-    r"(?P<name>[^\n]{2,80}?)\s+el\s+(?P<day>\d{2}/\d{2}/\d{2,4})(?:\s+a las\s+(?P<time>\d{2}:\d{2}))?",
-    re.IGNORECASE,
+    r"(?P<name>[^\n]{2,80}?)\s+el\s+(?P<day>\d{2}/\d{2}/\d{2,4})(?:\s+a las\s+(?P<time>\d{2}:\d{2}))?"
 )
 
 
@@ -376,10 +381,9 @@ def _key_transfers(mail: Mail, preferences: Preferences, source: str) -> list[di
     return list(proposals.values())
 
 
-RECEIVED_TRANSFER = re.compile(
+RECEIVED_TRANSFER = _sentence(
     r"recibiste una transferencia de\s+(?P<name>[^\n$]{2,80}?)\s+por\s+" + AMOUNT_TEXT
-    + r"\s+en tu cuenta\s+\*?\d{4}[^\n]{0,80}?\s+el\s+(?P<day>\d{2}/\d{2}/\d{2,4})(?:\s+a las\s+(?P<time>\d{2}:\d{2}))?",
-    re.IGNORECASE,
+    + r"\s+en tu cuenta\s+\*?\d{4}[^\n]{0,80}?\s+el\s+(?P<day>\d{2}/\d{2}/\d{2,4})(?:\s+a las\s+(?P<time>\d{2}:\d{2}))?"
 )
 
 
