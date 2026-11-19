@@ -23,7 +23,7 @@ from shared.storage import data_root
 from monthly_close.model import OllamaJsonModel
 from monthly_close import credit_ledger
 from monthly_close import statements as statements_module
-from monthly_close.domain import EMAIL, Preferences, received_local
+from monthly_close.domain import EMAIL, OWNERS, Preferences, received_local
 from monthly_close.extraction import EvidenceError, extract, income_category
 from monthly_close.graph_client import (
     AUTHORITIES, CLIENT_ID, GraphClient, interactive_login, silent_token,
@@ -586,11 +586,11 @@ STATEMENTS_FILE = "statements.json"
 
 
 def statement_settings(data_dir: Path) -> dict:
-    """Local statement settings: the PDF passwords and the exact approved senders.
+    """Local statement settings: each owner's PDF password and the exact approved senders.
 
-    password holds one password and passwords a list (one per holder, since each
-    holder's bank uses their own); every one is tried on each PDF. The file lives in
-    the local data folder, outside Git; its values are never printed.
+    passwords maps each owner to the password of their statements; the older
+    password key is Santiago's. The file lives in the local data folder, outside
+    Git; its values are never printed.
     """
     path = data_dir / STATEMENTS_FILE
     if not path.is_file():
@@ -599,13 +599,18 @@ def statement_settings(data_dir: Path) -> dict:
     if not isinstance(raw, dict):
         raise ValueError(f"{STATEMENTS_FILE} debe ser un objeto.")
     senders = raw.get("approved_senders")
-    passwords = ([raw["password"]] if "password" in raw else []) + raw.get("passwords", [])
+    passwords = raw.get("passwords", {})
+    if not isinstance(passwords, dict) or set(passwords) - set(OWNERS) or (
+        "password" in raw and "santiago" in passwords
+    ):
+        raise ValueError(f"{STATEMENTS_FILE}: passwords debe tener una contrasena por titular ({', '.join(OWNERS)}).")
+    passwords = {**({"santiago": raw["password"]} if "password" in raw else {}), **passwords}
     if (
-        not passwords or any(not isinstance(item, str) or not item for item in passwords)
+        not passwords or any(not isinstance(item, str) or not item for item in passwords.values())
         or not isinstance(senders, list) or not senders
         or any(not isinstance(item, str) or not EMAIL.fullmatch(item) for item in senders)
     ):
-        raise ValueError(f"{STATEMENTS_FILE} necesita password o passwords y remitentes exactos aprobados.")
+        raise ValueError(f"{STATEMENTS_FILE} necesita passwords por titular y remitentes exactos aprobados.")
     return {"passwords": passwords, "approved_senders": [item.lower() for item in senders]}
 
 
@@ -665,21 +670,31 @@ def reconcile_statements(
 
 
 def _read_statement(
-    name: str, content: bytes, passwords: list[str], start: date, box: Mailbox,
+    name: str, content: bytes, passwords: dict[str, str], start: date, box: Mailbox,
 ) -> statements_module.Statement | None:
-    """One statement attachment of a mailbox, or None when it is not a statement to reconcile."""
+    """One statement attachment of a mailbox, or None when it is not a statement to reconcile.
+
+    It opens only with the password of the mailbox's owner: a statement of another
+    person in that mailbox stops the run instead of being counted as the owner's.
+    """
     found_name = statements_module.identify(name)
     if found_name is None:
         return None
     product, period = found_name
     if product not in statements_module.PRODUCTS or period < start.strftime("%Y%m"):
         return None
+    if box.owner not in passwords:
+        raise ValueError(f"Falta la contrasena de los extractos de {box.owner} en {STATEMENTS_FILE} (buzon {box.name}).")
     try:
         statement = statements_module.parse(
-            product, period, statements_module.decrypt_text(content, passwords),
+            product, period,
+            statements_module.decrypt_text(content, passwords[box.owner], layout=product == "CTA_AHORROS"),
         )
     except statements_module.StatementError as exc:
-        raise ValueError(f"Extracto {product} {period} del buzon {box.name}: {exc}") from exc
+        raise ValueError(
+            f"Extracto {product} {period} del buzon {box.name}: {exc} Se probo solo la de {box.owner}: "
+            "si el extracto es de otra persona, no se cuenta como suyo."
+        ) from exc
     statement.owner = box.owner
     return statement
 

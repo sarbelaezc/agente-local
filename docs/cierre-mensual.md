@@ -327,9 +327,14 @@ Fiducuenta, crédito de consumo e hipotecario):
   entra pendiente a nombre de Manuela. Si el mismo extracto de un producto
   (mismo número y corte) llega a los buzones de los dos, no se sabe de quién es:
   la conciliación se detiene sin importar nada.
-- Se leen con lectores deterministas, sin Ollama. El de ahorros se valida con el
-  saldo corrido, línea a línea; un extracto que no se lee con exactitud detiene
-  todo sin importar nada.
+- Se leen con lectores deterministas, sin Ollama. Un extracto que no se lee con
+  exactitud detiene todo sin importar nada.
+- El de ahorros se lee conservando cada fila impresa (desde la segunda página el
+  texto simple separa fechas, descripciones y valores) y se valida dos veces: el
+  saldo corrido, línea a línea, y el resumen del extracto. Saldo anterior más
+  abonos menos cargos debe dar el saldo actual, y las líneas leídas deben sumar
+  exactamente los abonos y los cargos del resumen. Si falta una sola línea, se
+  detiene.
 - El mismo dinero visto en dos extractos se cuenta una vez (pago de una tarjeta,
   adición o retiro del fondo, cuota de un crédito), y se omiten los movimientos
   que extractos consecutivos repiten.
@@ -720,18 +725,24 @@ tablas. No cambia importes, decisiones ni auditoría.
   de noviembre de la Amex y el de ahorros del cuarto trimestre.
 - Extractos del Gmail de Manuela (2026-11-18): el lector de Gmail descargó en
   solo lectura los PDF de extractos desde diciembre de 2025 (ahorros, Fiducuenta,
-  Mastercard, Visa y cesantías). La contraseña de Santiago no los abre, así que
-  `reconcile-statements -ReadOnly` se detiene en el primero hasta que su contraseña
-  esté en `passwords`.
+  Mastercard, Visa y cesantías).
+- Extractos por titular (2026-11-19), `reconcile-statements -ReadOnly`: 111
+  extractos de Santiago y 31 de Manuela, cada buzón con la contraseña de su
+  titular, sin errores. El lector de ahorros solo leía la primera página de cada
+  trimestre (33 líneas; se saltaban entre 88 y 151 por extracto). Corregido, los 20
+  extractos de ahorros de los dos titulares cuadran con su resumen. Quedan sin
+  movimiento conocido 206 líneas de ahorros de Santiago y 365 de Manuela,
+  sobre todo abonos diarios de intereses (123 y 153). La siguiente importación
+  las deja pendientes y los meses conciliados con esas líneas vuelven a parcial.
 - Las pruebas (`pytest tests\monthly_close`) cubren reglas, importes, zona
   horaria, decisiones, lectores simulados de Graph y Gmail, el lanzador y el panel
   en Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas).
 
 **Pendiente**
 
-- Leer los extractos de Manuela con su contraseña: su conciliación contra sus
-  movimientos y cuántos meses ya conciliados vuelven a parcial por movimientos que
-  solo muestran sus extractos.
+- Importar (no solo leer) los extractos de los dos titulares con el lector de
+  ahorros corregido, decidir los pendientes que dejen y ver qué meses vuelven a
+  conciliarse.
 - Si una tarjeta de Manuela cambió de número, los meses siguientes no se concilian
   solos (ver [Conciliación automática del mes](#conciliación-automática-del-mes)).
 

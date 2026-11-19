@@ -106,19 +106,20 @@ def _co_amount(text: str) -> int:
     return int(Decimal(clean) * 100)
 
 
-def decrypt_text(content: bytes, passwords: list[str]) -> str:
-    """Text of a PDF decrypted in memory with the first password that opens it.
+def decrypt_text(content: bytes, password: str, layout: bool = False) -> str:
+    """Text of a PDF decrypted in memory; the PDF is never written to disk.
 
-    Each holder's bank uses their own password, so every configured one is tried.
-    The PDF is never written to disk.
+    layout keeps each printed row on one line. The savings statement needs it: from
+    its second page on, the plain text lists dates, descriptions and amounts apart.
     """
     if len(content) > MAX_PDF_BYTES:
         raise StatementError("Extracto demasiado grande.")
     try:
         reader = PdfReader(io.BytesIO(content))
-        if reader.is_encrypted and not any(reader.decrypt(password) for password in passwords):
-            raise StatementError("Ninguna contraseña configurada abre el extracto.")
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
+        if reader.is_encrypted and not reader.decrypt(password):
+            raise StatementError("La contraseña configurada no abre el extracto.")
+        mode = "layout" if layout else "plain"
+        return "\n".join(page.extract_text(extraction_mode=mode) or "" for page in reader.pages)
     except PdfReadError as exc:
         raise StatementError("PDF de extracto ilegible.") from exc
 
@@ -162,31 +163,54 @@ def _year_for(month: int, start: date, end: date) -> int:
     return start.year if month >= start.month and start.year != end.year else end.year
 
 
+def _summary(lines: list[str], label: str) -> int:
+    """An amount of the savings statement summary, such as 'SALDO ANTERIOR $ 1,234.56'."""
+    found = _first(lines, label + r" \$ ?(-?[\d,]*\.\s?\d{2})(?: |$)")
+    if not found:
+        raise StatementError("Extracto de ahorros sin resumen de saldos.")
+    return _us_amount(found[1])
+
+
 def parse_savings(text: str) -> Statement:
+    """Savings statement, checked line by line and against its summary.
+
+    The running balance ties each line to the one before, and the summary (opening
+    balance, credits, debits and closing balance) proves that no line was left out.
+    """
     lines = _lines(text)
     period = next((SAVINGS_PERIOD.search(line) for line in lines if SAVINGS_PERIOD.search(line)), None)
-    number = next((re.search(r"^numero (\d{6,})$", line, re.I) for line in lines if re.search(r"^numero \d{6,}$", line, re.I)), None)
+    # In the layout text the account number shares its line with the address.
+    number = _first(lines, r"\bnumero (\d{6,})$")
     if not period or not number:
         raise StatementError("Extracto de ahorros sin periodo o número de cuenta.")
     start = date(int(period[1]), int(period[2]), int(period[3]))
     end = date(int(period[4]), int(period[5]), int(period[6]))
     statement = Statement("CTA_AHORROS", number[1][-4:], start, end)
-    previous: int | None = None
+    opening, closing = _summary(lines, "saldo anterior"), _summary(lines, "saldo actual")
+    credits, debits = _summary(lines, "total abonos"), _summary(lines, "total cargos")
+    previous = opening
+    amounts: list[int] = []
     for line in lines:
         match = SAVINGS_LINE.match(line)
         if not match:
             continue
         amount, balance = _us_amount(match["amount"]), _us_amount(match["balance"])
         # The running balance proves each line was read whole: previous + amount = balance.
-        if previous is not None and previous + amount != balance:
+        if previous + amount != balance:
             raise StatementError("El saldo corrido del extracto de ahorros no cuadra.")
         previous = balance
+        amounts.append(amount)
         month = int(match["month"])
         day = date(_year_for(month, start, end), month, int(match["day"]))
         description = match["desc"]
         statement.movements.append(Movement(
             day, description, -amount, "COP", _hint(description, amount < 0),
         ))
+    if (
+        previous != closing or sum(a for a in amounts if a > 0) != credits
+        or -sum(a for a in amounts if a < 0) != debits
+    ):
+        raise StatementError("Las lineas leidas del extracto de ahorros no cuadran con su resumen; falta alguna.")
     return statement
 
 

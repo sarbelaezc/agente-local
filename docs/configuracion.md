@@ -213,16 +213,20 @@ son de remitentes aprobados. Revísalo y cambia `verified` a `true`.
 `.local\MonthlyCloseAgent\statements.json`:
 
 ```json
-{"passwords": ["<contraseña de los PDF de Santiago>", "<contraseña de los PDF de Manuela>"],
+{"passwords": {"santiago": "<contraseña de los PDF de Santiago>",
+               "manuela": "<contraseña de los PDF de Manuela>"},
  "approved_senders": ["<remitente exacto del banco>", "afp_proteccion@proteccion.com"]}
 ```
 
 Los extractos se buscan en **todos los buzones** configurados, y el banco cifra los
-PDF de cada titular con su propia contraseña: pon en `passwords` la de cada uno.
-Cada PDF se prueba con todas. También se acepta la clave `password` con una sola
-contraseña, como en versiones anteriores, y se suma a la lista. Si ninguna abre un
-extracto, la conciliación se detiene y dice cuál y de qué buzón, sin importar
-nada. Escribe tú las contraseñas en el archivo: el agente nunca las pide.
+PDF de cada titular con su propia contraseña. `passwords` asigna una a cada
+titular, y los PDF de un buzón se abren **solo con la contraseña de su titular**.
+Si no la abre (por ejemplo, un extracto de otra persona reenviado a ese buzón), la
+conciliación se detiene y dice cuál y de qué buzón, sin importar nada: nunca se
+cuenta como del titular equivocado. Un buzón con extractos y sin contraseña de su
+titular también la detiene. La clave antigua `password`, con una sola contraseña,
+se toma como la de Santiago. Escribe tú las contraseñas en el archivo: el agente
+nunca las pide.
 
 Las contraseñas quedan en texto plano, fuera de Git, por decisión del usuario, y
 nunca se imprimen. Solo se leen adjuntos de esos remitentes exactos. Uso en

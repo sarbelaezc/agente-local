@@ -139,7 +139,7 @@ def test_statement_instalments_are_not_imported_again_for_a_credit_with_register
         yield Reader()
 
     monkeypatch.setattr(app, "open_source", fake_source)
-    monkeypatch.setattr(st, "decrypt_text", lambda content, password: texts[content.decode()])
+    monkeypatch.setattr(st, "decrypt_text", lambda content, password, layout=False: texts[content.decode()])
     result = app.reconcile_statements(store, folder, {}, preferences, date(2026, 1, 1), False)
     assert result["imported"] == 0
     assert statement_instalments(store) == 0
