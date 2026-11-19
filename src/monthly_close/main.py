@@ -714,6 +714,16 @@ def import_credit_ledgers(store: Store, data_dir: Path, preferences: Preferences
     return lines
 
 
+def refresh_reconciled_coverage(store: Store, preferences: Preferences) -> None:
+    """Mark the closed months the statements reconcile, and undo those that stopped qualifying."""
+    today = datetime.now(ZoneInfo(preferences.timezone)).date()
+    changed = store.update_reconciled_coverage(today)
+    if changed["reconciled"]:
+        print("Meses conciliados con los extractos: " + ", ".join(changed["reconciled"]) + ".", flush=True)
+    if changed["revoked"]:
+        print("Meses que dejaron de estar conciliados: " + ", ".join(changed["revoked"]) + ".", flush=True)
+
+
 def run_complements(store: Store, data_dir: Path, settings: dict, preferences: Preferences, start: date) -> None:
     """After a mailbox scan: reconcile the bank statements, then import the credit registers.
 
@@ -730,6 +740,7 @@ def run_complements(store: Store, data_dir: Path, settings: dict, preferences: P
         )
     if credit_ledger.load_configs(data_dir):
         print("\n".join(import_credit_ledgers(store, data_dir, preferences)), flush=True)
+    refresh_reconciled_coverage(store, preferences)
 
 
 def run_member_import(store: Store, folder: Path) -> None:
@@ -768,6 +779,7 @@ def run(args: argparse.Namespace) -> None:
         return
     if args.command == "import-manuela":
         run_member_import(store, args.source_dir.expanduser().resolve())
+        refresh_reconciled_coverage(store, store.preferences())
         return
     if args.command == "merge-category":
         if not args.source_category or not args.target_category:
@@ -780,6 +792,7 @@ def run(args: argparse.Namespace) -> None:
         return
     if args.command == "import-credit-ledger":
         print("\n".join(import_credit_ledgers(store, data_dir, store.preferences())))
+        refresh_reconciled_coverage(store, store.preferences())
         return
     if args.command == "payroll-deduction":
         if not args.owner or not args.suffix:
@@ -828,6 +841,8 @@ def run(args: argparse.Namespace) -> None:
                f"{result['imported']} importados como pendientes; decidelos en el panel."
                + (f" {result['reclassified']} pendientes reclasificados." if result["reclassified"] else ""))
         )
+        if not args.read_only:
+            refresh_reconciled_coverage(store, preferences)
         return
     if args.command == "check-config":
         if not preferences.approved_senders or settings.get("folder_scan_verified") is not True:

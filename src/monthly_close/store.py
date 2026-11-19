@@ -4,7 +4,7 @@ import json
 import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Iterator
@@ -63,6 +63,11 @@ CREATE TABLE IF NOT EXISTS statement_checks (
     checked_at TEXT NOT NULL
 );
 """
+
+MONTH = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
+# Statements that list every movement of a product. Credits only bring balances (their
+# payments leave the savings account) and Protección only figures, so they do not count.
+COVERAGE_PRODUCTS = {"CTA_AHORROS", "TARJETA_MASTERCARD", "TARJETA_AMEX", "TARJETA_VISA", "FIDUCUENTA"}
 
 # Household columns added to databases created before owners existed. The defaults keep
 # every existing movement as Santiago's, with its amount and decision untouched.
@@ -293,7 +298,7 @@ class Store:
             return db.execute("SELECT max(month) AS month FROM closes").fetchone()["month"]
 
     def record_close(self, month: str) -> None:
-        if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        if not MONTH.fullmatch(month):
             raise ValueError("Mes de cierre invalido.")
         with self.connect() as db:
             db.execute(
@@ -382,8 +387,8 @@ class Store:
                 )
                 db.execute(
                     """UPDATE coverage SET status='partial',
-                    note='Hay movimientos nuevos despues de la ultima revision manual.'
-                    WHERE month=? AND status='reviewed'""", (event["day"][:7],),
+                    note='Hay movimientos nuevos despues de la ultima revision o conciliacion.'
+                    WHERE month=? AND status IN ('reviewed','reconciled')""", (event["day"][:7],),
                 )
             db.execute("INSERT OR IGNORE INTO processed VALUES (?)", (message_id,))
             db.execute("DELETE FROM extraction_failures WHERE message_id=?", (message_id,))
@@ -1148,8 +1153,100 @@ class Store:
             month["net"] = month["personal"] + month["family"] - month["third_party"]
         return totals
 
+    def update_reconciled_coverage(self, today: date) -> dict[str, list[str]]:
+        """Mark each closed month that Santiago's statements fully reconcile; undo it when that stops.
+
+        A month is reconciled when every product with movements (savings, cards and
+        Fiducuenta) that had started by then has statements covering each of its days,
+        none of them left a movement unmatched, and the month has neither pending
+        decisions nor notices in the review queue, for any owner. A person's review is
+        never replaced. Only closed months (before today's) are considered.
+        """
+        current = today.strftime("%Y-%m")
+        with self.connect() as db:
+            periods: dict[tuple[str, str], list[tuple[date, date, int]]] = {}
+            for row in db.execute(
+                "SELECT product,suffix,period_start,period_end,missing FROM statement_checks",
+            ):
+                if row["product"] in COVERAGE_PRODUCTS:
+                    periods.setdefault((row["product"], row["suffix"]), []).append((
+                        date.fromisoformat(row["period_start"]), date.fromisoformat(row["period_end"]),
+                        row["missing"],
+                    ))
+            status = {row["month"]: row["status"] for row in db.execute("SELECT month,status FROM coverage")}
+            months = set(status) | {
+                row[0] for row in db.execute("SELECT DISTINCT substr(day,1,7) FROM transactions")
+            }
+            # A month the statements cover may have no movement at all and still be complete.
+            for rows in periods.values():
+                for start, end, _ in rows:
+                    day = start.replace(day=1)
+                    while day <= end:
+                        months.add(day.strftime("%Y-%m"))
+                        day = (day + timedelta(days=32)).replace(day=1)
+            changed: dict[str, list[str]] = {"reconciled": [], "revoked": []}
+            for month in sorted(m for m in months if MONTH.fullmatch(m) and m < current):
+                reason, used = self._reconcile_month(db, month, periods)
+                if reason is None and status.get(month) not in {"reviewed", "reconciled"}:
+                    note = (
+                        f"Conciliado automaticamente con {used} extractos de Santiago: todos sus "
+                        "movimientos coinciden, sin pendientes ni avisos en cola de ningun titular. "
+                        "Los movimientos de Manuela no tienen extractos."
+                    )
+                    db.execute(
+                        """INSERT INTO coverage VALUES (?,'reconciled',?) ON CONFLICT(month)
+                        DO UPDATE SET status='reconciled',note=excluded.note""", (month, note),
+                    )
+                    self._audit(db, "coverage-reconciled", month, f"{used} extractos")
+                    changed["reconciled"].append(month)
+                elif reason is not None and status.get(month) in {"partial", "unverified"}:
+                    # The note tells why the month is not reconciled yet; the status stays.
+                    db.execute(
+                        "UPDATE coverage SET note=? WHERE month=?",
+                        (f"Sin conciliar con los extractos: {reason}.", month),
+                    )
+                elif reason is not None and status.get(month) == "reconciled":
+                    db.execute(
+                        "UPDATE coverage SET status='partial',note=? WHERE month=?",
+                        (f"La conciliacion automatica dejo de cumplirse: {reason}.", month),
+                    )
+                    self._audit(db, "coverage-reconcile-revoked", month, reason)
+                    changed["revoked"].append(month)
+        return changed
+
+    @staticmethod
+    def _reconcile_month(
+        db: sqlite3.Connection, month: str, periods: dict[tuple[str, str], list[tuple[date, date, int]]],
+    ) -> tuple[str | None, int]:
+        """Why the month is not reconciled (None when it is) and how many statements back it."""
+        first = date.fromisoformat(month + "-01")
+        last = date(first.year + first.month // 12, first.month % 12 + 1, 1) - timedelta(days=1)
+        required = {key: rows for key, rows in periods.items() if min(start for start, _, _ in rows) <= last}
+        if not required:
+            return "no hay extractos de Santiago para el mes", 0
+        used = 0
+        for (product, _), rows in required.items():
+            overlapping = [row for row in rows if row[0] <= last and row[1] >= first]
+            day = first
+            while day <= last:
+                if not any(start <= day <= end for start, end, _ in overlapping):
+                    return f"falta el extracto de {product} que cubre el {day.isoformat()}", 0
+                day += timedelta(days=1)
+            if any(missing for _, _, missing in overlapping):
+                return f"el extracto de {product} tiene movimientos sin coincidir", 0
+            used += len(overlapping)
+        if db.execute(
+            "SELECT 1 FROM transactions WHERE day LIKE ? AND decision IS NULL LIMIT 1", (month + "-%",),
+        ).fetchone():
+            return "hay movimientos pendientes de decision", 0
+        if db.execute(
+            "SELECT 1 FROM extraction_failures WHERE day LIKE ? LIMIT 1", (month + "-%",),
+        ).fetchone():
+            return "hay avisos en la cola de revision", 0
+        return None, used
+
     def coverage(self, month: str, status: str, note: str) -> None:
-        if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        if not MONTH.fullmatch(month):
             raise ValueError("Mes invalido.")
         if status not in {"partial", "unverified", "reviewed"}:
             raise ValueError("Estado de cobertura invalido.")

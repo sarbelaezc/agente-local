@@ -106,7 +106,9 @@ También puedes habilitarlo solo para la terminal actual con
   aprobados) y, opcionalmente, `statements.json` y `credit_ledgers.json`. Ver
   [docs/configuracion.md](docs/configuracion.md).
 - **Uso.** `import` para leer y revisar; la tarea programada cierra el mes el
-  último día a las 22:00. Ver [docs/cierre-mensual.md](docs/cierre-mensual.md).
+  último día a las 22:00. Cuando los extractos de Santiago cuadran y no queda nada
+  pendiente, el mes se marca solo como **Conciliado**. Ver
+  [docs/cierre-mensual.md](docs/cierre-mensual.md).
 - **Seguridad.** El cliente de Graph solo hace peticiones `GET` y el de Gmail
   usa el permiso `gmail.readonly`: nunca envía, mueve ni marca correos. Solo abre
   mensajes de remitentes aprobados y no guarda cuerpos de correo. Toda decisión

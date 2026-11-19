@@ -237,7 +237,7 @@
     td.numeric, th.numeric { text-align: right; }
     td.empty-cell, td.waiting { color: var(--mut); }
     .status-pill { display: inline-flex; padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--ink2); font-size: 11px; font-weight: 600; }
-    .status-pill.reviewed { background: var(--green-soft); color: var(--good); }
+    .status-pill.reviewed, .status-pill.reconciled { background: var(--green-soft); color: var(--good); }
     .status-pill.partial { background: var(--orange-soft); color: var(--warn); }
     details.category-detail { border-top: 1px solid var(--line); padding: 2px 0; }
     details.category-detail:first-of-type { border-top: 0; }
@@ -698,7 +698,7 @@
       function updateCoverageSummary(month) {
         const coverage = safeArray(state.data && state.data.coverage).find(entry => entry && entry.month === month);
         $("#coverage-summary").textContent = coverage
-          ? `Cobertura: ${coverage.status === "reviewed" ? "revisada manualmente" : coverage.status === "partial" ? "parcial" : "sin verificar"}${coverage.note ? ` · ${coverage.note}` : ""}`
+          ? `Cobertura: ${coverage.status === "reviewed" ? "revisada manualmente" : coverage.status === "reconciled" ? "conciliada con los extractos" : coverage.status === "partial" ? "parcial" : "sin verificar"}${coverage.note ? ` · ${coverage.note}` : ""}`
           : "Cobertura: sin verificar";
       }
       function itemText(item) {
@@ -1729,7 +1729,7 @@
         if (withdrawals.length) minor("Retiros de inversión", formatMoney(sum(withdrawals)), "fuera del gasto");
         if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "ya incluido en el gasto");
         if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
-        if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed}`, "meses transcurridos verificados a mano");
+        if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed}`, "meses transcurridos revisados o conciliados");
         $("#year-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
 
         const categoryHost = $("#year-categories");
@@ -1911,10 +1911,11 @@
           const coverage = coverageByMonth.get(bucket.month);
           const hasImports = importedMonths.has(bucket.month);
           const isReviewed = Boolean(coverage && coverage.status === "reviewed");
+          const isReconciled = Boolean(coverage && coverage.status === "reconciled");
           const isPartial = Boolean(coverage && coverage.status === "partial");
           if (bucket.month < current) {
             elapsed++;
-            if (isReviewed) reviewed++;
+            if (isReviewed || isReconciled) reviewed++;
           }
           const monthCell = el("td");
           const title = capitalize(monthLabel(bucket.month));
@@ -1937,6 +1938,7 @@
           }
           const status = bucket.month > current ? pill("Futuro")
             : isReviewed ? pill("Revisado", "reviewed")
+              : isReconciled ? pill("Conciliado", "reconciled")
               : isPartial ? pill("Parcial", "partial")
                 : pill(hasImports ? "Sin verificar" : "Sin importación");
           if (!hasImports) {
@@ -1956,7 +1958,7 @@
         totalRow.append(
           el("td", "", "Total del año"),
           ...cells(totals, { spend: buckets.reduce((total, bucket) => total + bucketTotal(bucket), 0) }),
-          el("td", "", elapsed ? `${reviewed} de ${elapsed} revisados` : "")
+          el("td", "", elapsed ? `${reviewed} de ${elapsed} verificados` : "")
         );
         totalRow.children[1].classList.add("spend");
         foot.append(totalRow);
@@ -1966,8 +1968,8 @@
         note.hidden = elapsed === 0;
         note.className = reviewed < elapsed ? "alert warning" : "alert";
         note.textContent = reviewed < elapsed
-          ? `${reviewed} de ${elapsed} ${elapsed === 1 ? "mes transcurrido está verificado" : "meses transcurridos están verificados"} a mano. En los demás pudo faltar algún aviso del banco: un mes sin verificar no es un mes completo.`
-          : `${elapsed === 1 ? "El mes transcurrido está verificado" : `Los ${elapsed} meses transcurridos están verificados`} a mano.`;
+          ? `${reviewed} de ${elapsed} ${elapsed === 1 ? "mes transcurrido está revisado" : "meses transcurridos están revisados"} a mano o conciliados con los extractos. En los demás pudo faltar algún aviso del banco: un mes sin verificar no es un mes completo.`
+          : `${elapsed === 1 ? "El mes transcurrido está revisado" : `Los ${elapsed} meses transcurridos están revisados`} a mano o conciliados con los extractos.`;
         return { elapsed, reviewed };
       }
 

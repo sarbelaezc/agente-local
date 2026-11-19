@@ -19,6 +19,7 @@ Para instalar y configurar, ver [configuracion.md](configuracion.md).
   - [Movimientos de Manuela por archivo](#movimientos-de-manuela-por-archivo)
   - [Cuentas y transferencias entre titulares](#cuentas-y-transferencias-entre-titulares)
   - [Conciliar extractos](#conciliar-extractos)
+  - [Conciliación automática del mes](#conciliación-automática-del-mes)
   - [Créditos y nómina](#créditos-y-nómina)
   - [Unir categorías](#unir-categorías)
   - [Cierre y tarea programada](#cierre-y-tarea-programada)
@@ -64,10 +65,14 @@ solo con una tasa que pones tú. Las fechas con zona horaria se convierten a la
 zona del paso 0; nunca se supone UTC. Si el aviso no tiene fecha de compra, se usa
 la fecha local del aviso y la propuesta lo indica.
 
-**Cobertura.** Cada mes importado queda **parcial / sin conciliar**: contar correos
-no demuestra que estén todos. La forma de confirmarlo es comparar con los
-extractos y marcar el mes como revisado en el panel, con una nota de conciliación.
-Movimientos nuevos invalidan esa revisión.
+**Cobertura.** Cada mes importado empieza **parcial**: contar correos no demuestra
+que estén todos. Se confirma de dos formas:
+
+- **Conciliado** (automático): el agente lo marca cuando los extractos de Santiago
+  cuadran. Ver [Conciliación automática del mes](#conciliación-automática-del-mes).
+- **Revisado** (manual): lo marcas tú en el panel, con una nota de conciliación.
+
+Un movimiento nuevo en un mes conciliado o revisado lo devuelve a parcial.
 
 ## Primer uso
 
@@ -347,6 +352,34 @@ En el panel, «Extractos y saldos» muestra el último saldo conocido y cuántos
 movimientos de cada extracto coinciden en el mes. El grupo **Inversiones** suma
 Fiducuenta, pensión voluntaria y cesantías.
 
+## Conciliación automática del mes
+
+Después de cada lectura (`scan`, `import`, la tarea programada), de
+`reconcile-statements`, `import-manuela` e `import-credit-ledger`, y de cada
+decisión en el panel, el agente revisa los meses ya cerrados (anteriores al mes en
+curso). Un mes queda **Conciliado** si se cumple todo:
+
+1. Cada producto de Santiago que lista movimientos (cuenta de ahorros, tarjetas y
+   Fiducuenta) y que ya existía ese mes tiene extractos que cubren todos sus días.
+   Los créditos (solo traen saldos; sus pagos salen de la cuenta de ahorros) y
+   Protección (solo cifras) no cuentan.
+2. Ninguno de esos extractos dejó movimientos sin coincidir.
+3. No hay movimientos pendientes de decisión ese mes, **de ningún titular**.
+4. No hay avisos de ese mes en la cola «Avisos sin extraer», de ningún buzón.
+
+- La nota dice con cuántos extractos se concilió y que los movimientos de Manuela
+  no tienen extractos. Queda auditado como `coverage-reconciled`.
+- Si una condición deja de cumplirse (por ejemplo, una nueva lectura de un extracto
+  encuentra un movimiento sin coincidir), el mes vuelve a parcial con el motivo
+  (`coverage-reconcile-revoked`).
+- Un mes cerrado que aún no se concilia muestra en su nota el motivo, por ejemplo
+  «falta el extracto de CTA_AHORROS que cubre el 2026-10-01».
+- Nunca reemplaza tu revisión manual: un mes **Revisado** sigue así.
+- La cuenta de ahorros envía extractos **trimestrales**, así que un mes se concilia
+  cuando llega el extracto de su trimestre (los de octubre a diciembre, en enero).
+- Si un producto deja de enviar extractos (por ejemplo, una tarjeta cancelada), los
+  meses siguientes ya no se concilian solos; márcalos como revisados a mano.
+
 ## Créditos y nómina
 
 **Cuotas descontadas de la nómina.** Si la cuota de un crédito se descuenta de la
@@ -479,7 +512,7 @@ claro u oscuro del sistema y el botón «Tema» puede fijar uno.
 - Las mismas cuatro cifras para el año (Por decidir se oculta si todo está
   decidido) y chips con el promedio de gasto por mes cerrado (sin el mes en
   curso), el mes de mayor gasto, la inversión neta, retiros, efectivo, abonos y la
-  cobertura («X de N» meses verificados a mano).
+  cobertura («X de N» meses revisados a mano o conciliados con los extractos).
 - Gráfica de ingresos y gastos, categorías del año con barras y porcentaje, y
   columnas por categoría con los mismos colores que el mes. El mes en curso se ve
   más claro.
@@ -614,6 +647,7 @@ origen. Las etiquetas principales:
 | `reprocess-replace-card-payments` | Pagos de tarjeta reemplazados por `-ReprocessEmpty` |
 | `category-merge-local-user` | Categoría unida con `merge-category` |
 | `scheduled-close` | Cierre de la tarea programada |
+| `coverage`, `coverage-reconciled`, `coverage-reconcile-revoked` | Mes revisado a mano; mes conciliado automáticamente; conciliación retirada |
 | `migrate-household` | Migración de una base anterior |
 
 **Migración de bases anteriores.** Al abrir una base de una versión anterior, el
@@ -656,6 +690,9 @@ tablas. No cambia importes, decisiones ni auditoría.
   `-ReprocessEmpty`, 9 pagos de tarjeta leídos, y la cola de 15 avisos quedó vacía
   (9 informativos, 2 inversiones y 4 movimientos recuperados, más 12
   transferencias a cuenta).
+- Conciliación automática (2026-11-18), simulada en una copia de la base real:
+  enero a septiembre de 2026 quedan conciliados; octubre y noviembre, parciales
+  hasta que llegue el extracto de ahorros del cuarto trimestre.
 - Las pruebas (`pytest tests\monthly_close`) cubren reglas, importes, zona
   horaria, decisiones, lectores simulados de Graph y Gmail, el lanzador y el panel
   en Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas).
