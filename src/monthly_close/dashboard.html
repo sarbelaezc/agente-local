@@ -178,7 +178,7 @@
     #year-table td.spend { font-weight: 700; }
     td.positive { color: var(--good); }
     td.negative { color: var(--bad); }
-    .month-tag { margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--soft); color: var(--ink2); font-size: 10.5px; font-weight: 600; }
+    tr.current-month > td:first-child { box-shadow: inset 3px 0 0 var(--accent); background: var(--accent-soft); font-weight: 600; }
     #year-categories .bar-row { grid-template-columns: minmax(0, 170px) minmax(0, 1fr) auto; }
     .axis-label.current { fill: var(--ink); font-weight: 700; }
     .decision-summary strong { font-size: 30px; }
@@ -456,7 +456,7 @@
             <div id="year-category-legend" class="legend-inline"></div>
           </article>
           <article class="card">
-            <div class="card-header"><div><h3>Resumen por mes</h3><p>Toca un mes para abrirlo. Lo pendiente no suma en el gasto hasta que lo decidas.</p></div></div>
+            <div class="card-header"><div><h3>Resumen por mes</h3><p>Toca un mes para abrirlo; el mes en curso lleva una barra de color. Lo pendiente no suma en el gasto hasta que lo decidas.</p></div></div>
             <p id="year-coverage-note" class="alert warning" role="note"></p>
             <div id="year-table" class="table-wrap"></div>
           </article>
@@ -1969,7 +1969,11 @@
             open.addEventListener("click", () => goToMonth(bucket.month));
             monthCell.append(open);
           } else monthCell.textContent = title;
-          if (bucket.month === current) monthCell.append(el("span", "month-tag", "en curso"));
+          if (bucket.month === current) {
+            tr.className = "current-month";
+            tr.setAttribute("aria-current", "date");
+            monthCell.title = "Mes en curso";
+          }
           // A month without movements is not a month that cost zero: the current and coming
           // months wait for the bank's notices, and an elapsed one shows a dash.
           if (!hasImports && bucket.month >= current) {
@@ -2001,8 +2005,9 @@
         totalRow.append(
           el("td", "", "Total del año"),
           ...cells(totals, { spend: buckets.reduce((total, bucket) => total + bucketTotal(bucket), 0) }),
-          el("td", "", elapsed ? `${reviewed} de ${elapsed} verificados` : "")
+          el("td", "", elapsed ? `${reviewed}/${elapsed}` : "")
         );
+        if (elapsed) totalRow.lastElementChild.title = `${reviewed} de ${elapsed} meses transcurridos verificados`;
         totalRow.children[1].classList.add("spend");
         foot.append(totalRow);
         table.append(head, body, foot);

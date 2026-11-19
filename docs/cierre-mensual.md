@@ -174,9 +174,10 @@ para las compras pendientes, también las importadas de extractos (que llegan co
   Familiar siempre con la misma categoría, se sugiere esa. Un comercio decidido
   con categorías distintas no se sugiere así.
 - Los demás van a Ollama (hasta 60, los más frecuentes) con tu lista de
-  categorías y, como ejemplos, hasta 3 comercios ya decididos por cada uno que
-  comparten palabras con él (los números de sucursal no cuentan), además de tus
-  reglas parecidas. Ollama solo ve nombres de comercio y categorías, sin importes,
+  categorías y, como ejemplos, hasta 5 comercios ya decididos por cada uno que
+  comparten palabras con él (los números de sucursal no cuentan) o reglas tuyas
+  parecidas, con un máximo de 150 ejemplos por consulta. Ollama no recibe todo tu
+  historial ni aprende de él: cada consulta empieza de cero. Ollama solo ve nombres de comercio y categorías, sin importes,
   fechas ni cuentas. Se descartan las respuestas sobre comercios no preguntados
   o con categorías fuera de tu lista. No incluye ingresos.
 - Las sugerencias de reglas usan el mismo historial y los mismos ejemplos.
@@ -613,7 +614,9 @@ claro u oscuro del sistema y el botón «Tema» puede fijar uno.
 - **Resumen por mes:** Gasto, Personal, Familiar, Abonos, Ingresos, Balance (con
   signo y color), Inversiones, Efectivo, Pendiente y Cobertura, con fila de total.
   Un guion (—) significa que no hubo movimientos de ese tipo, nunca gasto cero; los
-  meses que aún no llegan dicen «Sin notificaciones del banco aún».
+  meses que aún no llegan dicen «Sin notificaciones del banco aún». La fila del mes
+  en curso lleva una barra de color a la izquierda, y el total de Cobertura se
+  muestra como «X/Y» (el detalle completo aparece al pasar el cursor).
 - Tocar un mes de la tabla o una barra abre ese mes.
 
 **Decisión:** ver [Decidir movimientos](#decidir-movimientos),
@@ -811,9 +814,10 @@ tablas. No cambia importes, decisiones ni auditoría.
   `qwen2.5:7b`: 62 de 64 compras pendientes de extractos con sugerencia (9 por
   regla, 51 por decisiones anteriores, 2 por Ollama), frente a 30 solo con
   Ollama. En tres muestras de comercios ya decididos y ocultados del historial
-  (148 en total), Ollama coincidió con tu categoría en 45 sin ejemplos (30 %) y
-  en 65 con ejemplos (44 %); acierta en menos de la mitad de lo que responde, así
-  que sus sugerencias hay que revisarlas. Falta decidir con las sugerencias desde
+  (148 en total), Ollama coincidió con tu categoría en 45 sin ejemplos (30 %),
+  en 59-65 con 3 ejemplos por comercio (40-44 %) y en 71-75 con 5 (48-51 %), en
+  varias corridas; acierta en cerca de la mitad de lo que responde, así que sus
+  sugerencias hay que revisarlas. Falta decidir con las sugerencias desde
   el panel.
 - Las pruebas (`pytest tests\monthly_close`) cubren reglas, importes, zona
   horaria, decisiones, lectores simulados de Graph y Gmail, el lanzador y el panel
