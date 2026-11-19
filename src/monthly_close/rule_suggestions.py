@@ -50,7 +50,8 @@ class CategoryHistory:
             return self.exact[words], "history"
         return None
 
-    def examples(self, merchants: list[str], per_merchant: int = 3, limit: int = 60) -> list[dict]:
+    # 5 examples per merchant (up to 150) measured better than 3 (up to 60) on real decisions.
+    def examples(self, merchants: list[str], per_merchant: int = 5, limit: int = 150) -> list[dict]:
         """The confirmed merchants that share the most words with the ones being asked about."""
         chosen: dict[tuple[str, str], None] = {}
         for merchant in merchants:
