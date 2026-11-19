@@ -62,7 +62,13 @@ CREATE TABLE IF NOT EXISTS statement_checks (
     matched INTEGER NOT NULL, missing INTEGER NOT NULL, balance_minor INTEGER,
     checked_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS card_series (
+    owner TEXT NOT NULL, product TEXT NOT NULL, suffix TEXT NOT NULL,
+    replaces TEXT, decided_at TEXT, PRIMARY KEY (owner, product, suffix)
+);
 """
+# card_series.replaces: NULL while a person has not answered, '' for a card of its own,
+# 'PRODUCT:SUFFIX' when it is that earlier card with a new number.
 
 MONTH = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
 # Statements that list every movement of a product. Credits only bring balances (their
@@ -1175,6 +1181,7 @@ class Store:
         """
         current = today.strftime("%Y-%m")
         with self.connect() as db:
+            self._register_card_series(db)
             periods: dict[tuple[str, str, str], list[tuple[date, date, int]]] = {}
             for row in db.execute(
                 "SELECT owner,product,suffix,period_start,period_end,missing FROM statement_checks",
@@ -1184,6 +1191,7 @@ class Store:
                         date.fromisoformat(row["period_start"]), date.fromisoformat(row["period_end"]),
                         row["missing"],
                     ))
+            periods, names, unanswered = self._join_card_series(db, periods)
             status = {row["month"]: row["status"] for row in db.execute("SELECT month,status FROM coverage")}
             months = set(status) | {
                 row[0] for row in db.execute("SELECT DISTINCT substr(day,1,7) FROM transactions")
@@ -1197,7 +1205,7 @@ class Store:
                         day = (day + timedelta(days=32)).replace(day=1)
             changed: dict[str, list[str]] = {"reconciled": [], "revoked": []}
             for month in sorted(m for m in months if MONTH.fullmatch(m) and m < current):
-                reason, used, owners = self._reconcile_month(db, month, periods)
+                reason, used, owners = self._reconcile_month(db, month, periods, names, unanswered)
                 if reason is None and status.get(month) not in {"reviewed", "reconciled"}:
                     note = (
                         f"Conciliado automaticamente con {used} extractos de {owners}: todos sus "
@@ -1225,8 +1233,132 @@ class Store:
         return changed
 
     @staticmethod
+    def _card_firsts(db: sqlite3.Connection) -> dict[tuple[str, str, str], str]:
+        """First statement start of each card number, per owner."""
+        return {
+            (row["owner"], row["product"], row["suffix"]): row["first"] for row in db.execute(
+                f"""SELECT owner,product,suffix,MIN(period_start) AS first FROM statement_checks
+                WHERE product IN ({",".join("?" * len(CARD_PRODUCTS))}) GROUP BY owner,product,suffix""",
+                sorted(CARD_PRODUCTS),
+            )
+        }
+
+    def _register_card_series(self, db: sqlite3.Connection) -> None:
+        """Ask about a card number whose statements start after another card of the same owner.
+
+        It may be that card reissued with a new number, or a new card: only a person
+        knows. Cards seen from the first statements are recorded as cards of their own.
+        """
+        known = {
+            (row["owner"], row["product"], row["suffix"])
+            for row in db.execute("SELECT owner,product,suffix FROM card_series")
+        }
+        firsts = self._card_firsts(db)
+        for key, first in sorted(firsts.items(), key=lambda item: item[1]):
+            if key in known:
+                continue
+            later = any(other[0] == key[0] and other != key and start < first for other, start in firsts.items())
+            db.execute(
+                "INSERT INTO card_series VALUES (?,?,?,?,?)",
+                (*key, None, None) if later else (*key, "", datetime.now(timezone.utc).isoformat()),
+            )
+            if later:
+                self._audit(db, "card-series-question", f"{key[0]}:{key[1]}:*{key[2]}", first)
+
+    def _card_options(self, db: sqlite3.Connection, owner: str, product: str, suffix: str) -> list[dict]:
+        """Earlier cards of the owner that a new card number may continue."""
+        firsts = self._card_firsts(db)
+        first = firsts.get((owner, product, suffix))
+        taken = {
+            row["replaces"] for row in db.execute(
+                "SELECT replaces FROM card_series WHERE owner=? AND replaces<>''", (owner,),
+            )
+        }
+        options = [
+            {"product": key[1], "suffix": key[2], "first": start, "last": db.execute(
+                "SELECT MAX(period_start) FROM statement_checks WHERE owner=? AND product=? AND suffix=?", key,
+            ).fetchone()[0]}
+            for key, start in firsts.items()
+            if key[0] == owner and first is not None and start < first and f"{key[1]}:{key[2]}" not in taken
+        ]
+        # Most likely first: the same brand, then the card whose statements stopped last.
+        options.sort(key=lambda option: option["last"], reverse=True)
+        options.sort(key=lambda option: option["product"] != product)
+        return options
+
+    def card_questions(self) -> list[dict]:
+        """Card numbers waiting for a person to say whether they replace an earlier card."""
+        with self.connect() as db:
+            firsts = self._card_firsts(db)
+            return [
+                {
+                    "owner": row["owner"], "product": row["product"], "suffix": row["suffix"],
+                    "first": firsts.get((row["owner"], row["product"], row["suffix"])),
+                    "options": self._card_options(db, row["owner"], row["product"], row["suffix"]),
+                }
+                for row in db.execute(
+                    "SELECT * FROM card_series WHERE decided_at IS NULL ORDER BY owner,product,suffix",
+                )
+            ]
+
+    def decide_card_series(self, owner: str, product: str, suffix: str, replaces: str | None) -> None:
+        """Record a person's answer: the card replaces an earlier one ('PRODUCT:SUFFIX') or is new (None)."""
+        owner = owner_id(owner)
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT decided_at FROM card_series WHERE owner=? AND product=? AND suffix=?",
+                (owner, product, suffix),
+            ).fetchone()
+            if row is None or row["decided_at"] is not None:
+                raise ValueError("No hay una pregunta pendiente para esa tarjeta.")
+            options = {f"{option['product']}:{option['suffix']}" for option in self._card_options(db, owner, product, suffix)}
+            if replaces is not None and replaces not in options:
+                raise ValueError("La tarjeta elegida no es una tarjeta anterior de ese titular.")
+            db.execute(
+                "UPDATE card_series SET replaces=?,decided_at=? WHERE owner=? AND product=? AND suffix=?",
+                (replaces or "", datetime.now(timezone.utc).isoformat(), owner, product, suffix),
+            )
+            self._audit(
+                db, "card-series-local-user", f"{owner}:{product}:*{suffix}",
+                f"reemplaza {replaces}" if replaces else "tarjeta nueva",
+            )
+
+    @staticmethod
+    def _join_card_series(
+        db: sqlite3.Connection, periods: dict[tuple[str, str, str], list[tuple[date, date, int]]],
+    ) -> tuple[dict, dict[tuple[str, str, str], str], set[tuple[str, str, str]]]:
+        """One series per card across its number changes, its display name, and unanswered numbers."""
+        links, unanswered = {}, set()
+        for row in db.execute("SELECT * FROM card_series"):
+            key = (row["owner"], row["product"], row["suffix"])
+            if row["decided_at"] is None:
+                unanswered.add(key)
+            elif row["replaces"]:
+                links[key] = (row["owner"], *row["replaces"].split(":", 1))
+
+        def root(key: tuple[str, str, str]) -> tuple[str, str, str]:
+            seen = {key}
+            while key in links and links[key] not in seen:
+                key = links[key]
+                seen.add(key)
+            return key
+
+        joined: dict[tuple[str, str, str], list[tuple[date, date, int]]] = {}
+        members: dict[tuple[str, str, str], list[tuple[str, str, str]]] = {}
+        for key in sorted(periods, key=lambda k: min(start for start, _, _ in periods[k])):
+            joined.setdefault(root(key), []).extend(periods[key])
+            members.setdefault(root(key), []).append(key)
+        names = {
+            key: " / ".join(f"{product} *{suffix}" for _, product, suffix in parts)
+            + f" de {OWNERS.get(key[0], key[0])}"
+            for key, parts in members.items()
+        }
+        return joined, names, unanswered
+
+    @staticmethod
     def _reconcile_month(
         db: sqlite3.Connection, month: str, periods: dict[tuple[str, str, str], list[tuple[date, date, int]]],
+        names: dict[tuple[str, str, str], str] | None = None, unanswered: set[tuple[str, str, str]] = frozenset(),
     ) -> tuple[str | None, int, str]:
         """Why the month is not reconciled (None when it is), how many statements back it and whose."""
         first = date.fromisoformat(month + "-01")
@@ -1236,8 +1368,15 @@ class Store:
             return "no hay extractos para el mes", 0, ""
         used = 0
         next_first = last + timedelta(days=1)
+        asked = sorted(unanswered & set(required))
+        if asked:
+            owner, product, suffix = asked[0]
+            return (
+                f"falta decidir en Decisiones si la tarjeta {product} *{suffix} de "
+                f"{OWNERS.get(owner, owner)} es nueva o reemplaza a otra"
+            ), 0, ""
         for (owner, product, suffix), rows in required.items():
-            name = f"{product} *{suffix} de {OWNERS.get(owner, owner)}"
+            name = (names or {}).get((owner, product, suffix)) or f"{product} *{suffix} de {OWNERS.get(owner, owner)}"
             if product in CARD_PRODUCTS:
                 # A card statement carries the month of its cut-off date but lists the
                 # movements since the previous cut-off, in the middle of the month before.
@@ -1322,6 +1461,7 @@ class Store:
                         "SELECT * FROM extraction_failures ORDER BY day,received,message_id",
                     )
                 ],
+                "card_questions": self.card_questions(),
             }
 
     def summary(self, month: str, owner: str = "santiago") -> str:

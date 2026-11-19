@@ -464,6 +464,11 @@
         <section id="panel-decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden>
           <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Agrupadas por destino: una decisión vale para todos los pagos pendientes a ese mismo destino, y cada movimiento sigue disponible por separado. Se muestran todos los meses de la moneda seleccionada; en COP también aparecen los movimientos USD para ingresar su tasa estimada. Las categorías solo se cuentan en gastos si eliges Personal o Familiar.</p></div></div>
           <div id="decision-summary" class="metric hero decision-summary" aria-live="polite"></div>
+          <section id="card-review" hidden>
+            <h3>Tarjetas con número nuevo · confirma cuál es</h3>
+            <p>Llegaron extractos de una tarjeta de crédito con un número que no se había visto. Si el banco te cambió el número de una tarjeta (por renovación, robo o pérdida), elige cuál era: sus extractos se juntan y la conciliación sigue. Si es una tarjeta adicional, elige «Es una tarjeta de crédito nueva». Mientras no respondas, los meses desde su primer extracto no se concilian automáticamente.</p>
+            <div id="card-list" class="decision-list"></div>
+          </section>
           <section id="extraction-review" hidden>
             <h3>Avisos sin extraer · revisión pendiente</h3>
             <p>Ollama propuso un movimiento que no aparece tal cual en el aviso, así que no se importó y el agente no guarda esa propuesta ni el texto del correo: solo estos datos para encontrarlo. Ábrelo en Outlook por su fecha, hora y remitente. Si trae un movimiento, déjalo: cada lectura lo vuelve a intentar. Si no trae ninguno (por ejemplo, es solo informativo), pulsa «Descartar aviso».</p>
@@ -2002,7 +2007,62 @@
         return { elapsed, reviewed };
       }
 
+      function cardName(product, suffix) {
+        return `${productNames[product] || product} *${suffix}`;
+      }
+
+      // A new card number: the person says which earlier card it replaces, or that it is a new card.
+      function renderCardQuestions() {
+        const questions = safeArray(state.data.card_questions).filter(question => question && inOwnerView(question));
+        $("#card-review").hidden = questions.length === 0;
+        const host = $("#card-list");
+        host.replaceChildren();
+        questions.forEach((question, index) => {
+          const card = el("article", "decision-card");
+          const name = cardName(question.product, question.suffix);
+          const owner = state.owner === "hogar" ? ` · ${ownerLabel(question.owner)}` : "";
+          card.append(
+            el("h4", "", `${name}${owner}`),
+            el("p", "hint", `Primer extracto: ${typeof question.first === "string" ? question.first.slice(0, 7) : "sin fecha"}.`)
+          );
+          const field = el("div", "field");
+          const id = `card-choice-${index}`;
+          const label = el("label", "", "¿Qué tarjeta es?");
+          label.htmlFor = id;
+          const select = el("select", "");
+          select.id = id;
+          safeArray(question.options).forEach(option => {
+            const last = typeof option.last === "string" ? `, último extracto ${option.last.slice(0, 7)}` : "";
+            const item = el("option", "", `Es la ${cardName(option.product, option.suffix)} con número nuevo${last}`);
+            item.value = `${option.product}:${option.suffix}`;
+            select.append(item);
+          });
+          const fresh = el("option", "", "Es una tarjeta de crédito nueva");
+          fresh.value = "";
+          select.append(fresh);
+          field.append(label, select);
+          const save = el("button", "button small", "Guardar");
+          save.type = "button";
+          save.setAttribute("aria-label", `Guardar qué tarjeta es la ${name}`);
+          save.addEventListener("click", () => {
+            const replaces = select.value || null;
+            const chosen = select.options[select.selectedIndex].textContent;
+            if (!window.confirm(`¿${name}: ${chosen}? No se cambia desde el panel.`)) return;
+            postJson(
+              "/api/card-series",
+              { owner: question.owner, product: question.product, suffix: question.suffix, replaces },
+              replaces ? "Tarjeta asociada: sus extractos se concilian juntos." : "Tarjeta nueva registrada."
+            );
+          });
+          const actions = el("div", "decision-actions");
+          actions.append(field, save);
+          card.append(actions);
+          host.append(card);
+        });
+      }
+
       function renderDecisions() {
+        renderCardQuestions();
         const failures = safeArray(state.data.extraction_failures);
         $("#extraction-review").hidden = failures.length === 0;
         const failureHost = $("#extraction-list");

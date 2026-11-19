@@ -407,8 +407,25 @@ curso). Un mes queda **Conciliado** si se cumple todo:
   el extracto aunque el mes ya haya pasado.
 - La cuenta de ahorros envía extractos **trimestrales**, así que un mes se concilia
   cuando llega el extracto de su trimestre (los de octubre a diciembre, en enero).
-- Si un producto deja de enviar extractos (por ejemplo, una tarjeta cancelada), los
-  meses siguientes ya no se concilian solos; márcalos como revisados a mano.
+- **Tarjeta con número nuevo.** Si llegan extractos de una tarjeta de crédito con un
+  número que no se había visto y el mismo titular ya tenía otra tarjeta con
+  extractos anteriores, el panel pregunta en **Decisiones › Tarjetas con número
+  nuevo** qué tarjeta es:
+  - «Es la Visa \*NNNN con número nuevo»: elige la tarjeta anterior del mismo
+    titular que reemplaza (primero las de la misma franquicia y las que dejaron de
+    enviar extractos más recientemente). Los extractos de los dos números se juntan
+    en una sola tarjeta, y los meses del cambio se concilian con el extracto final
+    del número viejo y el primero del nuevo.
+  - «Es una tarjeta de crédito nueva»: se concilia por su cuenta desde su primer
+    extracto, y la tarjeta anterior se sigue exigiendo.
+
+  Mientras no respondas, los meses desde su primer extracto no se concilian y su
+  nota lo dice. La respuesta pide confirmación, queda auditada
+  (`card-series-local-user`) y no se cambia desde el panel. Las tarjetas que
+  aparecen desde los primeros extractos no se preguntan.
+- Si un producto deja de enviar extractos sin reemplazo (por ejemplo, una tarjeta
+  cancelada), los meses siguientes ya no se concilian solos; márcalos como revisados
+  a mano.
 
 ## Créditos y nómina
 
@@ -750,8 +767,10 @@ tablas. No cambia importes, decisiones ni auditoría.
 - Importar (no solo leer) los extractos de los dos titulares con el lector de
   ahorros corregido, decidir los pendientes que dejen y ver qué meses vuelven a
   conciliarse.
-- Si una tarjeta de Manuela cambió de número, los meses siguientes no se concilian
-  solos (ver [Conciliación automática del mes](#conciliación-automática-del-mes)).
+- Responder la primera pregunta de tarjeta con número nuevo: la Visa de Manuela,
+  con extractos desde septiembre de 2026, y su Mastercard como única opción (las
+  dos tienen extractos de septiembre y octubre). Probado solo sobre una copia de la
+  base y con datos sintéticos.
 
 - La primera ejecución real de la tarea programada.
 - Cuánto dura en la práctica la sesión de Gmail en Testing, y si pasar la app a

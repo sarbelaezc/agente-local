@@ -108,7 +108,9 @@ También puedes habilitarlo solo para la terminal actual con
 - **Uso.** `import` para leer y revisar; la tarea programada cierra el mes el
   último día a las 22:00. Los extractos se buscan en todos los buzones y cada uno
   se concilia con los movimientos de su titular. Cuando los extractos de los dos
-  cuadran y no queda nada pendiente, el mes se marca solo como **Conciliado**. Ver
+  cuadran y no queda nada pendiente, el mes se marca solo como **Conciliado**. Si
+  aparece una tarjeta de crédito con un número nuevo, el panel pregunta si
+  reemplaza a otra tarjeta o si es una tarjeta nueva. Ver
   [docs/cierre-mensual.md](docs/cierre-mensual.md).
 - **Seguridad.** El cliente de Graph solo hace peticiones `GET` y el de Gmail
   usa el permiso `gmail.readonly`: nunca envía, mueve ni marca correos. Solo abre

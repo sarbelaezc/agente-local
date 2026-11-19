@@ -206,3 +206,109 @@ def test_a_panel_decision_reconciles_the_month_it_completes(store):
         server.server_close()
     # Real today is after January 2026, so the decision completes that month.
     assert coverage(store)["2026-01"] == "reconciled"
+
+
+def changed_card(**overrides) -> list[dict]:
+    """Savings for Q1 and a Mastercard whose number changed from *0002 to *0009 in March."""
+    return first_quarter(**{
+        "mar": check("TARJETA_MASTERCARD", "2026-03-01", "2026-03-31", suffix="0009"),
+        "apr": check("TARJETA_MASTERCARD", "2026-04-01", "2026-04-30", suffix="0009"),
+        **overrides,
+    })
+
+
+def notes(store: Store) -> dict[str, str]:
+    return {row["month"]: row["note"] for row in store.state()["coverage"]}
+
+
+def post(store: Store, path: str, payload: dict) -> httpx.Response:
+    server = create_server(store, 0)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with httpx.Client(base_url=url, trust_env=False) as client:
+            headers = {"Origin": url, "X-CSRF-Token": client.get("/api/state").json()["csrf"]}
+            return client.post(path, headers=headers, json=payload)
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def test_cards_seen_from_the_first_statements_are_not_asked_about(store):
+    store.record_statements(first_quarter(amex=check("TARJETA_AMEX", "2026-01-01", "2026-01-31", suffix="0005")), [])
+    store.update_reconciled_coverage(TODAY)
+    assert store.state()["card_questions"] == []
+
+
+def scanned(store: Store, *months: str) -> None:
+    """Months a scan already left partial, so the reconciliation writes why they are not done."""
+    for month in months:
+        store.coverage(month, "partial", "Lectura del buzon")
+
+
+def test_a_new_card_number_is_asked_and_joined_to_the_card_it_replaces(store):
+    movement(store, "a", "2026-01-10")
+    scanned(store, "2026-02", "2026-03")
+    store.record_statements(changed_card(), [])
+    store.update_reconciled_coverage(TODAY)
+    # Until a person answers, nothing is assumed: the old number lacks March and the new one is asked.
+    assert coverage(store) == {"2026-01": "reconciled", "2026-02": "partial", "2026-03": "partial"}
+    assert "falta el extracto 2026-03 de TARJETA_MASTERCARD *0002" in notes(store)["2026-02"]
+    assert "falta decidir en Decisiones si la tarjeta TARJETA_MASTERCARD *0009" in notes(store)["2026-03"]
+    [question] = store.state()["card_questions"]
+    assert (question["owner"], question["product"], question["suffix"], question["first"]) == (
+        "santiago", "TARJETA_MASTERCARD", "0009", "2026-03-01",
+    )
+    assert [(o["product"], o["suffix"], o["last"]) for o in question["options"]] == [
+        ("TARJETA_MASTERCARD", "0002", "2026-02-01"),
+    ]
+    response = post(store, "/api/card-series", {
+        "owner": "santiago", "product": "TARJETA_MASTERCARD", "suffix": "0009", "replaces": "TARJETA_MASTERCARD:0002",
+    })
+    assert response.status_code == 200, response.text
+    assert store.state()["card_questions"] == []
+    assert coverage(store) == {"2026-01": "reconciled", "2026-02": "reconciled", "2026-03": "reconciled"}
+    with store.connect() as db:
+        audit = db.execute("SELECT target,value FROM audit WHERE action='card-series-local-user'").fetchall()
+    assert [tuple(row) for row in audit] == [("santiago:TARJETA_MASTERCARD:*0009", "reemplaza TARJETA_MASTERCARD:0002")]
+    # Once answered it is not asked again, and the answer is not changed from the panel.
+    with pytest.raises(ValueError, match="pregunta pendiente"):
+        store.decide_card_series("santiago", "TARJETA_MASTERCARD", "0009", None)
+
+
+def test_a_new_credit_card_keeps_its_own_statements(store):
+    store.record_statements(changed_card(
+        mar=check("TARJETA_MASTERCARD", "2026-03-01", "2026-03-31", suffix="0002"),
+        apr=check("TARJETA_MASTERCARD", "2026-04-01", "2026-04-30", suffix="0002"),
+        new_mar=check("TARJETA_VISA", "2026-03-01", "2026-03-31", suffix="0009"),
+    ), [])
+    scanned(store, "2026-03")
+    store.update_reconciled_coverage(TODAY)
+    assert coverage(store)["2026-03"] == "partial"
+    store.decide_card_series("santiago", "TARJETA_VISA", "0009", None)
+    store.update_reconciled_coverage(TODAY)
+    # The new card is required on its own: March still lacks its April statement.
+    assert coverage(store)["2026-02"] == "reconciled"
+    assert "falta el extracto 2026-04 de TARJETA_VISA *0009" in notes(store)["2026-03"]
+    store.record_statements([check("TARJETA_VISA", "2026-04-01", "2026-04-30", suffix="0009")], [])
+    store.update_reconciled_coverage(TODAY)
+    assert coverage(store)["2026-03"] == "reconciled"
+
+
+def test_a_card_can_only_be_joined_to_an_earlier_card_of_the_same_owner(store):
+    store.record_statements(changed_card(
+        other=check("TARJETA_AMEX", "2026-01-01", "2026-01-31", suffix="0007", owner="manuela"),
+    ), [])
+    store.update_reconciled_coverage(TODAY)
+    for replaces in ("TARJETA_AMEX:0007", "TARJETA_MASTERCARD:0009", "CTA_AHORROS:0001"):
+        with pytest.raises(ValueError, match="tarjeta anterior"):
+            store.decide_card_series("santiago", "TARJETA_MASTERCARD", "0009", replaces)
+    with pytest.raises(ValueError, match="pregunta pendiente"):
+        store.decide_card_series("santiago", "TARJETA_MASTERCARD", "0002", None)
+    response = post(store, "/api/card-series", {
+        "owner": "santiago", "product": "TARJETA_MASTERCARD", "suffix": "0009", "replaces": 2,
+    })
+    assert response.status_code == 400
+    assert len(store.state()["card_questions"]) == 1
