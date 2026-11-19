@@ -119,7 +119,13 @@ def test_queued_notice_can_be_discarded_from_the_panel(dashboard):
     page.wait_for_load_state("networkidle")
     page.locator("#tab-decisions").click()
     review = page.locator("#extraction-review")
-    assert "Evidencia no literal: monto" in review.inner_text()
+    assert "el monto que propuso Ollama no aparece en el aviso" in review.inner_text()
+    assert "12:00" in review.inner_text()  # the time, to find it among the same day's alerts
+    # The queue and the movements to decide never overlap: the queue ends before the list starts.
+    expect(page.locator("#pending-heading")).to_be_visible()
+    queue_box = review.bounding_box()
+    list_box = page.locator("#pending-list").bounding_box()
+    assert queue_box["y"] + queue_box["height"] < list_box["y"]
     # Cancelling the confirmation keeps the notice in the queue.
     asked = []
     page.once("dialog", lambda dialog: (asked.append(dialog.message), dialog.dismiss()))

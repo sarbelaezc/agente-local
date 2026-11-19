@@ -218,8 +218,15 @@ cuentas excluidas no se pueden sumar a inversiones.
 
 Cuando lo que propone Ollama no aparece literalmente en el aviso, se le pide
 **una sola corrección**. Si vuelve a fallar, el aviso no se importa ni se marca
-como procesado: queda en «Avisos sin extraer» (en **Decisión**) con remitente,
-asunto, fecha y el campo rechazado, y el recorrido sigue con los demás.
+como procesado: queda en «Avisos sin extraer» (en **Decisión**, en un bloque aparte
+de los movimientos por decidir) con remitente, asunto, fecha y hora, carpeta y el
+motivo, y el recorrido sigue con los demás.
+
+El agente **no guarda** la propuesta rechazada ni el texto del correo: la propuesta
+no es confiable (no coincidió con el aviso) y el cuerpo nunca se almacena. Por eso
+la tarjeta no muestra monto ni comercio. Para decidir, abre el aviso en Outlook por
+su fecha, hora y remitente: si trae un movimiento, déjalo en la cola (cada lectura
+lo reintenta); si no trae ninguno, descártalo.
 
 - El campo rechazado indica el motivo: `merchant` (comercio), `amount_text`
   (monto), `events` (el aviso dice que salió dinero y no se extrajo nada) o
