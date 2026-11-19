@@ -485,6 +485,10 @@
               <div class="field"><label for="rule-decision">Tipo</label><select id="rule-decision" name="decision"><option value="personal">Gasto personal</option><option value="family">Familiar</option><option value="income">Ingreso</option></select></div>
               <button type="submit" class="button primary">Guardar regla</button>
             </form>
+            <h3 style="margin:18px 0 6px">Sugerencias de Ollama</h3>
+            <p class="hint">Ollama local propone una categoría para los comercios pendientes sin regla (solo ve el nombre del comercio). Tú eliges Personal o Familiar y apruebas cada una; nada se guarda hasta entonces.</p>
+            <button type="button" id="suggest-rules" class="button">Sugerir reglas</button>
+            <div id="rule-suggestions" class="decision-list" style="margin-top:12px"></div>
             <div id="rules-list" class="decision-list" style="margin-top:12px"></div>
             <h3 style="margin:18px 0 6px">Reglas por destino</h3>
             <p class="hint">Se crean al marcar «Aplicar también a pagos futuros» en una tarjeta de destino. Borrar una regla conserva las decisiones que ya tomó.</p>
@@ -2307,6 +2311,71 @@
           groupHost.append(card);
         });
       }
+
+      let ruleSuggestions = [];
+
+      function renderRuleSuggestions() {
+        const host = $("#rule-suggestions");
+        host.replaceChildren();
+        const categories = safeArray(state.data && state.data.categories).filter(category => typeof category === "string");
+        ruleSuggestions.forEach(suggestion => {
+          const card = el("article", "decision-card");
+          const pattern = el("input");
+          pattern.value = suggestion.pattern;
+          pattern.maxLength = 60;
+          pattern.setAttribute("aria-label", "El comercio contiene");
+          const category = el("select");
+          category.setAttribute("aria-label", `Categoría para ${suggestion.pattern}`);
+          categories.forEach(name => {
+            const option = el("option", "", name);
+            option.value = name;
+            option.selected = name === suggestion.category;
+            category.append(option);
+          });
+          const kind = el("select");
+          kind.setAttribute("aria-label", `Tipo para ${suggestion.pattern}`);
+          [["personal", "Gasto personal"], ["family", "Familiar"]].forEach(([value, label]) => {
+            const option = el("option", "", label);
+            option.value = value;
+            kind.append(option);
+          });
+          const approve = el("button", "button small primary", "Aprobar regla");
+          approve.type = "button";
+          approve.addEventListener("click", async () => {
+            const saved = await postJson("/api/rules", { pattern: pattern.value, category: category.value, decision: kind.value }, "Regla guardada y aplicada a las compras pendientes.");
+            if (saved) { ruleSuggestions = ruleSuggestions.filter(item => item !== suggestion); renderRuleSuggestions(); }
+          });
+          const skip = el("button", "button small", "Descartar");
+          skip.type = "button";
+          skip.addEventListener("click", () => { ruleSuggestions = ruleSuggestions.filter(item => item !== suggestion); renderRuleSuggestions(); });
+          const actions = el("div", "decision-actions");
+          actions.append(pattern, category, kind, approve, skip);
+          card.append(el("p", "hint", `${suggestion.count} compra(s) pendiente(s)`), actions);
+          host.append(card);
+        });
+      }
+
+      $("#suggest-rules").addEventListener("click", async () => {
+        if (state.busy || !state.data || !state.data.csrf) return;
+        showMessage("Pidiendo sugerencias a Ollama…", "success");
+        setBusy(true);
+        try {
+          const response = await fetch("/api/rules/suggest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json", "X-CSRF-Token": state.data.csrf },
+            body: "{}"
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `El servidor respondió ${response.status}`);
+          ruleSuggestions = safeArray(body.suggestions).filter(item => item && typeof item.pattern === "string" && typeof item.category === "string");
+          renderRuleSuggestions();
+          showMessage(ruleSuggestions.length ? `${ruleSuggestions.length} sugerencia(s) por revisar.` : "Ollama no tiene sugerencias para los comercios pendientes.");
+        } catch (error) {
+          showMessage(`No se pudieron pedir sugerencias: ${error.message}`, "error");
+        } finally {
+          setBusy(false);
+        }
+      });
 
       $("#rule-decision").addEventListener("change", () => { if (state.data) renderRules(); });
       $("#rule-form").addEventListener("submit", async event => {

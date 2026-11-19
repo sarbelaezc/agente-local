@@ -142,7 +142,23 @@ pista, con botones que deciden todos sus movimientos a la vez.
 
 En **Decisión**, «Reglas por comercio» evita repetir la misma decisión: «si el
 comercio contiene `PRIMAX`, es Transporte y Familiar». Las escribes tú; Ollama no
-las crea ni las aplica.
+las aplica ni decide nada por su cuenta.
+
+### Sugerencias de Ollama
+
+El botón **Sugerir reglas** (en «Reglas por comercio») pide a Ollama una categoría
+para los comercios de compras pendientes que ninguna regla cubre (hasta 25, los más
+frecuentes primero). Requiere un `runtime.json` válido y Ollama activo.
+
+- Ollama solo recibe los nombres de esos comercios y tu lista de categorías; no
+  ve importes, fechas ni cuentas. Su respuesta se trata como texto no confiable:
+  se descartan los comercios que no se le preguntaron y las categorías que no
+  están en tu lista.
+- Cada sugerencia aparece con el comercio (editable), la categoría y el tipo
+  (Gasto personal o Familiar). **Aprobar regla** la guarda como una regla normal,
+  con su auditoría; **Descartar** la quita. Ollama no elige Personal o Familiar,
+  y mientras no apruebes no se guarda ni se decide nada.
+- Las sugerencias no se conservan: al recargar el panel hay que pedirlas de nuevo.
 
 - Coinciden por palabras completas, sin distinguir mayúsculas ni signos: `UBER`
   coincide con `UBER*RIDES`, pero `IPS` no coincide con `TIPS`. Si coinciden
@@ -758,6 +774,8 @@ tablas. No cambia importes, decisiones ni auditoría.
   abono por…» quedaba en cola porque el lector fijo no lo reconocía y Ollama lo
   proponía como préstamo. Leído de nuevo en solo lectura, ahora sale sin Ollama
   como un pago de tarjeta pendiente.
+- Sugerencias de reglas con Ollama: cubiertas solo con pruebas y un modelo
+  simulado; no se han probado con Ollama ni con datos reales.
 - Las pruebas (`pytest tests\monthly_close`) cubren reglas, importes, zona
   horaria, decisiones, lectores simulados de Graph y Gmail, el lanzador y el panel
   en Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas).

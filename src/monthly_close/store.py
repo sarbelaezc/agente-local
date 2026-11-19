@@ -471,6 +471,23 @@ class Store:
             decided += 1
         return decided
 
+    def unruled_merchants(self, limit: int = 25) -> list[dict]:
+        """Merchants of pending purchases that no rule covers, most frequent first."""
+        with self.connect() as db:
+            pending = db.execute(
+                """SELECT merchant FROM transactions
+                WHERE decision IS NULL AND kind='purchase' AND id NOT LIKE 'stmt:%'
+                AND """ + NOT_DUPLICATE,
+            ).fetchall()
+        patterns = [rule["pattern"] for rule in self.rules() if rule["decision"] != "income"]
+        counts: dict[str, int] = {}
+        for row in pending:
+            words = merchant_words(row["merchant"])
+            if len(words.strip()) >= 3 and not any(f" {pattern} " in words for pattern in patterns):
+                counts[words.strip()] = counts.get(words.strip(), 0) + 1
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
+        return [{"merchant": merchant, "count": count} for merchant, count in ranked]
+
     def _apply_group_rules(self) -> int:
         """Decide pending movements whose destination has a remembered decision."""
         with self.connect() as db:

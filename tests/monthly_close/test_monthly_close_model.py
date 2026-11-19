@@ -109,3 +109,21 @@ def test_amount_constraints_only_use_literal_currency_marked_amounts(
     )
     properties = seen[0]["format"]["properties"]["events"]["items"]["properties"]
     assert properties["amount_text"].get("enum") == expected
+
+
+def test_suggest_categories_constrains_merchants_and_categories(monkeypatch):
+    seen = []
+    real_client = httpx.Client
+
+    def handle(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"message": {"content": '{"suggestions":[]}'}})
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(handle), **kwargs,
+    ))
+    model = OllamaJsonModel("http://127.0.0.1:11434", "test")
+    assert model.suggest_categories(["FLYPASS"], ["Transporte"]) == {"suggestions": []}
+    item = seen[0]["format"]["properties"]["suggestions"]["items"]["properties"]
+    assert item["merchant"]["enum"] == ["FLYPASS"] and item["category"]["enum"] == ["Transporte"]
+    assert "tools" not in seen[0]

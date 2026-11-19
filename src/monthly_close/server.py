@@ -8,14 +8,19 @@ from importlib.resources import files
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from shared.local_model import LocalModelError
+from monthly_close.rule_suggestions import CategoryModel, suggest_rules
 from monthly_close.store import Store
 
 # Changes that can complete or reopen a month, so its reconciliation is checked again.
 RECONCILE_AFTER = {"/api/decision", "/api/decision-group", "/api/failure/dismiss", "/api/card-series"}
 
 
-def create_server(store: Store, port: int = 8766) -> HTTPServer:
-    """Serve the dashboard on loopback only, with strict Host/Origin and CSRF checks."""
+def create_server(store: Store, port: int = 8766, model: CategoryModel | None = None) -> HTTPServer:
+    """Serve the dashboard on loopback only, with strict Host/Origin and CSRF checks.
+
+    `model` is the optional local Ollama client used only to suggest rules; it never writes.
+    """
     csrf = secrets.token_urlsafe(32)
 
     class Handler(BaseHTTPRequestHandler):
@@ -126,6 +131,11 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                     if not all(isinstance(value, str) for value in (pattern, category, decision)):
                         raise ValueError("Regla invalida.")
                     store.add_rule(pattern, category, decision)
+                elif self.path == "/api/rules/suggest":
+                    if model is None:
+                        raise ValueError("Ollama no esta configurado: revisa runtime.json.")
+                    self.json_response(200, {"suggestions": suggest_rules(store, model)})
+                    return
                 elif self.path == "/api/rules/delete":
                     if type(raw.get("id")) is not int:
                         raise ValueError("Regla invalida.")
@@ -154,7 +164,7 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                     store.update_reconciled_coverage(
                         datetime.now(ZoneInfo(store.preferences().timezone)).date(),
                     )
-            except (ValueError, TypeError, ZoneInfoNotFoundError) as exc:
+            except (ValueError, TypeError, ZoneInfoNotFoundError, LocalModelError) as exc:
                 self.json_response(400, {"error": str(exc)})
                 return
             self.json_response(200, {"ok": True})

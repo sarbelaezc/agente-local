@@ -172,3 +172,80 @@ def test_dismissing_a_queued_notice_removes_it_and_blocks_normal_retries(store):
     assert store.seen("notice") and store.processed_without_events("notice")
     with pytest.raises(ValueError):
         store.dismiss_failure("notice")
+
+
+class FakeCategoryModel:
+    def __init__(self, suggestions):
+        self.suggestions = suggestions
+        self.asked = None
+
+    def suggest_categories(self, merchants, categories):
+        self.asked = (merchants, categories)
+        return {"suggestions": self.suggestions}
+
+
+def test_suggestions_cover_only_unruled_merchants_and_save_nothing(store):
+    from monthly_close.rule_suggestions import suggest_rules
+
+    store.add_rule("UBER", TRANSPORT, "personal")
+    store.import_message("m1", [
+        event("a", "UBER*RIDES"), event("b", "FLYPASS PEAJE"), event("c", "FLYPASS PEAJE"),
+        event("d", "TIENDA LUNA", kind="transfer"),
+    ])
+    model = FakeCategoryModel([
+        {"merchant": "FLYPASS PEAJE", "category": TRANSPORT},
+        {"merchant": "UBER RIDES", "category": TRANSPORT},  # already covered by a rule
+        {"merchant": "OTRO", "category": TRANSPORT},  # never asked
+        {"merchant": "FLYPASS PEAJE", "category": "Inventada"},  # unauthorized category
+        "basura",
+    ])
+
+    assert suggest_rules(store, model) == [{"pattern": "FLYPASS PEAJE", "category": TRANSPORT, "count": 2}]
+    assert model.asked[0] == ["FLYPASS PEAJE"]
+    assert len(store.rules()) == 1
+    assert rows(store)["b"]["decision"] is None
+
+
+def test_suggestion_with_no_pending_merchants_does_not_call_the_model(store):
+    from monthly_close.rule_suggestions import suggest_rules
+
+    class Unused:
+        def suggest_categories(self, merchants, categories):
+            raise AssertionError("no merchants to ask about")
+
+    assert suggest_rules(store, Unused()) == []
+
+
+def test_suggest_endpoint_needs_csrf_and_a_model_and_never_writes(store):
+    import threading
+
+    import httpx
+
+    from monthly_close.server import create_server
+
+    store.import_message("m1", [event("a", "FLYPASS PEAJE")])
+    model = FakeCategoryModel([{"merchant": "FLYPASS PEAJE", "category": TRANSPORT}])
+    servers = [create_server(store, 0, model), create_server(store, 0)]
+    threads = [threading.Thread(target=server.serve_forever) for server in servers]
+    for thread in threads:
+        thread.start()
+    try:
+        results = []
+        for server in servers:
+            url = f"http://127.0.0.1:{server.server_port}"
+            with httpx.Client(base_url=url, trust_env=False) as client:
+                headers = {"Origin": url, "X-CSRF-Token": client.get("/api/state").json()["csrf"]}
+                assert client.post("/api/rules/suggest", json={}).status_code == 403
+                results.append(client.post("/api/rules/suggest", headers=headers, json={}))
+    finally:
+        for server in servers:
+            server.shutdown()
+        for thread in threads:
+            thread.join(timeout=5)
+        for server in servers:
+            server.server_close()
+
+    assert results[0].status_code == 200
+    assert results[0].json() == {"suggestions": [{"pattern": "FLYPASS PEAJE", "category": TRANSPORT, "count": 1}]}
+    assert results[1].status_code == 400 and "Ollama" in results[1].json()["error"]
+    assert store.rules() == [] and rows(store)["a"]["decision"] is None

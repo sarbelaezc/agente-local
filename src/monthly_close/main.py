@@ -808,7 +808,12 @@ def run(args: argparse.Namespace) -> None:
     data_dir = args.data_dir.expanduser().resolve()
     store = Store(data_dir / "close.sqlite3")
     if args.command == "serve":
-        server = create_server(store, args.port)
+        try:
+            settings = runtime(data_dir)
+            model = OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
+        except (ValueError, OSError):
+            model = None  # Without a valid runtime.json the panel works, minus rule suggestions.
+        server = create_server(store, args.port, model)
         print(f"Panel local: http://127.0.0.1:{server.server_port}", flush=True)
         try:
             server.serve_forever()
