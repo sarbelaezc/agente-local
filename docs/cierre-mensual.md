@@ -635,6 +635,9 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 | «transferiste $X a la llave K desde tu cuenta *N a NOMBRE» | Transferencia a NOMBRE con la llave y la hora |
 | «recibiste una transferencia de NOMBRE por $X» | Ingreso pendiente con el nombre de quien envía |
 
+Las tres últimas frases se reconocen aunque el correo las parta en varias líneas
+(por ejemplo «…hizo» al final de una línea y «un abono por…» en la siguiente).
+
 De las cuentas y llaves numéricas se guardan solo los últimos 4 dígitos. Si la
 frase no dice el destino o es ambigua, no se asigna; no se adivinan formatos. Al
 modelo se le indica además que «transferiste» o «pagaste» nunca es ingreso y que
@@ -734,6 +737,10 @@ tablas. No cambia importes, decisiones ni auditoría.
   movimiento conocido 206 líneas de ahorros de Santiago y 365 de Manuela,
   sobre todo abonos diarios de intereses (123 y 153). La siguiente importación
   las deja pendientes y los meses conciliados con esas líneas vuelven a parcial.
+- Abono a tarjeta partido en dos líneas (2026-11-19): un aviso real «…hizo⏎un
+  abono por…» quedaba en cola porque el lector fijo no lo reconocía y Ollama lo
+  proponía como préstamo. Leído de nuevo en solo lectura, ahora sale sin Ollama
+  como un pago de tarjeta pendiente.
 - Las pruebas (`pytest tests\monthly_close`) cubren reglas, importes, zona
   horaria, decisiones, lectores simulados de Graph y Gmail, el lanzador y el panel
   en Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas).
