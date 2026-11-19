@@ -169,13 +169,22 @@ En **Decisión**, el botón **Sugerir categorías con Ollama** propone una categ
 para las compras pendientes, también las importadas de extractos (que llegan como
 «Otros gastos»). Requiere un `runtime.json` válido y Ollama activo.
 
-- Ollama recibe solo los nombres de comercio (hasta 60, los más frecuentes) y tu
-  lista de categorías. Se descartan las respuestas sobre comercios no preguntados
+- Primero, sin Ollama: si una de tus reglas por comercio coincide, se sugiere su
+  categoría; si no, y ya decidiste ese mismo comercio como Gasto personal o
+  Familiar siempre con la misma categoría, se sugiere esa. Un comercio decidido
+  con categorías distintas no se sugiere así.
+- Los demás van a Ollama (hasta 60, los más frecuentes) con tu lista de
+  categorías y, como ejemplos, hasta 3 comercios ya decididos por cada uno que
+  comparten palabras con él (los números de sucursal no cuentan), además de tus
+  reglas parecidas. Ollama solo ve nombres de comercio y categorías, sin importes,
+  fechas ni cuentas. Se descartan las respuestas sobre comercios no preguntados
   o con categorías fuera de tu lista. No incluye ingresos.
-- La sugerencia solo **preselecciona** la categoría, con la nota «Sugerida por
-  Ollama». En un movimiento queda en su selector de categoría; en la tarjeta de un
-  destino cuyos movimientos tienen la misma sugerencia aparece un selector
-  «Categoría para Gasto personal o Familiar».
+- Las sugerencias de reglas usan el mismo historial y los mismos ejemplos.
+- La sugerencia solo **preselecciona** la categoría, con una nota que dice si
+  viene de tus reglas, de tus decisiones anteriores o de Ollama. En un movimiento
+  queda en su selector de categoría; en la tarjeta de un destino cuyos
+  movimientos tienen la misma sugerencia aparece un selector «Categoría para
+  Gasto personal o Familiar».
 - Nada se guarda hasta que pulsas una decisión. Con Gasto personal o Familiar en la
   tarjeta del destino, todos sus movimientos toman la categoría elegida, con la
   misma validación todo o nada y una auditoría por movimiento. Las demás
@@ -798,9 +807,14 @@ tablas. No cambia importes, decisiones ni auditoría.
   como un pago de tarjeta pendiente.
 - Sugerencias de reglas con Ollama: probadas por el usuario en el panel con datos
   reales (2026-11-19); una regla sugerida, ajustada y aprobada.
-- Sugerencias de categoría (2026-11-19), en solo lectura sobre la base real: Ollama
-  propuso categoría para 30 de 64 compras pendientes de extractos en 6 s, sin
-  guardar nada. Falta decidir con ellas desde el panel.
+- Sugerencias de categoría (2026-11-19), en solo lectura sobre la base real con
+  `qwen2.5:7b`: 62 de 64 compras pendientes de extractos con sugerencia (9 por
+  regla, 51 por decisiones anteriores, 2 por Ollama), frente a 30 solo con
+  Ollama. En tres muestras de comercios ya decididos y ocultados del historial
+  (148 en total), Ollama coincidió con tu categoría en 45 sin ejemplos (30 %) y
+  en 65 con ejemplos (44 %); acierta en menos de la mitad de lo que responde, así
+  que sus sugerencias hay que revisarlas. Falta decidir con las sugerencias desde
+  el panel.
 - Las pruebas (`pytest tests\monthly_close`) cubren reglas, importes, zona
   horaria, decisiones, lectores simulados de Graph y Gmail, el lanzador y el panel
   en Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas).

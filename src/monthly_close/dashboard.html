@@ -2144,8 +2144,13 @@
         renderRules();
       }
 
-      // Movement id -> category proposed by Ollama; kept only in this page, never saved.
+      // Movement id -> {category, source} proposed for pending purchases; kept only in this page, never saved.
       let categorySuggestions = {};
+      const suggestionNotes = {
+        rule: "Sugerida por una de tus reglas; cámbiala si no corresponde.",
+        history: "Sugerida por tus decisiones anteriores de este comercio; cámbiala si no corresponde.",
+        ollama: "Sugerida por Ollama; cámbiala si no corresponde."
+      };
       const decidedValues = new Set(["income", "personal", "family", "investment", "investment_withdrawal", "cash_withdrawal", "exclude", "third_party_payment"]);
       const counterpartKinds = new Set(["transfer", "own_transfer", "income", "unknown", "card_payment", "pse"]);
 
@@ -2232,7 +2237,8 @@
         remember.type = "checkbox";
         remember.id = `group-remember-${decisionCardSequence++}`;
         // An Ollama suggestion shared by every movement is offered as the destination's category.
-        const suggestedSet = new Set(entry.rows.map(tx => categorySuggestions[tx.id]));
+        const groupSuggestions = entry.rows.map(tx => categorySuggestions[tx.id]);
+        const suggestedSet = new Set(groupSuggestions.map(item => item && item.category));
         const suggested = !isPrevious && suggestedSet.size === 1 ? [...suggestedSet][0] : undefined;
         let groupCategory = null;
         if (typeof suggested === "string" && entry.rows.every(tx => tx.kind === "purchase")) {
@@ -2247,7 +2253,7 @@
             option.selected = category === suggested;
             groupCategory.append(option);
           });
-          field.append(label, groupCategory, el("p", "hint", "Sugerida por Ollama; cámbiala si no corresponde."));
+          field.append(label, groupCategory, el("p", "hint", suggestionNotes[groupSuggestions[0].source] || suggestionNotes.ollama));
           card.append(field);
         }
         const actions = el("div", "decision-actions");
@@ -2424,10 +2430,13 @@
 
       $("#suggest-categories").addEventListener("click", () => askOllama("/api/category-suggestions", body => {
         const raw = body && typeof body.by_id === "object" && body.by_id ? body.by_id : {};
-        categorySuggestions = Object.fromEntries(Object.entries(raw).filter(([, category]) => typeof category === "string"));
+        categorySuggestions = Object.fromEntries(Object.entries(raw).filter(([, item]) =>
+          item && typeof item.category === "string" && ["rule", "history", "ollama"].includes(item.source)));
         renderDecisions();
-        const count = Object.keys(categorySuggestions).length;
-        return count ? `Categoría sugerida en ${count} compra(s) pendiente(s). Revísala y decide.` : "Ollama no sugirió categorías: no hay compras pendientes o no reconoció los comercios.";
+        const values = Object.values(categorySuggestions);
+        const own = values.filter(item => item.source !== "ollama").length;
+        return values.length ? `Categoría sugerida en ${values.length} compra(s) pendiente(s) (${own} por tus reglas o decisiones anteriores, ${values.length - own} por Ollama). Revísala y decide.`
+          : "No hay sugerencias: no quedan compras pendientes o ni tu historial ni Ollama reconocieron los comercios.";
       }));
 
       $("#rule-decision").addEventListener("change", () => { if (state.data) renderRules(); });
@@ -2476,9 +2485,9 @@
         });
         categoryField.append(categoryLabel, categorySelect);
         const suggested = !isPrevious && !isIncome && tx.decision == null ? categorySuggestions[tx.id] : undefined;
-        if (typeof suggested === "string" && categories.includes(suggested)) {
-          categorySelect.value = suggested;
-          categoryField.append(el("p", "hint", "Sugerida por Ollama; cámbiala si no corresponde."));
+        if (suggested && categories.includes(suggested.category)) {
+          categorySelect.value = suggested.category;
+          categoryField.append(el("p", "hint", suggestionNotes[suggested.source] || suggestionNotes.ollama));
         }
         card.append(categoryField);
         let currencySelect = null, rateInput = null;

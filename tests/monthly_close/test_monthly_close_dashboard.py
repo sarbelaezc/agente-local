@@ -696,7 +696,8 @@ def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(da
     ])
     page.route("**/api/category-suggestions", lambda route: route.fulfill(
         status=200, content_type="application/json",
-        body='{"by_id":{"stmt:6":"Transporte","stmt:7":"Transporte"}}',
+        body='{"by_id":{"stmt:6":{"category":"Transporte","source":"history"},'
+             '"stmt:7":{"category":"Transporte","source":"history"}}}',
     ))
     page.reload()
     page.wait_for_load_state("networkidle")
@@ -704,6 +705,7 @@ def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(da
     page.get_by_role("button", name="Sugerir categorías con Ollama").click()
     group_select = page.get_by_label("Categoría para Gasto personal o Familiar")
     expect(group_select).to_have_value("Transporte")
+    expect(page.get_by_text("Sugerida por tus decisiones anteriores de este comercio").first).to_be_visible()
     assert all(row["decision"] is None for row in store.state()["transactions"] if row["id"].startswith("stmt:"))
     page.get_by_role("button", name=re.compile("^Familiar: 2 movimientos")).click()
     expect(page.get_by_role("status").filter(has_text="2 movimientos")).to_be_visible()

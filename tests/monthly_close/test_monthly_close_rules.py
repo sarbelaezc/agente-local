@@ -179,8 +179,9 @@ class FakeCategoryModel:
         self.suggestions = suggestions
         self.asked = None
 
-    def suggest_categories(self, merchants, categories):
+    def suggest_categories(self, merchants, categories, examples=None):
         self.asked = (merchants, categories)
+        self.examples = examples
         return {"suggestions": self.suggestions}
 
 
@@ -210,7 +211,7 @@ def test_suggestion_with_no_pending_merchants_does_not_call_the_model(store):
     from monthly_close.rule_suggestions import suggest_rules
 
     class Unused:
-        def suggest_categories(self, merchants, categories):
+        def suggest_categories(self, merchants, categories, examples=None):
             raise AssertionError("no merchants to ask about")
 
     assert suggest_rules(store, Unused()) == []
@@ -264,7 +265,8 @@ def test_pending_category_suggestions_include_statement_purchases_and_save_nothi
         {"merchant": "EMPRESA SA", "category": TRANSPORT},
     ])
 
-    assert suggest_pending_categories(store, model) == {"stmt:1": TRANSPORT, "stmt:2": TRANSPORT}
+    suggestion = {"category": TRANSPORT, "source": "ollama"}
+    assert suggest_pending_categories(store, model) == {"stmt:1": suggestion, "stmt:2": suggestion}
     assert set(model.asked[0]) == {"FLYPASS PEAJE", "TIENDA LUNA"}
     assert all(row["decision"] is None and row["category"] != TRANSPORT for row in rows(store).values())
 
@@ -282,3 +284,33 @@ def test_group_decision_applies_the_chosen_category_all_or_nothing(store):
 
     assert store.decide_group(owner, group, "family", category=TRANSPORT) == 2
     assert {(row["decision"], row["category"]) for row in rows(store).values()} == {("family", TRANSPORT)}
+
+
+def test_rules_and_consistent_past_decisions_answer_without_the_model(store):
+    from monthly_close.rule_suggestions import suggest_pending_categories
+
+    store.add_rule("PEAJE", TRANSPORT, "family")
+    store.import_message("old", [
+        event("h1", "TIENDA LUNA 123"), event("h2", "TIENDA LUNA 123"),
+        event("x1", "DROGUERIA SOL"), event("x2", "DROGUERIA SOL"),
+    ])
+    store.decide("h1", "personal", "Salud y farmacia")
+    store.decide("h2", "family", "Salud y farmacia")
+    store.decide("x1", "personal", "Salud y farmacia")
+    store.decide("x2", "personal", "Compras")  # ambiguous merchant: only an example
+    store.import_message("stmt", [
+        event("stmt:1", "FLYPASS PEAJE"), event("stmt:2", "TIENDA LUNA 123"),
+        event("stmt:3", "DROGUERIA SOL"), event("stmt:4", "LUNA TIENDA NORTE"),
+    ])
+    model = FakeCategoryModel([{"merchant": "DROGUERIA SOL", "category": "Compras"}])
+
+    result = suggest_pending_categories(store, model)
+
+    assert result["stmt:1"] == {"category": TRANSPORT, "source": "rule"}
+    assert result["stmt:2"] == {"category": "Salud y farmacia", "source": "history"}
+    assert result["stmt:3"] == {"category": "Compras", "source": "ollama"}
+    assert sorted(model.asked[0]) == ["DROGUERIA SOL", "LUNA TIENDA NORTE"]
+    # Examples are the confirmed merchants that share words with the asked ones.
+    assert {"merchant": "TIENDA LUNA 123", "category": "Salud y farmacia"} in model.examples
+    assert {"merchant": "DROGUERIA SOL", "category": "Compras"} in model.examples
+    assert all(row["decision"] is None for key, row in rows(store).items() if key.startswith("stmt:"))

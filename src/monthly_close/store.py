@@ -478,6 +478,14 @@ class Store:
                 "SELECT id,merchant FROM transactions WHERE decision IS NULL AND kind='purchase'",
             )]
 
+    def confirmed_purchase_categories(self) -> list[dict]:
+        """Merchant and category of purchases a person (or their rule) decided as expense."""
+        with self.connect() as db:
+            return [dict(row) for row in db.execute(
+                """SELECT merchant,category FROM transactions
+                WHERE kind='purchase' AND decision IN ('personal','family') AND category IS NOT NULL""",
+            )]
+
     def unruled_merchants(self, limit: int = 25) -> list[dict]:
         """Merchants of pending purchases that no rule covers, most frequent first."""
         with self.connect() as db:
