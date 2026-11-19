@@ -1,4 +1,4 @@
-"""Automatic reconciliation of a month's coverage against Santiago's statements (synthetic data)."""
+"""Automatic reconciliation of a month's coverage against every owner's statements (synthetic data)."""
 from __future__ import annotations
 
 import threading
@@ -26,9 +26,9 @@ def store(tmp_path, categories) -> Store:
     return store
 
 
-def check(product: str, start: str, end: str, missing: int = 0, suffix: str = "0001") -> dict:
+def check(product: str, start: str, end: str, missing: int = 0, suffix: str = "0001", owner: str = "santiago") -> dict:
     return {
-        "identity": f"{product}|{suffix}|{start}", "product": product, "suffix": suffix,
+        "identity": f"{product}|{suffix}|{start}", "owner": owner, "product": product, "suffix": suffix,
         "period_start": start, "period_end": end, "movements": 3, "matched": 3 - missing,
         "missing": missing, "balance_minor": None,
     }
@@ -70,7 +70,7 @@ def test_months_fully_covered_by_matching_statements_are_reconciled(store):
     assert changed == {"reconciled": ["2026-01", "2026-02", "2026-03"], "revoked": []}
     assert coverage(store) == {"2026-01": "reconciled", "2026-02": "reconciled", "2026-03": "reconciled"}
     row = store.state()["coverage"][0]
-    assert "3 extractos de Santiago" in row["note"] and "Manuela no tienen extractos" in row["note"]
+    assert row["note"].startswith("Conciliado automaticamente con 3 extractos de Santiago:")
     with store.connect() as db:
         audit = [row[0] for row in db.execute("SELECT target FROM audit WHERE action='coverage-reconciled' ORDER BY id")]
     assert audit == ["2026-01", "2026-02", "2026-03"]
@@ -87,9 +87,11 @@ def test_a_month_without_every_statement_or_with_unmatched_lines_stays_partial(s
     assert store.update_reconciled_coverage(TODAY)["reconciled"] == []
     # A closed month that does not qualify says why, and keeps its partial status.
     notes = {row["month"]: row["note"] for row in store.state()["coverage"]}
-    assert notes["2026-01"] == "Sin conciliar con los extractos: falta el extracto de TARJETA_MASTERCARD de 2026-02."
-    assert notes["2026-02"] == "Sin conciliar con los extractos: falta el extracto de TARJETA_MASTERCARD de 2026-02."
-    assert notes["2026-03"] == "Sin conciliar con los extractos: el extracto de TARJETA_MASTERCARD tiene movimientos sin coincidir."
+    assert notes["2026-01"] == "Sin conciliar con los extractos: falta el extracto 2026-02 de TARJETA_MASTERCARD *0002 de Santiago."
+    assert notes["2026-02"] == "Sin conciliar con los extractos: falta el extracto 2026-02 de TARJETA_MASTERCARD *0002 de Santiago."
+    assert notes["2026-03"] == (
+        "Sin conciliar con los extractos: el extracto de TARJETA_MASTERCARD *0002 de Santiago tiene movimientos sin coincidir."
+    )
     assert set(coverage(store).values()) == {"partial"}
 
 
@@ -102,6 +104,29 @@ def test_a_card_month_waits_for_the_next_statement_with_its_last_days(store):
     store.record_statements([check("TARJETA_MASTERCARD", "2026-02-01", "2026-02-28", suffix="0002")], [])
     store.update_reconciled_coverage(TODAY)
     assert coverage(store)["2026-01"] == "reconciled"
+
+
+def test_every_owners_statements_are_required_and_named(store):
+    movement(store, "a", "2026-01-10")
+    for month in ("2026-01", "2026-02", "2026-03"):
+        store.coverage(month, "partial", "Recorrido explicito.")
+    savings = check("CTA_AHORROS", "2025-12-31", "2026-01-31", suffix="0001", owner="manuela")
+    savings["identity"] = "manuela-savings-jan"
+    store.record_statements(first_quarter(manuela=savings), [])
+    assert store.update_reconciled_coverage(TODAY)["reconciled"] == ["2026-01"]
+    rows = {row["month"]: row["note"] for row in store.state()["coverage"]}
+    assert rows["2026-01"].startswith("Conciliado automaticamente con 4 extractos de Manuela y Santiago:")
+    # The same product number of another owner is another product with its own statements.
+    assert rows["2026-02"] == (
+        "Sin conciliar con los extractos: falta el extracto de CTA_AHORROS *0001 de Manuela que cubre el 2026-02-01."
+    )
+
+
+def test_a_statement_keeps_the_owner_it_was_first_recorded_with(store):
+    store.record_statements([check("CTA_AHORROS", "2025-12-31", "2026-03-31")], [])
+    with pytest.raises(ValueError, match="otro titular"):
+        store.record_statements([check("CTA_AHORROS", "2025-12-31", "2026-03-31", owner="manuela")], [])
+    assert {row["owner"] for row in store.state()["statement_checks"]} == {"santiago"}
 
 
 def test_a_product_that_started_later_does_not_block_earlier_months(store):

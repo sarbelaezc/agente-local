@@ -213,12 +213,19 @@ son de remitentes aprobados. Revísalo y cambia `verified` a `true`.
 `.local\MonthlyCloseAgent\statements.json`:
 
 ```json
-{"password": "<contraseña de los PDF>",
+{"passwords": ["<contraseña de los PDF de Santiago>", "<contraseña de los PDF de Manuela>"],
  "approved_senders": ["<remitente exacto del banco>", "afp_proteccion@proteccion.com"]}
 ```
 
-La contraseña queda en texto plano, fuera de Git, por decisión del usuario, y
-nunca se imprime. Solo se leen adjuntos de esos remitentes exactos. Uso en
+Los extractos se buscan en **todos los buzones** configurados, y el banco cifra los
+PDF de cada titular con su propia contraseña: pon en `passwords` la de cada uno.
+Cada PDF se prueba con todas. También se acepta la clave `password` con una sola
+contraseña, como en versiones anteriores, y se suma a la lista. Si ninguna abre un
+extracto, la conciliación se detiene y dice cuál y de qué buzón, sin importar
+nada. Escribe tú las contraseñas en el archivo: el agente nunca las pide.
+
+Las contraseñas quedan en texto plano, fuera de Git, por decisión del usuario, y
+nunca se imprimen. Solo se leen adjuntos de esos remitentes exactos. Uso en
 [Extractos](cierre-mensual.md#conciliar-extractos).
 
 **Registro de pagos de un crédito.** Si llevas tus pagos de un crédito en Excel,

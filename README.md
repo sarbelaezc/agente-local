@@ -106,8 +106,9 @@ También puedes habilitarlo solo para la terminal actual con
   aprobados) y, opcionalmente, `statements.json` y `credit_ledgers.json`. Ver
   [docs/configuracion.md](docs/configuracion.md).
 - **Uso.** `import` para leer y revisar; la tarea programada cierra el mes el
-  último día a las 22:00. Cuando los extractos de Santiago cuadran y no queda nada
-  pendiente, el mes se marca solo como **Conciliado**. Ver
+  último día a las 22:00. Los extractos se buscan en todos los buzones y cada uno
+  se concilia con los movimientos de su titular. Cuando los extractos de los dos
+  cuadran y no queda nada pendiente, el mes se marca solo como **Conciliado**. Ver
   [docs/cierre-mensual.md](docs/cierre-mensual.md).
 - **Seguridad.** El cliente de Graph solo hace peticiones `GET` y el de Gmail
   usa el permiso `gmail.readonly`: nunca envía, mueve ni marca correos. Solo abre
@@ -138,7 +139,7 @@ ignora. Para guardarlo en otro lugar, define la variable de entorno
 
 | Ruta | Contenido |
 |---|---|
-| `.local\MonthlyCloseAgent\` | `runtime.json`, `close.sqlite3` (movimientos, decisiones, reglas y auditoría), sesiones de Microsoft y Google, `statements.json` (contraseña de los extractos), `credit_ledgers.json` y `last-close.txt` |
+| `.local\MonthlyCloseAgent\` | `runtime.json`, `close.sqlite3` (movimientos, decisiones, reglas y auditoría), sesiones de Microsoft y Google, `statements.json` (contraseñas de los extractos de cada titular), `credit_ledgers.json` y `last-close.txt` |
 | `.local\MailInvoiceAgent\` | Sesión de Microsoft de facturas, estados de lotes, decisiones de carpetas, copias del Excel (las 5 más recientes) y `tessdata` |
 | `.local\ImportManuela\` | Archivos exportados del panel de Manuela |
 | `…\logs\` (en cada carpeta) | Un registro por ejecución; se conservan los 10 más recientes |

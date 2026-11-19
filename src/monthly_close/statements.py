@@ -75,10 +75,15 @@ class Statement:
     contributions_minor: int | None = None
     withdrawals_minor: int | None = None
     returns_minor: int | None = None
+    owner: str = "santiago"  # the owner of the mailbox the statement arrived in
 
     @property
     def identity(self) -> str:
-        return f"{self.product}:{self.suffix}:{self.period_end.isoformat()}"
+        identity = f"{self.product}:{self.suffix}:{self.period_end.isoformat()}"
+        # Santiago's statements keep the identity they had before every mailbox was read,
+        # because the movements they imported derive their ids from it. Protección
+        # statements have no product number, so the owner tells two people's apart.
+        return identity if self.owner == "santiago" else f"{identity}:{self.owner}"
 
 
 def _us_amount(text: str) -> int:
@@ -101,14 +106,18 @@ def _co_amount(text: str) -> int:
     return int(Decimal(clean) * 100)
 
 
-def decrypt_text(content: bytes, password: str) -> str:
-    """Text of a PDF decrypted in memory; the PDF is never written to disk."""
+def decrypt_text(content: bytes, passwords: list[str]) -> str:
+    """Text of a PDF decrypted in memory with the first password that opens it.
+
+    Each holder's bank uses their own password, so every configured one is tried.
+    The PDF is never written to disk.
+    """
     if len(content) > MAX_PDF_BYTES:
         raise StatementError("Extracto demasiado grande.")
     try:
         reader = PdfReader(io.BytesIO(content))
-        if reader.is_encrypted and not reader.decrypt(password):
-            raise StatementError("La contraseña configurada no abre el extracto.")
+        if reader.is_encrypted and not any(reader.decrypt(password) for password in passwords):
+            raise StatementError("Ninguna contraseña configurada abre el extracto.")
         return "\n".join(page.extract_text() or "" for page in reader.pages)
     except PdfReadError as exc:
         raise StatementError("PDF de extracto ilegible.") from exc
@@ -557,11 +566,13 @@ def _same_money(saving: Movement, other: Movement) -> bool:
     return saving.amount_minor == expected
 
 
-def match_existing(candidates: list[Candidate], rows: list[dict]) -> tuple[list[tuple[Candidate, str]], list[Candidate]]:
-    """Pair each statement movement with one existing movement of the same amount and nearby date."""
+def match_existing(
+    candidates: list[Candidate], rows: list[dict], owner: str = "santiago",
+) -> tuple[list[tuple[Candidate, str]], list[Candidate]]:
+    """Pair each statement movement with one existing movement of the same owner, amount and nearby date."""
     free = [
         row for row in rows
-        if row["owner"] == "santiago" and row["currency"] in {"COP", "USD"}
+        if row["owner"] == owner and row["currency"] in {"COP", "USD"}
     ]
     used: set[str] = set()
     matched, missing = [], []
@@ -601,7 +612,7 @@ def missing_event(candidate: Candidate, category: str, income_category: str) -> 
         "account": PRODUCTS.get(statement.product, "Desconocida"),
         "amount_minor": abs(movement.amount_minor), "currency": movement.currency,
         "category": income_category if kind == "income" else category, "kind": kind,
-        "decision": None,
+        "decision": None, "owner": statement.owner,
         "reason": f"Leído del extracto {PRODUCTS.get(statement.product, statement.product)} "
         f"*{statement.suffix}; no llegó por aviso. Confirma qué es.",
     }
@@ -621,7 +632,7 @@ class Reconciliation:
             matched = sum(c.statement is statement for c, _ in self.matched)
             missing = sum(c.statement is statement for c in self.missing)
             rows.append({
-                "identity": statement.identity, "product": statement.product,
+                "identity": statement.identity, "owner": statement.owner, "product": statement.product,
                 "suffix": statement.suffix, "period_start": statement.period_start.isoformat(),
                 "period_end": statement.period_end.isoformat(), "movements": len(statement.movements),
                 "matched": matched, "missing": missing, "balance_minor": statement.balance_minor,
@@ -635,7 +646,16 @@ class Reconciliation:
 
 
 def reconcile(statements: list[Statement], rows: list[dict], start: date) -> Reconciliation:
-    """Compare statements with known movements from start on; nothing is decided here."""
-    candidates = [c for c in pair_internal(statements) if c.movement.day >= start]
-    matched, missing = match_existing(candidates, rows)
+    """Compare statements with known movements from start on; nothing is decided here.
+
+    Each owner's statements pair with each other and match only that owner's movements.
+    """
+    matched: list[tuple[Candidate, str]] = []
+    missing: list[Candidate] = []
+    for owner in dict.fromkeys(statement.owner for statement in statements):
+        own = [statement for statement in statements if statement.owner == owner]
+        candidates = [c for c in pair_internal(own) if c.movement.day >= start]
+        found, absent = match_existing(candidates, rows, owner)
+        matched += found
+        missing += absent
     return Reconciliation(statements, matched, missing)

@@ -68,8 +68,8 @@ la fecha local del aviso y la propuesta lo indica.
 **Cobertura.** Cada mes importado empieza **parcial**: contar correos no demuestra
 que estén todos. Se confirma de dos formas:
 
-- **Conciliado** (automático): el agente lo marca cuando los extractos de Santiago
-  cuadran. Ver [Conciliación automática del mes](#conciliación-automática-del-mes).
+- **Conciliado** (automático): el agente lo marca cuando los extractos de los dos
+  titulares cuadran. Ver [Conciliación automática del mes](#conciliación-automática-del-mes).
 - **Revisado** (manual): lo marcas tú en el panel, con una nota de conciliación.
 
 Un movimiento nuevo en un mes conciliado o revisado lo devuelve a parcial.
@@ -316,9 +316,17 @@ Se ejecuta solo con cada `scan` o `import`, o a mano:
 **Extractos del banco** (cuenta de ahorros, tarjetas en pesos y dólares,
 Fiducuenta, crédito de consumo e hipotecario):
 
-- Se buscan por Graph solo en los correos de los remitentes de `statements.json`
-  y solo los adjuntos con nombre de extracto. Un correo de otro remitente detiene
-  la ejecución. Cada PDF se descifra y se lee en memoria; no se guarda.
+- Se buscan en **todos los buzones** configurados (el Outlook de Santiago por
+  Graph y el Gmail de Manuela por la API de Gmail), solo en los correos de los
+  remitentes de `statements.json` y solo los adjuntos con nombre de extracto. En
+  Gmail se piden solo los nombres y tamaños de las partes del correo, nunca su
+  texto. Un correo de otro remitente detiene la ejecución. Cada PDF se descifra
+  con la contraseña de su titular y se lee en memoria; no se guarda.
+- **Cada extracto es del titular del buzón donde llegó**, y sus movimientos solo
+  se comparan con los de ese titular: lo que falta en un extracto de Manuela
+  entra pendiente a nombre de Manuela. Si el mismo extracto de un producto
+  (mismo número y corte) llega a los buzones de los dos, no se sabe de quién es:
+  la conciliación se detiene sin importar nada.
 - Se leen con lectores deterministas, sin Ollama. El de ahorros se valida con el
   saldo corrido, línea a línea; un extracto que no se lee con exactitud detiene
   todo sin importar nada.
@@ -338,7 +346,8 @@ Fiducuenta, crédito de consumo e hipotecario):
   importados de extractos que siguen pendientes (`statement-reclassify`).
 
 **Extractos de Protección** (agrega `afp_proteccion@proteccion.com` a
-`statements.json`; la contraseña es la misma):
+`statements.json`; se abren con la misma contraseña del titular). No traen número
+de producto, así que el buzón dice de quién es cada uno:
 
 | Producto | Correo | Adjunto | Frecuencia |
 |---|---|---|---|
@@ -356,7 +365,8 @@ Fiducuenta, crédito de consumo e hipotecario):
   movimientos, porque la información la aporta el PDF.
 
 En el panel, «Extractos y saldos» muestra el último saldo conocido y cuántos
-movimientos de cada extracto coinciden en el mes. El grupo **Inversiones** suma
+movimientos de cada extracto coinciden en el mes. Cada titular ve sus extractos;
+**Hogar** los ve todos, con el nombre del titular. El grupo **Inversiones** suma
 Fiducuenta, pensión voluntaria y cesantías.
 
 ## Conciliación automática del mes
@@ -366,8 +376,9 @@ Después de cada lectura (`scan`, `import`, la tarea programada), de
 decisión en el panel, el agente revisa los meses ya cerrados (anteriores al mes en
 curso). Un mes queda **Conciliado** si se cumple todo:
 
-1. Cada producto de Santiago que lista movimientos (cuenta de ahorros, tarjetas y
-   Fiducuenta) y que ya existía ese mes tiene extractos que cubren todos sus días
+1. Cada producto **de cualquier titular** que lista movimientos (cuenta de
+   ahorros, tarjetas y Fiducuenta) y que ya existía ese mes tiene extractos que
+   cubren todos sus días
    (en las tarjetas, los de ese mes y el siguiente; ver abajo).
    Los créditos (solo traen saldos; sus pagos salen de la cuenta de ahorros) y
    Protección (solo cifras) no cuentan.
@@ -375,13 +386,13 @@ curso). Un mes queda **Conciliado** si se cumple todo:
 3. No hay movimientos pendientes de decisión ese mes, **de ningún titular**.
 4. No hay avisos de ese mes en la cola «Avisos sin extraer», de ningún buzón.
 
-- La nota dice con cuántos extractos se concilió y que los movimientos de Manuela
-  no tienen extractos. Queda auditado como `coverage-reconciled`.
+- La nota dice con cuántos extractos y de qué titulares se concilió. Queda
+  auditado como `coverage-reconciled`.
 - Si una condición deja de cumplirse (por ejemplo, una nueva lectura de un extracto
   encuentra un movimiento sin coincidir), el mes vuelve a parcial con el motivo
   (`coverage-reconcile-revoked`).
 - Un mes cerrado que aún no se concilia muestra en su nota el motivo, por ejemplo
-  «falta el extracto de CTA_AHORROS que cubre el 2026-10-01».
+  «falta el extracto de CTA_AHORROS *NNNN de Manuela que cubre el 2026-10-01».
 - Nunca reemplaza tu revisión manual: un mes **Revisado** sigue así.
 - **Tarjetas.** Cada extracto lleva el mes de su fecha de corte (a mitad de mes) y
   lista los movimientos desde el corte anterior: el extracto de noviembre trae las
@@ -707,11 +718,22 @@ tablas. No cambia importes, decisiones ni auditoría.
 - Conciliación automática (2026-11-18), con `import` en la base real: enero a
   septiembre de 2026 quedaron conciliados. Octubre sigue parcial: faltan el extracto
   de noviembre de la Amex y el de ahorros del cuarto trimestre.
+- Extractos del Gmail de Manuela (2026-11-18): el lector de Gmail descargó en
+  solo lectura los PDF de extractos desde diciembre de 2025 (ahorros, Fiducuenta,
+  Mastercard, Visa y cesantías). La contraseña de Santiago no los abre, así que
+  `reconcile-statements -ReadOnly` se detiene en el primero hasta que su contraseña
+  esté en `passwords`.
 - Las pruebas (`pytest tests\monthly_close`) cubren reglas, importes, zona
   horaria, decisiones, lectores simulados de Graph y Gmail, el lanzador y el panel
   en Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas).
 
 **Pendiente**
+
+- Leer los extractos de Manuela con su contraseña: su conciliación contra sus
+  movimientos y cuántos meses ya conciliados vuelven a parcial por movimientos que
+  solo muestran sus extractos.
+- Si una tarjeta de Manuela cambió de número, los meses siguientes no se concilian
+  solos (ver [Conciliación automática del mes](#conciliación-automática-del-mes)).
 
 - La primera ejecución real de la tarea programada.
 - Cuánto dura en la práctica la sesión de Gmail en Testing, y si pasar la app a

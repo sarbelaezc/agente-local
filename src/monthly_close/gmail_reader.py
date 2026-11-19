@@ -23,6 +23,17 @@ PAGE_SIZE = 500
 OWN_LABELS = {"SENT", "DRAFT"}
 # Gmail search dates are coarse; list one extra day and cut exactly on the received time.
 QUERY_MARGIN = timedelta(days=1)
+# Part names and sizes only, three levels deep: no message text is downloaded.
+# shortcut: an attachment nested deeper is not seen; add a level if a bank nests more.
+_PART = "filename,body(attachmentId,size)"
+PARTS_FIELDS = f"id,payload(headers,{_PART},parts({_PART},parts({_PART},parts({_PART}))))"
+
+
+def _parts(part: dict) -> Iterator[dict]:
+    yield part
+    for child in part.get("parts") or []:
+        if isinstance(child, dict):
+            yield from _parts(child)
 
 
 def _received(message: dict) -> datetime:
@@ -263,6 +274,46 @@ class GmailSourceReader:
             [self.active_folder, candidate.item_id, candidate.sender, candidate.subject, received],
             sort_keys=True, ensure_ascii=False,
         ).encode()).hexdigest()
+
+    def statement_files(
+        self, sender: str, since: datetime, name_pattern, max_bytes: int,
+    ) -> Iterator[tuple[str, bytes]]:
+        """PDF statements attached by one exact approved sender, read into memory only.
+
+        Same contract as the Outlook reader: messages are listed by that sender only and
+        any other sender in the answer stops the run. Only part names and sizes are
+        requested, and only attachments matching the statement pattern and size limit
+        are downloaded.
+        """
+        if not EMAIL.fullmatch(sender) or any(char in sender for char in "\"(){}"):
+            raise ValueError("Remitente de extractos invalido.")
+        if since.tzinfo is None:
+            raise ValueError("La fecha inicial de extractos necesita zona horaria.")
+        query = f'from:("{sender}") has:attachment after:{int((since - QUERY_MARGIN).timestamp())}'
+        for identifier in self._ids(query):
+            url = f"{GMAIL_ROOT}/messages/{quote(identifier, safe='')}"
+            message = self.client.get_json(url, {"format": "full", "fields": PARTS_FIELDS})
+            header = _header(message, "From") if message.get("id") == identifier else None
+            addresses = getaddresses([header]) if header else []
+            if len(addresses) != 1 or addresses[0][1].strip().lower() != sender:
+                raise OutlookError("Gmail devolvio un correo de otro remitente al listar extractos.")
+            for part in _parts(message.get("payload") or {}):
+                name, body = part.get("filename"), part.get("body") or {}
+                if not isinstance(name, str) or not name_pattern.fullmatch(name):
+                    continue
+                size, attachment_id = body.get("size"), body.get("attachmentId")
+                if type(size) is not int or not 0 < size <= max_bytes or not isinstance(attachment_id, str):
+                    raise OutlookError("Adjunto de extracto con tamano no verificable.")
+                data = self.client.get_json(f"{url}/attachments/{quote(attachment_id, safe='')}").get("data")
+                if not isinstance(data, str):
+                    raise OutlookError("Adjunto de extracto no reconocido.")
+                try:
+                    content = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+                except (binascii.Error, ValueError) as exc:
+                    raise OutlookError("Contenido de extracto no valido.") from exc
+                if len(content) > max_bytes:
+                    raise OutlookError("Adjunto de extracto con tamano no verificable.")
+                yield name, content
 
     def read(self, candidate: Candidate) -> Mail:
         data = self.client.get_json(

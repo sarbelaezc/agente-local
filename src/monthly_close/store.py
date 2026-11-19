@@ -158,6 +158,9 @@ class Store:
                 db.execute("ALTER TABLE statement_checks ADD COLUMN due_minor INTEGER")
             if "paid_minor" not in checks:
                 db.execute("ALTER TABLE statement_checks ADD COLUMN paid_minor INTEGER")
+            # Statements read before every mailbox was searched came from Santiago's Outlook.
+            if "owner" not in checks:
+                db.execute("ALTER TABLE statement_checks ADD COLUMN owner TEXT NOT NULL DEFAULT 'santiago'")
             # Investment figures of a period (Protección); NULL for other statements.
             for column in INVESTMENT_FIGURES:
                 if column not in checks:
@@ -942,11 +945,17 @@ class Store:
         inserted: list[str] = []
         with self.connect() as db:
             for check in checks:
+                check = {"owner": "santiago", **check}
+                known = db.execute(
+                    "SELECT owner FROM statement_checks WHERE identity=?", (check["identity"],),
+                ).fetchone()
+                if known is not None and known["owner"] != check["owner"]:
+                    raise ValueError("Un extracto ya registrado de otro titular no cambia de titular.")
                 db.execute(
-                    """INSERT INTO statement_checks (identity,product,suffix,period_start,period_end,
+                    """INSERT INTO statement_checks (identity,owner,product,suffix,period_start,period_end,
                     movements,matched,missing,balance_minor,checked_at,due_minor,paid_minor,
                     opening_minor,contributions_minor,withdrawals_minor,returns_minor) VALUES (
-                    :identity,:product,:suffix,:period_start,:period_end,:movements,:matched,
+                    :identity,:owner,:product,:suffix,:period_start,:period_end,:movements,:matched,
                     :missing,:balance_minor,:checked_at,:due_minor,:paid_minor,
                     :opening_minor,:contributions_minor,:withdrawals_minor,:returns_minor) ON CONFLICT(identity) DO UPDATE SET
                     movements=excluded.movements,matched=excluded.matched,missing=excluded.missing,
@@ -967,8 +976,9 @@ class Store:
                 if db.execute(
                     """INSERT OR IGNORE INTO transactions (
                     id,message_id,day,merchant,account,amount_minor,currency,category,kind,
-                    decision,reason) VALUES (:id,:message_id,:day,:merchant,:account,
-                    :amount_minor,:currency,:category,:kind,NULL,:reason)""", event,
+                    decision,reason,owner) VALUES (:id,:message_id,:day,:merchant,:account,
+                    :amount_minor,:currency,:category,:kind,NULL,:reason,:owner)""",
+                    {"owner": "santiago", **event},
                 ).rowcount:
                     inserted.append(event["id"])
                     self._audit(db, "statement-import", event["id"], event["message_id"])
@@ -1155,22 +1165,22 @@ class Store:
         return totals
 
     def update_reconciled_coverage(self, today: date) -> dict[str, list[str]]:
-        """Mark each closed month that Santiago's statements fully reconcile; undo it when that stops.
+        """Mark each closed month that the statements fully reconcile; undo it when that stops.
 
         A month is reconciled when every product with movements (savings, cards and
-        Fiducuenta) that had started by then has statements covering each of its days,
+        Fiducuenta) of any owner that had started by then has statements covering each of its days,
         none of them left a movement unmatched, and the month has neither pending
         decisions nor notices in the review queue, for any owner. A person's review is
         never replaced. Only closed months (before today's) are considered.
         """
         current = today.strftime("%Y-%m")
         with self.connect() as db:
-            periods: dict[tuple[str, str], list[tuple[date, date, int]]] = {}
+            periods: dict[tuple[str, str, str], list[tuple[date, date, int]]] = {}
             for row in db.execute(
-                "SELECT product,suffix,period_start,period_end,missing FROM statement_checks",
+                "SELECT owner,product,suffix,period_start,period_end,missing FROM statement_checks",
             ):
                 if row["product"] in COVERAGE_PRODUCTS:
-                    periods.setdefault((row["product"], row["suffix"]), []).append((
+                    periods.setdefault((row["owner"], row["product"], row["suffix"]), []).append((
                         date.fromisoformat(row["period_start"]), date.fromisoformat(row["period_end"]),
                         row["missing"],
                     ))
@@ -1187,12 +1197,11 @@ class Store:
                         day = (day + timedelta(days=32)).replace(day=1)
             changed: dict[str, list[str]] = {"reconciled": [], "revoked": []}
             for month in sorted(m for m in months if MONTH.fullmatch(m) and m < current):
-                reason, used = self._reconcile_month(db, month, periods)
+                reason, used, owners = self._reconcile_month(db, month, periods)
                 if reason is None and status.get(month) not in {"reviewed", "reconciled"}:
                     note = (
-                        f"Conciliado automaticamente con {used} extractos de Santiago: todos sus "
-                        "movimientos coinciden, sin pendientes ni avisos en cola de ningun titular. "
-                        "Los movimientos de Manuela no tienen extractos."
+                        f"Conciliado automaticamente con {used} extractos de {owners}: todos sus "
+                        "movimientos coinciden, sin pendientes ni avisos en cola de ningun titular."
                     )
                     db.execute(
                         """INSERT INTO coverage VALUES (?,'reconciled',?) ON CONFLICT(month)
@@ -1217,17 +1226,18 @@ class Store:
 
     @staticmethod
     def _reconcile_month(
-        db: sqlite3.Connection, month: str, periods: dict[tuple[str, str], list[tuple[date, date, int]]],
-    ) -> tuple[str | None, int]:
-        """Why the month is not reconciled (None when it is) and how many statements back it."""
+        db: sqlite3.Connection, month: str, periods: dict[tuple[str, str, str], list[tuple[date, date, int]]],
+    ) -> tuple[str | None, int, str]:
+        """Why the month is not reconciled (None when it is), how many statements back it and whose."""
         first = date.fromisoformat(month + "-01")
         last = date(first.year + first.month // 12, first.month % 12 + 1, 1) - timedelta(days=1)
         required = {key: rows for key, rows in periods.items() if min(start for start, _, _ in rows) <= last}
         if not required:
-            return "no hay extractos de Santiago para el mes", 0
+            return "no hay extractos para el mes", 0, ""
         used = 0
         next_first = last + timedelta(days=1)
-        for (product, _), rows in required.items():
+        for (owner, product, suffix), rows in required.items():
+            name = f"{product} *{suffix} de {OWNERS.get(owner, owner)}"
             if product in CARD_PRODUCTS:
                 # A card statement carries the month of its cut-off date but lists the
                 # movements since the previous cut-off, in the middle of the month before.
@@ -1235,26 +1245,27 @@ class Store:
                 overlapping = [row for row in rows if row[0] in (first, next_first)]
                 for needed in (first, next_first):
                     if not any(row[0] == needed for row in overlapping):
-                        return f"falta el extracto de {product} de {needed:%Y-%m}", 0
+                        return f"falta el extracto {needed:%Y-%m} de {name}", 0, ""
             else:
                 overlapping = [row for row in rows if row[0] <= last and row[1] >= first]
                 day = first
                 while day <= last:
                     if not any(start <= day <= end for start, end, _ in overlapping):
-                        return f"falta el extracto de {product} que cubre el {day.isoformat()}", 0
+                        return f"falta el extracto de {name} que cubre el {day.isoformat()}", 0, ""
                     day += timedelta(days=1)
             if any(missing for _, _, missing in overlapping):
-                return f"el extracto de {product} tiene movimientos sin coincidir", 0
+                return f"el extracto de {name} tiene movimientos sin coincidir", 0, ""
             used += len(overlapping)
         if db.execute(
             "SELECT 1 FROM transactions WHERE day LIKE ? AND decision IS NULL LIMIT 1", (month + "-%",),
         ).fetchone():
-            return "hay movimientos pendientes de decision", 0
+            return "hay movimientos pendientes de decision", 0, ""
         if db.execute(
             "SELECT 1 FROM extraction_failures WHERE day LIKE ? LIMIT 1", (month + "-%",),
         ).fetchone():
-            return "hay avisos en la cola de revision", 0
-        return None, used
+            return "hay avisos en la cola de revision", 0, ""
+        owners = sorted({OWNERS.get(owner, owner) for owner, _, _ in required})
+        return None, used, " y ".join(owners)
 
     def coverage(self, month: str, status: str, note: str) -> None:
         if not MONTH.fullmatch(month):
