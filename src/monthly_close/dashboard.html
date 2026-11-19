@@ -476,6 +476,10 @@
             <div id="extraction-list" class="decision-list"></div>
           </section>
           <h3 id="pending-heading" hidden>Movimientos por decidir</h3>
+          <div id="category-suggest" class="decision-actions" style="align-items:center;margin:8px 0 12px">
+            <button type="button" id="suggest-categories" class="button">Sugerir categorías con Ollama</button>
+            <p class="hint" style="margin:0">Preselecciona una categoría en las compras pendientes, también las de extractos. Ollama solo ve el nombre del comercio; tú decides cada destino o movimiento.</p>
+          </div>
           <div id="pending-list" class="decision-list"></div>
           <details class="history-detail" id="rules-detail">
             <summary>Reglas por comercio · decidir sin preguntar</summary>
@@ -2140,6 +2144,8 @@
         renderRules();
       }
 
+      // Movement id -> category proposed by Ollama; kept only in this page, never saved.
+      let categorySuggestions = {};
       const decidedValues = new Set(["income", "personal", "family", "investment", "investment_withdrawal", "cash_withdrawal", "exclude", "third_party_payment"]);
       const counterpartKinds = new Set(["transfer", "own_transfer", "income", "unknown", "card_payment", "pse"]);
 
@@ -2225,6 +2231,25 @@
         const remember = document.createElement("input");
         remember.type = "checkbox";
         remember.id = `group-remember-${decisionCardSequence++}`;
+        // An Ollama suggestion shared by every movement is offered as the destination's category.
+        const suggestedSet = new Set(entry.rows.map(tx => categorySuggestions[tx.id]));
+        const suggested = !isPrevious && suggestedSet.size === 1 ? [...suggestedSet][0] : undefined;
+        let groupCategory = null;
+        if (typeof suggested === "string" && entry.rows.every(tx => tx.kind === "purchase")) {
+          const field = el("div", "field decision-category");
+          const label = el("label", "", "Categoría para Gasto personal o Familiar");
+          label.htmlFor = `group-category-${decisionCardSequence++}`;
+          groupCategory = document.createElement("select");
+          groupCategory.id = label.htmlFor;
+          safeArray(state.data.categories).filter(category => typeof category === "string").forEach(category => {
+            const option = el("option", "", category);
+            option.value = category;
+            option.selected = category === suggested;
+            groupCategory.append(option);
+          });
+          field.append(label, groupCategory, el("p", "hint", "Sugerida por Ollama; cámbiala si no corresponde."));
+          card.append(field);
+        }
         const actions = el("div", "decision-actions");
         options.forEach(([decision, label]) => {
           const button = el("button", `button small${decision === "exclude" ? " danger" : ""}`, label);
@@ -2234,10 +2259,12 @@
           button.addEventListener("click", () => {
             // Changing past decisions rewrites many movements at once, so ask first.
             if (isPrevious && !window.confirm(`¿Cambiar a «${label}» los ${entry.rows.length} movimientos de «${groupTitle(entry)}»?`)) return;
-            postJson("/api/decision-group", {
+            const payload = {
               owner: entry.owner, group: entry.group, decision,
               scope: isPrevious ? "all" : "pending", remember: remember.checked
-            }, `Decisión guardada para ${entry.rows.length} movimientos.`);
+            };
+            if (groupCategory && (decision === "personal" || decision === "family")) payload.category = groupCategory.value;
+            postJson("/api/decision-group", payload, `Decisión guardada para ${entry.rows.length} movimientos.`);
           });
           actions.append(button);
         });
@@ -2367,27 +2394,41 @@
         });
       }
 
-      $("#suggest-rules").addEventListener("click", async () => {
+      // Ask the local server for Ollama suggestions; nothing is saved by these calls.
+      async function askOllama(url, onAnswer) {
         if (state.busy || !state.data || !state.data.csrf) return;
-        showMessage("Pidiendo sugerencias a Ollama…", "success");
+        showMessage("Pidiendo sugerencias a Ollama… puede tardar un minuto.", "success");
         setBusy(true);
         try {
-          const response = await fetch("/api/rules/suggest", {
+          const response = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json", Accept: "application/json", "X-CSRF-Token": state.data.csrf },
             body: "{}"
           });
           const body = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `El servidor respondió ${response.status}`);
-          ruleSuggestions = safeArray(body.suggestions).filter(item => item && typeof item.pattern === "string" && typeof item.category === "string");
-          renderRuleSuggestions();
-          showMessage(ruleSuggestions.length ? `${ruleSuggestions.length} sugerencia(s) por revisar.` : "Ollama no tiene sugerencias para los comercios pendientes.");
+          showMessage(onAnswer(body));
         } catch (error) {
           showMessage(`No se pudieron pedir sugerencias: ${error.message}`, "error");
         } finally {
           setBusy(false);
         }
-      });
+      }
+
+      $("#suggest-rules").addEventListener("click", () => askOllama("/api/rules/suggest", body => {
+        ruleSuggestions = safeArray(body.suggestions).filter(item => item && typeof item.pattern === "string" && typeof item.category === "string");
+        renderRuleSuggestions();
+        return ruleSuggestions.length ? `${ruleSuggestions.length} sugerencia(s) por revisar.`
+          : "No hay sugerencias: o ya no quedan compras de avisos sin regla (las de extractos nunca las decide una regla), o Ollama no reconoció los comercios. Para las de extractos usa «Sugerir categorías con Ollama» arriba.";
+      }));
+
+      $("#suggest-categories").addEventListener("click", () => askOllama("/api/category-suggestions", body => {
+        const raw = body && typeof body.by_id === "object" && body.by_id ? body.by_id : {};
+        categorySuggestions = Object.fromEntries(Object.entries(raw).filter(([, category]) => typeof category === "string"));
+        renderDecisions();
+        const count = Object.keys(categorySuggestions).length;
+        return count ? `Categoría sugerida en ${count} compra(s) pendiente(s). Revísala y decide.` : "Ollama no sugirió categorías: no hay compras pendientes o no reconoció los comercios.";
+      }));
 
       $("#rule-decision").addEventListener("change", () => { if (state.data) renderRules(); });
       $("#rule-form").addEventListener("submit", async event => {
@@ -2434,6 +2475,11 @@
           categorySelect.append(option);
         });
         categoryField.append(categoryLabel, categorySelect);
+        const suggested = !isPrevious && !isIncome && tx.decision == null ? categorySuggestions[tx.id] : undefined;
+        if (typeof suggested === "string" && categories.includes(suggested)) {
+          categorySelect.value = suggested;
+          categoryField.append(el("p", "hint", "Sugerida por Ollama; cámbiala si no corresponde."));
+        }
         card.append(categoryField);
         let currencySelect = null, rateInput = null;
         if (state.data.config.currency === "COP" && ["COP", "USD"].includes(txCurrency(tx))) {

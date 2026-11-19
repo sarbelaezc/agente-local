@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from shared.local_model import LocalModelError
-from monthly_close.rule_suggestions import CategoryModel, suggest_rules
+from monthly_close.rule_suggestions import CategoryModel, suggest_pending_categories, suggest_rules
 from monthly_close.store import Store
 
 # Changes that can complete or reopen a month, so its reconciliation is checked again.
@@ -110,8 +110,12 @@ def create_server(store: Store, port: int = 8766, model: CategoryModel | None = 
                     scope, remember = raw.get("scope", "pending"), raw.get("remember", False)
                     if scope not in {"pending", "all"} or type(remember) is not bool:
                         raise ValueError("Alcance de la decision invalido.")
+                    category = raw.get("category")
+                    if category is not None and not isinstance(category, str):
+                        raise ValueError("Categoria invalida.")
                     store.decide_group(
                         owner, group, decision, pending_only=scope == "pending", remember=remember,
+                        category=category,
                     )
                 elif self.path == "/api/between-owners":
                     owner, group = raw.get("owner"), raw.get("group")
@@ -131,10 +135,13 @@ def create_server(store: Store, port: int = 8766, model: CategoryModel | None = 
                     if not all(isinstance(value, str) for value in (pattern, category, decision)):
                         raise ValueError("Regla invalida.")
                     store.add_rule(pattern, category, decision)
-                elif self.path == "/api/rules/suggest":
+                elif self.path in {"/api/rules/suggest", "/api/category-suggestions"}:
                     if model is None:
                         raise ValueError("Ollama no esta configurado: revisa runtime.json.")
-                    self.json_response(200, {"suggestions": suggest_rules(store, model)})
+                    if self.path == "/api/rules/suggest":
+                        self.json_response(200, {"suggestions": suggest_rules(store, model)})
+                    else:
+                        self.json_response(200, {"by_id": suggest_pending_categories(store, model)})
                     return
                 elif self.path == "/api/rules/delete":
                     if type(raw.get("id")) is not int:

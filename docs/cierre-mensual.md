@@ -159,6 +159,28 @@ frecuentes primero). Requiere un `runtime.json` válido y Ollama activo.
   con su auditoría; **Descartar** la quita. Ollama no elige Personal o Familiar,
   y mientras no apruebes no se guarda ni se decide nada.
 - Las sugerencias no se conservan: al recargar el panel hay que pedirlas de nuevo.
+- Solo cubren compras de avisos de correo. Si no queda ninguna sin regla, no hay
+  nada que sugerir: las compras de extractos nunca las decide una regla. Para esas
+  usa las sugerencias de categoría.
+
+### Sugerencias de categoría para pendientes
+
+En **Decisión**, el botón **Sugerir categorías con Ollama** propone una categoría
+para las compras pendientes, también las importadas de extractos (que llegan como
+«Otros gastos»). Requiere un `runtime.json` válido y Ollama activo.
+
+- Ollama recibe solo los nombres de comercio (hasta 60, los más frecuentes) y tu
+  lista de categorías. Se descartan las respuestas sobre comercios no preguntados
+  o con categorías fuera de tu lista. No incluye ingresos.
+- La sugerencia solo **preselecciona** la categoría, con la nota «Sugerida por
+  Ollama». En un movimiento queda en su selector de categoría; en la tarjeta de un
+  destino cuyos movimientos tienen la misma sugerencia aparece un selector
+  «Categoría para Gasto personal o Familiar».
+- Nada se guarda hasta que pulsas una decisión. Con Gasto personal o Familiar en la
+  tarjeta del destino, todos sus movimientos toman la categoría elegida, con la
+  misma validación todo o nada y una auditoría por movimiento. Las demás
+  decisiones (No cuenta, Inversión…) no usan esa categoría.
+- Las sugerencias no se conservan: al recargar el panel hay que pedirlas de nuevo.
 
 - Coinciden por palabras completas, sin distinguir mayúsculas ni signos: `UBER`
   coincide con `UBER*RIDES`, pero `IPS` no coincide con `TIPS`. Si coinciden
@@ -774,8 +796,11 @@ tablas. No cambia importes, decisiones ni auditoría.
   abono por…» quedaba en cola porque el lector fijo no lo reconocía y Ollama lo
   proponía como préstamo. Leído de nuevo en solo lectura, ahora sale sin Ollama
   como un pago de tarjeta pendiente.
-- Sugerencias de reglas con Ollama: cubiertas solo con pruebas y un modelo
-  simulado; no se han probado con Ollama ni con datos reales.
+- Sugerencias de reglas con Ollama: probadas por el usuario en el panel con datos
+  reales (2026-11-19); una regla sugerida, ajustada y aprobada.
+- Sugerencias de categoría (2026-11-19), en solo lectura sobre la base real: Ollama
+  propuso categoría para 30 de 64 compras pendientes de extractos en 6 s, sin
+  guardar nada. Falta decidir con ellas desde el panel.
 - Las pruebas (`pytest tests\monthly_close`) cubren reglas, importes, zona
   horaria, decisiones, lectores simulados de Graph y Gmail, el lanzador y el panel
   en Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas).

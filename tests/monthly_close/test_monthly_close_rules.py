@@ -249,3 +249,36 @@ def test_suggest_endpoint_needs_csrf_and_a_model_and_never_writes(store):
     assert results[0].json() == {"suggestions": [{"pattern": "FLYPASS PEAJE", "category": TRANSPORT, "count": 1}]}
     assert results[1].status_code == 400 and "Ollama" in results[1].json()["error"]
     assert store.rules() == [] and rows(store)["a"]["decision"] is None
+
+
+def test_pending_category_suggestions_include_statement_purchases_and_save_nothing(store):
+    from monthly_close.rule_suggestions import suggest_pending_categories
+
+    store.import_message("m1", [
+        event("stmt:1", "FLYPASS PEAJE"), event("stmt:2", "FLYPASS PEAJE"),
+        event("a", "TIENDA LUNA"), event("i", "EMPRESA SA", kind="income"),
+    ])
+    model = FakeCategoryModel([
+        {"merchant": "FLYPASS PEAJE", "category": TRANSPORT},
+        {"merchant": "TIENDA LUNA", "category": "Inventada"},
+        {"merchant": "EMPRESA SA", "category": TRANSPORT},
+    ])
+
+    assert suggest_pending_categories(store, model) == {"stmt:1": TRANSPORT, "stmt:2": TRANSPORT}
+    assert set(model.asked[0]) == {"FLYPASS PEAJE", "TIENDA LUNA"}
+    assert all(row["decision"] is None and row["category"] != TRANSPORT for row in rows(store).values())
+
+
+def test_group_decision_applies_the_chosen_category_all_or_nothing(store):
+    store.import_message("m1", [event("stmt:1", "FLYPASS PEAJE"), event("stmt:2", "FLYPASS PEAJE")])
+    group = "com:FLYPASS PEAJE"
+    owner = rows(store)["stmt:1"]["owner"]
+
+    with pytest.raises(ValueError):
+        store.decide_group(owner, group, "exclude", category=TRANSPORT)
+    with pytest.raises(ValueError):
+        store.decide_group(owner, group, "family", category="Inventada")
+    assert all(row["decision"] is None for row in rows(store).values())
+
+    assert store.decide_group(owner, group, "family", category=TRANSPORT) == 2
+    assert {(row["decision"], row["category"]) for row in rows(store).values()} == {("family", TRANSPORT)}

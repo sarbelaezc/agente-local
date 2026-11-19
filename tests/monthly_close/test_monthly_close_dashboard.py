@@ -682,3 +682,31 @@ def test_rule_panel_buttons_and_fields_are_readable_in_both_themes(dashboard):
         assert len(ratios) >= 7
         assert all(ratio >= 4.5 for _, ratio in ratios), (theme, ratios)
     assert not errors
+
+
+def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(dashboard):
+    page, store, month, errors = dashboard
+    store.import_message("stmt", [
+        {
+            "id": f"stmt:{index}", "message_id": "stmt", "day": f"{month}-0{index}",
+            "merchant": "FLYPASS PEAJE", "account": "Tarjeta A", "amount_minor": 1000000,
+            "currency": "COP", "category": "Compras", "kind": "purchase", "decision": None,
+            "reason": "Extracto.",
+        } for index in (6, 7)
+    ])
+    page.route("**/api/category-suggestions", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body='{"by_id":{"stmt:6":"Transporte","stmt:7":"Transporte"}}',
+    ))
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    page.get_by_role("button", name="Sugerir categorías con Ollama").click()
+    group_select = page.get_by_label("Categoría para Gasto personal o Familiar")
+    expect(group_select).to_have_value("Transporte")
+    assert all(row["decision"] is None for row in store.state()["transactions"] if row["id"].startswith("stmt:"))
+    page.get_by_role("button", name=re.compile("^Familiar: 2 movimientos")).click()
+    expect(page.get_by_role("status").filter(has_text="2 movimientos")).to_be_visible()
+    saved = {row["id"]: (row["decision"], row["category"]) for row in store.state()["transactions"]}
+    assert saved["stmt:6"] == saved["stmt:7"] == ("family", "Transporte")
+    assert not errors

@@ -471,6 +471,13 @@ class Store:
             decided += 1
         return decided
 
+    def pending_purchases(self) -> list[dict]:
+        """Id and merchant of every pending purchase, from notices and statements."""
+        with self.connect() as db:
+            return [dict(row) for row in db.execute(
+                "SELECT id,merchant FROM transactions WHERE decision IS NULL AND kind='purchase'",
+            )]
+
     def unruled_merchants(self, limit: int = 25) -> list[dict]:
         """Merchants of pending purchases that no rule covers, most frequent first."""
         with self.connect() as db:
@@ -662,13 +669,16 @@ class Store:
 
     def decide_group(
         self, owner: str, group: str, decision: str, *,
-        pending_only: bool = True, remember: bool = False,
+        pending_only: bool = True, remember: bool = False, category: str | None = None,
     ) -> int:
         """Apply one person's decision to every movement to a destination, all or nothing.
 
         Each movement passes the same validation as a single decision and gets its own
         audit row. remember also decides later movements to the same destination.
+        category, chosen by the person, applies only to Personal or Familiar decisions.
         """
+        if category is not None and decision not in {"personal", "family"}:
+            raise ValueError("Solo Gasto personal o Familiar admiten una categoria para todo el destino.")
         owner = owner_id(owner)
         group = clean_text(group, 200)
         with self.connect() as db:
@@ -677,7 +687,7 @@ class Store:
                 raise ValueError("Destino sin movimientos por decidir.")
             for row in rows:
                 self._decide(
-                    db, row["id"], decision, None,
+                    db, row["id"], decision, category,
                     audit=("decision-group-local-user", f"{decision}: {group}"),
                 )
             if remember:
