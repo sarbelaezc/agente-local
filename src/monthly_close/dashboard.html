@@ -2164,9 +2164,10 @@
         const groups = new Map();
         rows.forEach(tx => {
           const key = `${tx.owner}|${tx.group}`;
-          if (!groups.has(key)) groups.set(key, { owner: tx.owner, group: tx.group, rows: [], total: 0 });
+          if (!groups.has(key)) groups.set(key, { owner: tx.owner, group: tx.group, rows: [], total: 0, native: new Map() });
           const entry = groups.get(key);
           entry.rows.push(tx);
+          if (Number.isSafeInteger(tx.amount_minor)) entry.native.set(txCurrency(tx), (entry.native.get(txCurrency(tx)) || 0) + tx.amount_minor);
           entry.total += reportingCurrency(tx) === state.currency && reportingCurrency(tx) !== txCurrency(tx) ? tx.cop_amount_minor
             : txCurrency(tx) === state.currency ? tx.amount_minor : 0;
         });
@@ -2174,6 +2175,19 @@
         entries.forEach(entry => entry.rows.sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))));
         const last = entry => String(entry.rows[entry.rows.length - 1].day || "");
         return entries.sort(newestFirst ? (a, b) => last(b).localeCompare(last(a)) : (a, b) => b.total - a.total);
+      }
+
+      // A destination's amount in each movement's own currency; dollar purchases without an
+      // estimated rate are never shown as 0.00 COP. The COP estimate is added only when every
+      // dollar movement has one.
+      function groupAmountText(entry) {
+        const parts = Array.from(entry.native, ([currency, minor]) => formatMoney(minor, currency));
+        const dollars = entry.rows.filter(tx => txCurrency(tx) === "USD");
+        if (state.currency === "COP" && dollars.length && dollars.every(tx => Number.isSafeInteger(tx.cop_amount_minor))) {
+          const estimate = dollars.reduce((total, tx) => total + tx.cop_amount_minor, 0);
+          return `${parts.join(" + ")} (≈ ${formatMoney(estimate, "COP")})`;
+        }
+        return parts.join(" + ");
       }
 
       function groupTitle(entry) {
@@ -2232,7 +2246,7 @@
         if (state.owner === "hogar") tags.append(ownerTag(entry.owner), document.createTextNode(" "));
         tags.append(el("span", "status-pill", `${entry.rows.length} movimientos`));
         meta.append(tags, el("span", "", `${shortDate(entry.rows[0].day)} → ${shortDate(entry.rows[entry.rows.length - 1].day)}`));
-        card.append(meta, el("h3", "", groupTitle(entry)), el("span", "group-amount", formatMoney(entry.total)));
+        card.append(meta, el("h3", "", groupTitle(entry)), el("span", "group-amount", groupAmountText(entry)));
         const hint = groupHint(entry);
         if (hint) card.append(el("p", "hint", hint));
         // Only choices valid for every movement of the destination are offered.

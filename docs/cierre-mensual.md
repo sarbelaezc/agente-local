@@ -217,6 +217,11 @@ aviso con marcas de COP y USD a la vez se detiene por ambiguo.
    equivalente en COP, que es el que suman los totales. Sin tasa, el movimiento
    no suma a COP; «No cuenta» lo excluye sin tasa.
 
+La tarjeta de un destino con varias compras muestra su total en la moneda de cada
+movimiento (por ejemplo `US$ 35,00`), nunca 0,00 COP por falta de tasa. Con COP
+seleccionado, añade el estimado en COP solo si todos sus movimientos en dólares
+tienen tasa.
+
 La tasa la pones tú: no se consulta una tasa externa ni la propone el modelo. Si
 un aviso en USD quedó guardado como COP, comprueba el correo original, cambia
 **Moneda original del aviso** a USD y pon la tasa al decidir.

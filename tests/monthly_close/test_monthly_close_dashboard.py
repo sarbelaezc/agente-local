@@ -195,6 +195,25 @@ def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
     assert not errors
 
 
+def test_grouped_usd_purchases_show_dollars_not_zero_cop(dashboard):
+    page, store, month, errors = dashboard
+    for number, amount in (("1", 1000), ("2", 2500)):
+        store.import_message(f"usd-group-{number}", [{
+            "id": f"usd-group-{number}", "message_id": f"usd-group-{number}", "day": f"{month}-0{number}",
+            "merchant": "OPENAI CHATGPT", "account": "Tarjeta A",
+            "amount_minor": amount, "currency": "USD", "category": "Compras",
+            "kind": "purchase", "decision": None, "reason": "Aviso USD.",
+        }])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.locator("#tab-decisions").click()
+    card = page.locator("#pending-list .group-card").filter(has_text="OPENAI CHATGPT")
+    amount = card.locator(".group-amount").inner_text()
+    assert "35,00" in amount and "US$" in amount
+    assert "0,00" not in amount.replace("35,00", "")
+    assert not errors
+
+
 def test_legacy_cop_record_can_be_corrected_to_usd_only_on_decision(dashboard):
     page, store, _, errors = dashboard
     page.locator("#tab-decisions").click()
