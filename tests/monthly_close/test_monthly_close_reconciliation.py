@@ -35,12 +35,17 @@ def check(product: str, start: str, end: str, missing: int = 0, suffix: str = "0
 
 
 def first_quarter(**overrides) -> list[dict]:
-    """A quarterly savings statement and the three monthly card statements of Q1 2026."""
+    """A quarterly savings statement and the card statements that hold every day of Q1 2026.
+
+    A card statement is named after the month of its mid-month cut-off, so the last
+    days of March are in April's statement.
+    """
     checks = {
         "savings": check("CTA_AHORROS", "2025-12-31", "2026-03-31"),
         "jan": check("TARJETA_MASTERCARD", "2026-01-01", "2026-01-31", suffix="0002"),
         "feb": check("TARJETA_MASTERCARD", "2026-02-01", "2026-02-28", suffix="0002"),
         "mar": check("TARJETA_MASTERCARD", "2026-03-01", "2026-03-31", suffix="0002"),
+        "apr": check("TARJETA_MASTERCARD", "2026-04-01", "2026-04-30", suffix="0002"),
     }
     checks.update(overrides)
     return [value for value in checks.values() if value is not None]
@@ -65,7 +70,7 @@ def test_months_fully_covered_by_matching_statements_are_reconciled(store):
     assert changed == {"reconciled": ["2026-01", "2026-02", "2026-03"], "revoked": []}
     assert coverage(store) == {"2026-01": "reconciled", "2026-02": "reconciled", "2026-03": "reconciled"}
     row = store.state()["coverage"][0]
-    assert "2 extractos de Santiago" in row["note"] and "Manuela no tienen extractos" in row["note"]
+    assert "3 extractos de Santiago" in row["note"] and "Manuela no tienen extractos" in row["note"]
     with store.connect() as db:
         audit = [row[0] for row in db.execute("SELECT target FROM audit WHERE action='coverage-reconciled' ORDER BY id")]
     assert audit == ["2026-01", "2026-02", "2026-03"]
@@ -74,20 +79,29 @@ def test_months_fully_covered_by_matching_statements_are_reconciled(store):
 
 
 def test_a_month_without_every_statement_or_with_unmatched_lines_stays_partial(store):
-    movement(store, "a", "2026-01-10")
-    store.record_statements(first_quarter(feb=None, mar=check("TARJETA_MASTERCARD", "2026-03-01", "2026-03-31", 1, "0002")), [])
+    for month in ("2026-01", "2026-02", "2026-03"):
+        store.coverage(month, "partial", "Recorrido explicito.")
+    store.record_statements(first_quarter(
+        feb=None, apr=check("TARJETA_MASTERCARD", "2026-04-01", "2026-04-30", 1, "0002"),
+    ), [])
+    assert store.update_reconciled_coverage(TODAY)["reconciled"] == []
+    # A closed month that does not qualify says why, and keeps its partial status.
+    notes = {row["month"]: row["note"] for row in store.state()["coverage"]}
+    assert notes["2026-01"] == "Sin conciliar con los extractos: falta el extracto de TARJETA_MASTERCARD de 2026-02."
+    assert notes["2026-02"] == "Sin conciliar con los extractos: falta el extracto de TARJETA_MASTERCARD de 2026-02."
+    assert notes["2026-03"] == "Sin conciliar con los extractos: el extracto de TARJETA_MASTERCARD tiene movimientos sin coincidir."
+    assert set(coverage(store).values()) == {"partial"}
+
+
+def test_a_card_month_waits_for_the_next_statement_with_its_last_days(store):
+    """The real case: purchases of 16 October arrived in November's card statement."""
+    store.coverage("2026-01", "partial", "Recorrido explicito.")
+    store.record_statements(first_quarter(feb=None, mar=None, apr=None), [])
+    store.update_reconciled_coverage(TODAY)
+    assert coverage(store)["2026-01"] == "partial"
+    store.record_statements([check("TARJETA_MASTERCARD", "2026-02-01", "2026-02-28", suffix="0002")], [])
     store.update_reconciled_coverage(TODAY)
     assert coverage(store)["2026-01"] == "reconciled"
-    notes = {row["month"]: row["note"] for row in store.state()["coverage"]}
-    # A closed month that does not qualify says why, and keeps its partial status.
-    assert coverage(store).get("2026-02") is None
-    store.coverage("2026-02", "partial", "Recorrido explicito.")
-    store.coverage("2026-03", "partial", "Recorrido explicito.")
-    store.update_reconciled_coverage(TODAY)
-    notes = {row["month"]: row["note"] for row in store.state()["coverage"]}
-    assert notes["2026-02"] == "Sin conciliar con los extractos: falta el extracto de TARJETA_MASTERCARD que cubre el 2026-02-01."
-    assert notes["2026-03"] == "Sin conciliar con los extractos: el extracto de TARJETA_MASTERCARD tiene movimientos sin coincidir."
-    assert coverage(store)["2026-03"] == "partial"
 
 
 def test_a_product_that_started_later_does_not_block_earlier_months(store):

@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS statement_checks (
 MONTH = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
 # Statements that list every movement of a product. Credits only bring balances (their
 # payments leave the savings account) and Protección only figures, so they do not count.
-COVERAGE_PRODUCTS = {"CTA_AHORROS", "TARJETA_MASTERCARD", "TARJETA_AMEX", "TARJETA_VISA", "FIDUCUENTA"}
+CARD_PRODUCTS = {"TARJETA_MASTERCARD", "TARJETA_AMEX", "TARJETA_VISA"}
+COVERAGE_PRODUCTS = {"CTA_AHORROS", "FIDUCUENTA", *CARD_PRODUCTS}
 
 # Household columns added to databases created before owners existed. The defaults keep
 # every existing movement as Santiago's, with its amount and decision untouched.
@@ -1225,13 +1226,23 @@ class Store:
         if not required:
             return "no hay extractos de Santiago para el mes", 0
         used = 0
+        next_first = last + timedelta(days=1)
         for (product, _), rows in required.items():
-            overlapping = [row for row in rows if row[0] <= last and row[1] >= first]
-            day = first
-            while day <= last:
-                if not any(start <= day <= end for start, end, _ in overlapping):
-                    return f"falta el extracto de {product} que cubre el {day.isoformat()}", 0
-                day += timedelta(days=1)
+            if product in CARD_PRODUCTS:
+                # A card statement carries the month of its cut-off date but lists the
+                # movements since the previous cut-off, in the middle of the month before.
+                # The statements of this month and the next one hold every day of it.
+                overlapping = [row for row in rows if row[0] in (first, next_first)]
+                for needed in (first, next_first):
+                    if not any(row[0] == needed for row in overlapping):
+                        return f"falta el extracto de {product} de {needed:%Y-%m}", 0
+            else:
+                overlapping = [row for row in rows if row[0] <= last and row[1] >= first]
+                day = first
+                while day <= last:
+                    if not any(start <= day <= end for start, end, _ in overlapping):
+                        return f"falta el extracto de {product} que cubre el {day.isoformat()}", 0
+                    day += timedelta(days=1)
             if any(missing for _, _, missing in overlapping):
                 return f"el extracto de {product} tiene movimientos sin coincidir", 0
             used += len(overlapping)

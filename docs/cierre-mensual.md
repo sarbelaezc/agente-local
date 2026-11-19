@@ -360,7 +360,8 @@ decisión en el panel, el agente revisa los meses ya cerrados (anteriores al mes
 curso). Un mes queda **Conciliado** si se cumple todo:
 
 1. Cada producto de Santiago que lista movimientos (cuenta de ahorros, tarjetas y
-   Fiducuenta) y que ya existía ese mes tiene extractos que cubren todos sus días.
+   Fiducuenta) y que ya existía ese mes tiene extractos que cubren todos sus días
+   (en las tarjetas, los de ese mes y el siguiente; ver abajo).
    Los créditos (solo traen saldos; sus pagos salen de la cuenta de ahorros) y
    Protección (solo cifras) no cuentan.
 2. Ninguno de esos extractos dejó movimientos sin coincidir.
@@ -375,6 +376,12 @@ curso). Un mes queda **Conciliado** si se cumple todo:
 - Un mes cerrado que aún no se concilia muestra en su nota el motivo, por ejemplo
   «falta el extracto de CTA_AHORROS que cubre el 2026-10-01».
 - Nunca reemplaza tu revisión manual: un mes **Revisado** sigue así.
+- **Tarjetas.** Cada extracto lleva el mes de su fecha de corte (a mitad de mes) y
+  lista los movimientos desde el corte anterior: el extracto de noviembre trae las
+  compras de la segunda mitad de octubre. Por eso un mes se concilia cuando llegan
+  los extractos de la tarjeta de ese mes **y del siguiente**. Esos días son también
+  los que más suelen traer compras sin aviso del banco, que entran pendientes desde
+  el extracto aunque el mes ya haya pasado.
 - La cuenta de ahorros envía extractos **trimestrales**, así que un mes se concilia
   cuando llega el extracto de su trimestre (los de octubre a diciembre, en enero).
 - Si un producto deja de enviar extractos (por ejemplo, una tarjeta cancelada), los
@@ -690,9 +697,9 @@ tablas. No cambia importes, decisiones ni auditoría.
   `-ReprocessEmpty`, 9 pagos de tarjeta leídos, y la cola de 15 avisos quedó vacía
   (9 informativos, 2 inversiones y 4 movimientos recuperados, más 12
   transferencias a cuenta).
-- Conciliación automática (2026-11-18), simulada en una copia de la base real:
-  enero a septiembre de 2026 quedan conciliados; octubre y noviembre, parciales
-  hasta que llegue el extracto de ahorros del cuarto trimestre.
+- Conciliación automática (2026-11-18), con `import` en la base real: enero a
+  septiembre de 2026 quedaron conciliados. Octubre sigue parcial: faltan el extracto
+  de noviembre de la Amex y el de ahorros del cuarto trimestre.
 - Las pruebas (`pytest tests\monthly_close`) cubren reglas, importes, zona
   horaria, decisiones, lectores simulados de Graph y Gmail, el lanzador y el panel
   en Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas).
