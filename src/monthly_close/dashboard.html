@@ -75,7 +75,8 @@
     .button[disabled] { cursor: not-allowed; opacity: .55; }
     .decision-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 6px; }
     .decision-actions .button { min-height: 42px; padding: 11px 6px; border-radius: 12px; background: var(--soft); font-size: 13.5px; }
-    .decision-actions .button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+    .decision-actions .button[aria-pressed="true"], .decision-actions .button.primary { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+    .decision-actions .button.primary:hover { border-color: var(--ink2); }
     .decision-actions.between-actions { margin-top: 12px; }
 
     /* Messages */
@@ -2320,12 +2321,20 @@
         const categories = safeArray(state.data && state.data.categories).filter(category => typeof category === "string");
         ruleSuggestions.forEach(suggestion => {
           const card = el("article", "decision-card");
+          const field = (text, control) => {
+            const wrap = el("div", "field");
+            const label = el("label", "", text);
+            label.style.cssText = "display:flex;flex-direction:column;gap:6px";
+            label.append(control);
+            wrap.append(label);
+            return wrap;
+          };
           const pattern = el("input");
           pattern.value = suggestion.pattern;
           pattern.maxLength = 60;
-          pattern.setAttribute("aria-label", "El comercio contiene");
+          pattern.autocomplete = "off";
+          pattern.spellcheck = false;
           const category = el("select");
-          category.setAttribute("aria-label", `Categoría para ${suggestion.pattern}`);
           categories.forEach(name => {
             const option = el("option", "", name);
             option.value = name;
@@ -2333,7 +2342,6 @@
             category.append(option);
           });
           const kind = el("select");
-          kind.setAttribute("aria-label", `Tipo para ${suggestion.pattern}`);
           [["personal", "Gasto personal"], ["family", "Familiar"]].forEach(([value, label]) => {
             const option = el("option", "", label);
             option.value = value;
@@ -2348,9 +2356,13 @@
           const skip = el("button", "button small", "Descartar");
           skip.type = "button";
           skip.addEventListener("click", () => { ruleSuggestions = ruleSuggestions.filter(item => item !== suggestion); renderRuleSuggestions(); });
+          const fields = el("div", "decision-actions");
+          fields.style.alignItems = "end";
+          fields.append(field("El comercio contiene", pattern), field("Categoría", category), field("Tipo", kind));
           const actions = el("div", "decision-actions");
-          actions.append(pattern, category, kind, approve, skip);
-          card.append(el("p", "hint", `${suggestion.count} compra(s) pendiente(s)`), actions);
+          actions.style.marginTop = "10px";
+          actions.append(approve, skip);
+          card.append(el("p", "hint", `${suggestion.count} compra(s) pendiente(s)`), fields, actions);
           host.append(card);
         });
       }

@@ -646,3 +646,39 @@ def test_a_new_card_number_is_asked_in_decisions_with_the_option_of_a_new_card(d
     with store.connect() as db:
         assert db.execute("SELECT replaces FROM card_series WHERE suffix='0009'").fetchone()[0] == "TARJETA_VISA:0002"
     assert not errors
+
+
+def test_rule_panel_buttons_and_fields_are_readable_in_both_themes(dashboard):
+    page, _, _, errors = dashboard
+    page.route("**/api/rules/suggest", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body='{"suggestions":[{"pattern":"FLYPASS PEAJE","category":"Compras","count":2}]}',
+    ))
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    page.locator("#rules-detail > summary").click()
+    page.get_by_role("button", name="Sugerir reglas").click()
+    expect(page.get_by_role("button", name="Aprobar regla")).to_be_visible()
+    expect(page.get_by_label("El comercio contiene").last).to_have_value("FLYPASS PEAJE")
+    for theme in ["light", "dark"]:
+        if theme == "dark":
+            page.locator("#theme-toggle").click()
+        ratios = page.locator(
+            "#rules-detail button:visible, #rules-detail input:visible, #rules-detail select:visible",
+        ).evaluate_all(r"""controls => controls.map(control => {
+            const luminance = color => {
+                const channels = color.match(/[\d.]+/g).slice(0, 3).map(Number)
+                    .map(value => value / 255)
+                    .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+                return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
+            };
+            let host = control, background = "rgba(0, 0, 0, 0)";
+            while (host && /rgba\(.*, 0\)$/.test(background)) {
+                background = getComputedStyle(host).backgroundColor;
+                host = host.parentElement;
+            }
+            const values = [luminance(getComputedStyle(control).color), luminance(background)];
+            return [control.textContent.trim() || control.value, (Math.max(...values) + .05) / (Math.min(...values) + .05)];
+        })""")
+        assert len(ratios) >= 7
+        assert all(ratio >= 4.5 for _, ratio in ratios), (theme, ratios)
+    assert not errors
