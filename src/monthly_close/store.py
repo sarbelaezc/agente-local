@@ -113,6 +113,10 @@ KEPT = (
 )
 
 
+# Statement wording that always means the owner paid their own card (confirmed by the owners).
+OWN_CARD_PAYMENT = "ABONO SUCURSAL VIRTUAL"
+
+
 def merchant_words(text: str) -> str:
     """Uppercase words padded with spaces, so rules match whole words only."""
     return " " + " ".join(re.findall(r"[^\W_]+", text.upper())) + " "
@@ -1024,8 +1028,36 @@ class Store:
                     inserted.append(event["id"])
                     self._audit(db, "statement-import", event["id"], event["message_id"])
             self._flag_between_owners(db, inserted)
-        # No rule decides them: what only a statement shows is always confirmed by a person.
+            # No rule decides them: what only a statement shows is confirmed by a person,
+            # except the fixed wordings each owner confirmed always mean the same thing.
+            self._decide_fixed_statement_lines(db)
         return len(inserted)
+
+    def _decide_fixed_statement_lines(self, db: sqlite3.Connection) -> int:
+        """Decide pending statement lines whose exact wording has one meaning for both owners.
+
+        «ABONO SUCURSAL VIRTUAL» on a credit card statement is the owner paying their own
+        card from their savings account: it does not count, because the purchases do.
+        """
+        rows = db.execute(
+            """SELECT id,merchant FROM transactions WHERE decision IS NULL AND id LIKE 'stmt:%'
+            AND kind='card_payment' AND account LIKE 'Tarjeta de cr%'""",
+        ).fetchall()
+        decided = 0
+        for row in rows:
+            if merchant_words(row["merchant"]).strip() != OWN_CARD_PAYMENT:
+                continue
+            self._decide(
+                db, row["id"], "exclude", None,
+                audit=("decision-statement-phrase", f"exclude: {OWN_CARD_PAYMENT}"),
+            )
+            db.execute(
+                "UPDATE transactions SET reason=? WHERE id=?",
+                (f"«{OWN_CARD_PAYMENT}» en el extracto de la tarjeta es un pago propio desde "
+                 "la cuenta de ahorros: no cuenta. Puedes cambiarlo aqui.", row["id"]),
+            )
+            decided += 1
+        return decided
 
     def reclassify_statement_movements(self, kinds: dict[str, str]) -> int:
         """Correct the kind of statement movements still pending, after the reader improved.

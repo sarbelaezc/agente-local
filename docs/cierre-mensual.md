@@ -399,8 +399,15 @@ Fiducuenta, crédito de consumo e hipotecario):
   que extractos consecutivos repiten.
 - Un movimiento del extracto **coincide** con uno conocido del mismo importe y
   moneda con hasta 5 días de diferencia; cada uno se usa una sola vez. Lo que solo
-  muestra el extracto entra **pendiente** (`statement-import`) y siempre lo decide
-  una persona. Repetir no importa nada dos veces.
+  muestra el extracto entra **pendiente** (`statement-import`) y lo decide una
+  persona. Repetir no importa nada dos veces.
+- Única excepción: una línea que dice exactamente «ABONO SUCURSAL VIRTUAL» en el
+  extracto de una tarjeta de crédito, de cualquiera de los dos titulares, es un
+  pago propio desde la cuenta de ahorros y queda decidida **No cuenta**
+  (`decision-statement-phrase`), porque el gasto son las compras. Se aplica al
+  registrar extractos, también a las que ya estaban pendientes, nunca cambia una
+  decisión tomada y se puede corregir en el historial (por ejemplo, a «Abono de
+  tercero» si un día pagó otra persona).
 - Se guarda el saldo de cada inversión de Fiducuenta y el saldo de capital de cada
   crédito.
 - Las cuotas de crédito cuentan como gasto si se deciden Personal o Familiar.
@@ -752,6 +759,7 @@ origen. Las etiquetas principales:
 | `rule-local-user`, `group-rule-local-user`, `group-rule-between-local-user`, `group-rule-delete-local-user` | Regla por comercio o por destino creada, marcada entre titulares o borrada |
 | `decision-manuela`, `group-rule-manuela` | Decisiones importadas del panel anterior de Manuela |
 | `statement-import`, `statement-reclassify` | Movimiento importado de un extracto, o su tipo corregido |
+| `decision-statement-phrase` | Línea de extracto decidida por su texto fijo («ABONO SUCURSAL VIRTUAL»: No cuenta) |
 | `destination-backfill` | Destino completado con `backfill-destinations` |
 | `payroll-deduction-income` | Ingreso espejo de una cuota descontada de la nómina |
 | `mailbox-possible-duplicate` | Posible duplicado entre el Gmail de Manuela y su archivo |

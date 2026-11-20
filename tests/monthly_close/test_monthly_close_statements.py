@@ -191,7 +191,10 @@ def test_statement_movements_enter_pending_audited_and_only_once(store):
     assert store.record_statements(report.checks(), events) == 4
     assert store.record_statements(report.checks(), events) == 0
     rows = store.state()["transactions"]
-    assert {r["decision"] for r in rows} == {None}
+    # Only the card's own-payment wording is decided (No cuenta); everything else waits.
+    assert {(r["merchant"], r["decision"]) for r in rows if r["decision"] is not None} == {
+        ("ABONO SUCURSAL VIRTUAL", "exclude"),
+    }
     assert {r["kind"] for r in rows} == {"purchase", "card_payment"}
     assert store.state()["statement_checks"][0]["missing"] == 4
     with store.connect() as db:
@@ -206,7 +209,7 @@ def test_merchant_rules_never_decide_statement_movements(store):
     report = st.reconcile([card], [], date(2026, 1, 1))
     store.record_statements(report.checks(), [st.missing_event(c, "Otros gastos", "Otros ingresos") for c in report.missing])
     store.apply_rules()  # e.g. a later notice import runs every rule again
-    assert {r["decision"] for r in store.state()["transactions"]} == {None}
+    assert {r["decision"] for r in store.state()["transactions"] if r["merchant"] != "ABONO SUCURSAL VIRTUAL"} == {None}
 
 
 def test_loan_instalment_counts_only_as_personal_family_or_nothing(store):
@@ -794,3 +797,34 @@ def test_reconcile_corrects_pending_movements_it_imported_with_an_old_kind(store
     assert [tuple(row) for row in audit] == [(events[0]["id"], "card_payment -> purchase")]
     # Repeating it changes nothing.
     assert run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)["reclassified"] == 0
+
+
+def test_own_card_payment_wording_is_decided_not_counted_only_on_card_statements(store):
+    def line(event_id, merchant, account, owner="santiago", kind="card_payment"):
+        return {
+            "id": f"stmt:{event_id}", "message_id": "statement:x", "day": "2026-01-10",
+            "merchant": merchant, "account": account, "amount_minor": 5000000, "currency": "COP",
+            "category": "Otros gastos", "kind": kind, "decision": None, "owner": owner,
+            "reason": "Leído del extracto.",
+        }
+    store.record_statements([], [
+        line("amex", "ABONO SUCURSAL VIRTUAL", "Tarjeta de crédito Amex"),
+        line("visa", "Abono  sucursal-virtual", "Tarjeta de crédito Visa", owner="manuela"),
+        line("savings", "ABONO SUCURSAL VIRTUAL", "Cuenta de ahorros"),
+        line("other", "ABONO SUCURSAL VIRTUAL REF 123", "Tarjeta de crédito Master"),
+        line("buy", "ABONO SUCURSAL VIRTUAL", "Tarjeta de crédito Master", kind="purchase"),
+    ])
+
+    rows = {row["id"]: row for row in store.state()["transactions"]}
+    assert rows["stmt:amex"]["decision"] == rows["stmt:visa"]["decision"] == "exclude"
+    assert "pago propio" in rows["stmt:amex"]["reason"]
+    assert all(rows[f"stmt:{key}"]["decision"] is None for key in ("savings", "other", "buy"))
+    with store.connect() as db:
+        audit = db.execute("SELECT target,value FROM audit WHERE action='decision-statement-phrase'").fetchall()
+    assert sorted(map(tuple, audit)) == [("stmt:amex", "exclude: ABONO SUCURSAL VIRTUAL"), ("stmt:visa", "exclude: ABONO SUCURSAL VIRTUAL")]
+    assert store.monthly_totals("santiago").get("2026-01", {}).get("personal", 0) == 0
+
+    # A person's later change stands: recording statements again does not decide it back.
+    store.decide("stmt:amex", "third_party_payment")
+    store.record_statements([], [])
+    assert {row["id"]: row["decision"] for row in store.state()["transactions"]}["stmt:amex"] == "third_party_payment"
