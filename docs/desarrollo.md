@@ -102,7 +102,7 @@ va en `src/shared/`.
     segundo sin tráfico).
   - Las fixtures `dashboard` y `household` fallan solas si la página lanzó algún
     error de JavaScript; la prueba no necesita comprobarlo.
-  - Legibilidad: `tests/monthly_close/page_checks.py` da `in_both_themes(page)` y
+  - Legibilidad: `tests/page_checks.py` (compartido por las dos funcionalidades) da `in_both_themes(page)` y
     `assert_readable(locator, tema, at_least=…, min_height=…)`, que exige contraste
     de al menos 4,5:1 frente al fondo real y, si se pide, una altura mínima. Úsalo
     para cada control nuevo del panel.
