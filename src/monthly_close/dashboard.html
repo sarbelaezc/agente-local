@@ -2266,6 +2266,8 @@
           const currentSet = new Set(entry.rows.map(tx => tx.category));
           const current = currentSet.size === 1 ? [...currentSet][0] : undefined;
           const categories = safeArray(state.data.categories).filter(category => typeof category === "string");
+          // Same special choice as a single movement: cash taken out counts as Personal or Familiar.
+          if (!categories.includes("Retiro en efectivo")) categories.push("Retiro en efectivo");
           const selected = typeof suggested === "string" ? suggested : categories.includes(current) ? current : "";
           const field = el("div", "field decision-category");
           const label = el("label", "", `Categoría para los ${entry.rows.length} movimientos (Gasto personal o Familiar)`);

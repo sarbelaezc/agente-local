@@ -788,10 +788,10 @@ def test_group_category_shows_for_transfers_but_not_for_investments(dashboard):
     transfer = page.locator("#pending-list .group-card").filter(has_text="TRASLADO A NEQUI")
     investment = page.locator("#pending-list .group-card").filter(has_text="TRASLADO A FONDO")
     expect(investment.get_by_label(label)).to_have_count(0)
-    transfer.get_by_label(label).select_option("Transporte")
+    transfer.get_by_label(label).select_option("Retiro en efectivo")
     transfer.get_by_role("button", name=re.compile("^Familiar: 2 movimientos")).click()
     expect(page.locator("#pending-list .group-card").filter(has_text="TRASLADO A NEQUI")).to_have_count(0)
 
     saved = {row["id"]: (row["decision"], row["category"]) for row in store.state()["transactions"]}
-    assert saved["tr:1"] == saved["tr:2"] == ("family", "Transporte")
+    assert saved["tr:1"] == saved["tr:2"] == ("family", "Retiro en efectivo")
     assert not errors

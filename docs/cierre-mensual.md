@@ -133,7 +133,8 @@ pista, con botones que deciden todos sus movimientos a la vez.
 - **Categoría del destino.** Una tarjeta con varios movimientos que admiten Gasto
   personal o Familiar (compras, transferencias como un traslado a Nequi, cuotas
   de crédito o movimientos sin tipo) tiene el selector «Categoría para los N
-  movimientos (Gasto personal o Familiar)». Los traslados a inversiones no lo
+  movimientos (Gasto personal o Familiar)», que incluye «Retiro en efectivo» para
+  traslados que sacaste en efectivo. Los traslados a inversiones no lo
   tienen: Inversión y Retiro de inversión asignan su propia categoría. Al decidir
   Gasto personal o Familiar, todos toman esa categoría, con la misma validación
   todo o nada y una auditoría por movimiento; las demás decisiones no la usan.
