@@ -802,7 +802,8 @@ def test_reconcile_corrects_pending_movements_it_imported_with_an_old_kind(store
     kinds = {row["id"]: (row["kind"], row["decision"]) for row in store.state()["transactions"]}
     assert kinds[events[0]["id"]] == ("purchase", None)
     assert kinds[decided] == ("card_payment", "exclude")  # a person's decision stands
-    assert kinds[events[2]["id"]] == ("card_payment", None)
+    # «PAGO SUC VIRT TC …» from savings is a fixed own-card payment: No cuenta.
+    assert kinds[events[2]["id"]] == ("card_payment", "exclude")
     with store.connect() as db:
         audit = db.execute("SELECT target, value FROM audit WHERE action='statement-reclassify'").fetchall()
     assert [tuple(row) for row in audit] == [(events[0]["id"], "card_payment -> purchase")]
@@ -872,3 +873,26 @@ def test_statement_purchases_arrive_with_a_proposed_category_but_pending(store):
     assert "una de tus reglas" in events[0]["reason"] and "decisiones anteriores" in events[1]["reason"]
     store.record_statements([], events)
     assert {row["id"]: row["decision"] for row in store.state()["transactions"]}["stmt:a"] is None
+
+
+def test_savings_interest_and_own_card_payments_are_decided_by_their_fixed_wording(store):
+    def line(event_id, merchant, account, kind):
+        return {
+            "id": f"stmt:{event_id}", "message_id": "statement:x", "day": "2026-01-10",
+            "merchant": merchant, "account": account, "amount_minor": 1000, "currency": "COP",
+            "category": "Otros ingresos" if kind == "income" else "Otros gastos", "kind": kind,
+            "decision": None, "owner": "manuela", "reason": "Leído del extracto.",
+        }
+    store.record_statements([], [
+        line("interest", "ABONO INTERESES AHORROS", "Cuenta de ahorros", "income"),
+        line("master", "PAGO SUC VIRT TC MASTER DOLAR", "Cuenta de ahorros", "card_payment"),
+        line("visa", "PAGO SUC VIRT TC VISA", "Cuenta de ahorros", "card_payment"),
+        line("auto", "PAGO AUTOM TC MASTER DOLAR", "Cuenta de ahorros", "card_payment"),
+        line("elsewhere", "ABONO INTERESES AHORROS", "Fiducuenta", "income"),
+        line("other", "PAGO SUC VIRT TC OTRA", "Cuenta de ahorros", "card_payment"),
+    ])
+    rows = {row["id"]: row for row in store.state()["transactions"]}
+    assert (rows["stmt:interest"]["decision"], rows["stmt:interest"]["category"]) == ("income", "Otros ingresos")
+    assert rows["stmt:master"]["decision"] == rows["stmt:visa"]["decision"] == "exclude"
+    assert all(rows[f"stmt:{key}"]["decision"] is None for key in ("auto", "elsewhere", "other"))
+    assert "intereses" in rows["stmt:interest"]["reason"]

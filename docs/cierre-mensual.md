@@ -411,13 +411,18 @@ Fiducuenta, crédito de consumo e hipotecario):
   persona; si es una compra, con una categoría sugerida (ver
   [Sugerencias de categoría](#sugerencias-de-categoría-para-pendientes)). Repetir no
   importa nada dos veces.
-- Única excepción: una línea que dice exactamente «ABONO SUCURSAL VIRTUAL» en el
-  extracto de una tarjeta de crédito, de cualquiera de los dos titulares, es un
-  pago propio desde la cuenta de ahorros y queda decidida **No cuenta**
-  (`decision-statement-phrase`), porque el gasto son las compras. Se aplica al
-  registrar extractos, también a las que ya estaban pendientes, nunca cambia una
-  decisión tomada y se puede corregir en el historial (por ejemplo, a «Abono de
-  tercero» si un día pagó otra persona).
+- Excepción: las líneas con un texto fijo que los dos titulares confirmaron que
+  siempre significa lo mismo quedan decididas al registrar extractos
+  (`decision-statement-phrase`), también las que ya estaban pendientes:
+
+  | Texto exacto | Dónde | Decisión |
+  |---|---|---|
+  | «ABONO SUCURSAL VIRTUAL» | Extracto de tarjeta de crédito | **No cuenta**: pago propio desde la cuenta de ahorros; el gasto son las compras |
+  | «PAGO SUC VIRT TC MASTER», «… AMEX» o «… VISA», con o sin «DOLAR» | Cuenta de ahorros | **No cuenta**: la salida con la que pagaste tu tarjeta |
+  | «ABONO INTERESES AHORROS» | Cuenta de ahorros | **Ingreso**, categoría «Otros ingresos» |
+
+  Cualquier otro texto, aunque se parezca (por ejemplo «PAGO AUTOM TC…»), sigue
+  pendiente. Nunca cambia una decisión tomada y se puede corregir en el historial.
 - Se guarda el saldo de cada inversión de Fiducuenta y el saldo de capital de cada
   crédito.
 - Las cuotas de crédito cuentan como gasto si se deciden Personal o Familiar.
@@ -769,7 +774,7 @@ origen. Las etiquetas principales:
 | `rule-local-user`, `group-rule-local-user`, `group-rule-between-local-user`, `group-rule-delete-local-user` | Regla por comercio o por destino creada, marcada entre titulares o borrada |
 | `decision-manuela`, `group-rule-manuela` | Decisiones importadas del panel anterior de Manuela |
 | `statement-import`, `statement-reclassify` | Movimiento importado de un extracto, o su tipo corregido |
-| `decision-statement-phrase` | Línea de extracto decidida por su texto fijo («ABONO SUCURSAL VIRTUAL»: No cuenta) |
+| `decision-statement-phrase` | Línea de extracto decidida por un texto fijo confirmado (ver «Conciliar extractos») |
 | `destination-backfill` | Destino completado con `backfill-destinations` |
 | `payroll-deduction-income` | Ingreso espejo de una cuota descontada de la nómina |
 | `mailbox-possible-duplicate` | Posible duplicado entre el Gmail de Manuela y su archivo |

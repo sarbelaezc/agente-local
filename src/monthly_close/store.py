@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
@@ -113,8 +114,33 @@ KEPT = (
 )
 
 
-# Statement wording that always means the owner paid their own card (confirmed by the owners).
-OWN_CARD_PAYMENT = "ABONO SUCURSAL VIRTUAL"
+@dataclass(frozen=True)
+class FixedStatementLine:
+    """A statement wording that both owners confirmed always means the same decision."""
+
+    wording: str  # regular expression over the line's words (see merchant_words)
+    account: str  # SQL LIKE pattern for the account it appears in
+    kind: str
+    decision: str
+    category: str | None
+    reason: str
+
+
+FIXED_STATEMENT_LINES = (
+    FixedStatementLine(
+        r"ABONO SUCURSAL VIRTUAL", "Tarjeta de cr%", "card_payment", "exclude", None,
+        "en el extracto de la tarjeta es un pago propio desde la cuenta de ahorros: no cuenta.",
+    ),
+    FixedStatementLine(
+        r"PAGO SUC VIRT TC (?:MASTER|AMEX|VISA)(?: DOLAR)?", "Cuenta de ahorros", "card_payment",
+        "exclude", None,
+        "es la salida de ahorros con la que pagaste tu propia tarjeta: no cuenta, el gasto son las compras.",
+    ),
+    FixedStatementLine(
+        r"ABONO INTERESES AHORROS", "Cuenta de ahorros", "income", "income", "Otros ingresos",
+        "son intereses de la cuenta de ahorros: ingreso.",
+    ),
+)
 
 
 def merchant_words(text: str) -> str:
@@ -1036,27 +1062,28 @@ class Store:
     def _decide_fixed_statement_lines(self, db: sqlite3.Connection) -> int:
         """Decide pending statement lines whose exact wording has one meaning for both owners.
 
-        «ABONO SUCURSAL VIRTUAL» on a credit card statement is the owner paying their own
-        card from their savings account: it does not count, because the purchases do.
+        Only the wordings in FIXED_STATEMENT_LINES, in their account and kind, are decided;
+        a decision already taken is never changed. Each one is audited and can be corrected.
         """
-        rows = db.execute(
-            """SELECT id,merchant FROM transactions WHERE decision IS NULL AND id LIKE 'stmt:%'
-            AND kind='card_payment' AND account LIKE 'Tarjeta de cr%'""",
-        ).fetchall()
         decided = 0
-        for row in rows:
-            if merchant_words(row["merchant"]).strip() != OWN_CARD_PAYMENT:
-                continue
-            self._decide(
-                db, row["id"], "exclude", None,
-                audit=("decision-statement-phrase", f"exclude: {OWN_CARD_PAYMENT}"),
-            )
-            db.execute(
-                "UPDATE transactions SET reason=? WHERE id=?",
-                (f"«{OWN_CARD_PAYMENT}» en el extracto de la tarjeta es un pago propio desde "
-                 "la cuenta de ahorros: no cuenta. Puedes cambiarlo aqui.", row["id"]),
-            )
-            decided += 1
+        for line in FIXED_STATEMENT_LINES:
+            rows = db.execute(
+                """SELECT id,merchant FROM transactions WHERE decision IS NULL AND id LIKE 'stmt:%'
+                AND kind=? AND account LIKE ?""", (line.kind, line.account),
+            ).fetchall()
+            for row in rows:
+                words = merchant_words(row["merchant"]).strip()
+                if not re.fullmatch(line.wording, words):
+                    continue
+                self._decide(
+                    db, row["id"], line.decision, line.category,
+                    audit=("decision-statement-phrase", f"{line.decision}: {words}"),
+                )
+                db.execute(
+                    "UPDATE transactions SET reason=? WHERE id=?",
+                    (f"«{words}» {line.reason} Puedes cambiarlo aqui.", row["id"]),
+                )
+                decided += 1
         return decided
 
     def reclassify_statement_movements(self, kinds: dict[str, str]) -> int:
