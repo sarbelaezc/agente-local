@@ -921,7 +921,9 @@ tablas. No cambia importes, decisiones ni auditoría.
   Ollama.
 
 - Acceso desde otro dispositivo de la red de casa (2026-11-20): regla del
-  firewall creada, red marcada como privada y entrada al panel con `serve -Red`.
+  firewall creada, red marcada como privada, entrada al panel con `serve -Red` y
+  una decisión guardada desde el celular, con su nombre en la columna `device` de
+  la auditoría.
 
 **Pendiente**
 
@@ -933,8 +935,8 @@ tablas. No cambia importes, decisiones ni auditoría.
   dos tienen extractos de septiembre y octubre). Probado solo sobre una copia de la
   base y con datos sintéticos.
 
-- Decidir y revocar desde un dispositivo real con `serve -Red` (probado en
-  Chromium con una segunda dirección local).
+- Revocar un dispositivo real con `devices -Revoke` (probado con datos
+  sintéticos).
 - La primera ejecución real de la tarea programada.
 - Cuánto dura en la práctica la sesión de Gmail en Testing, y si pasar la app a
   producción lo evita.
