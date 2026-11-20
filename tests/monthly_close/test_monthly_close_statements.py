@@ -5,20 +5,25 @@ import base64
 import io
 import json
 import re
-import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import date, datetime, timezone
 
 import pytest
+from playwright.sync_api import expect
 from pypdf import PdfWriter
 
+from builders import statement_line
 from monthly_close import main as app
 from monthly_close import statements as st
 from monthly_close.domain import Preferences
+from monthly_close.extraction import Mail, extract
 from monthly_close.gmail_reader import GmailSourceReader
 from monthly_close.graph_reader import GraphSourceReader
 from monthly_close.outlook import OutlookError
-from monthly_close.store import Store
+from monthly_close.rule_suggestions import propose_statement_categories
+from monthly_close.store import DUPLICATE_NOTE, Store
+from shared.local_model import LocalModelError
 
 SAVINGS = """Extracto de cuenta
 DESDE: 2026/01/01 HASTA: 2026/03/31
@@ -76,14 +81,8 @@ NÚMERO DE CRÉDITO
 
 
 @pytest.fixture
-def preferences(categories) -> Preferences:
-    return Preferences.parse({
-        "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
-        "accounts": ["Tarjeta A"], "excluded_accounts": [],
-        "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": ["avisos@example.test"], "categories": categories,
-        "confidential_confirmed": True,
-    })
+def preferences(make_preferences) -> Preferences:
+    return make_preferences()  # no excluded accounts
 
 
 @pytest.fixture
@@ -191,7 +190,10 @@ def test_statement_movements_enter_pending_audited_and_only_once(store):
     assert store.record_statements(report.checks(), events) == 4
     assert store.record_statements(report.checks(), events) == 0
     rows = store.state()["transactions"]
-    assert {r["decision"] for r in rows} == {None}
+    # Only the card's own-payment wording is decided (No cuenta); everything else waits.
+    assert {(r["merchant"], r["decision"]) for r in rows if r["decision"] is not None} == {
+        ("ABONO SUCURSAL VIRTUAL", "exclude"),
+    }
     assert {r["kind"] for r in rows} == {"purchase", "card_payment"}
     assert store.state()["statement_checks"][0]["missing"] == 4
     with store.connect() as db:
@@ -200,13 +202,16 @@ def test_statement_movements_enter_pending_audited_and_only_once(store):
         store.record_statements([], [{**events[0], "id": "stmt:x", "decision": "personal"}])
 
 
-def test_merchant_rules_never_decide_statement_movements(store):
+def test_the_persons_rules_decide_statement_movements_except_possible_duplicates(store):
     store.add_rule("TIENDA FICTICIA", "Compras", "personal")
     card = st.parse("TARJETA_MASTERCARD", "202601", CARD)
     report = st.reconcile([card], [], date(2026, 1, 1))
-    store.record_statements(report.checks(), [st.missing_event(c, "Otros gastos", "Otros ingresos") for c in report.missing])
-    store.apply_rules()  # e.g. a later notice import runs every rule again
-    assert {r["decision"] for r in store.state()["transactions"]} == {None}
+    events = [st.missing_event(c, "Otros gastos", "Otros ingresos") for c in report.missing]
+    store.record_statements(report.checks(), events)
+    rows = [r for r in store.state()["transactions"] if "TIENDA FICTICIA" in r["merchant"]]
+    assert rows and {(r["decision"], r["category"]) for r in rows} == {("personal", "Compras")}
+    with store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM audit WHERE action='decision-rule'").fetchone()[0] == len(rows)
 
 
 def test_loan_instalment_counts_only_as_personal_family_or_nothing(store):
@@ -352,7 +357,18 @@ def run_reconcile(
         return texts[name]
 
     monkeypatch.setattr(st, "decrypt_text", decrypt)
-    return app.reconcile_statements(store, tmp_path, settings or {}, preferences, date(2026, 1, 1), read_only)
+    # Tests never reach a real Ollama: this one recognises nothing, so only rules and
+    # past decisions propose categories.
+    class SilentModel:
+        def __init__(self, url, model):
+            pass
+
+        def suggest_categories(self, merchants, categories, examples=None):
+            return {"suggestions": []}
+
+    monkeypatch.setattr(app, "OllamaJsonModel", SilentModel)
+    settings = {"ollama_url": "http://127.0.0.1:11434", "ollama_model": "prueba", **(settings or {})}
+    return app.reconcile_statements(store, tmp_path, settings, preferences, date(2026, 1, 1), read_only)
 
 
 def test_each_mailbox_statements_reconcile_against_its_owners_movements(store, tmp_path, preferences, monkeypatch):
@@ -427,7 +443,7 @@ def test_reconcile_command_reports_read_only_then_imports(store, tmp_path, prefe
         "Extracto_1_202601_CONSOLIDADO_0003.pdf": "no se lee",
     }
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=True)
-    assert result == {"statements": 2, "matched": 0, "missing": 5, "imported": 0, "balances": 1, "reclassified": 0}
+    assert result == {"statements": 2, "matched": 0, "missing": 5, "imported": 0, "balances": 1, "reclassified": 0, "categories_proposed": 0}
     assert store.state()["transactions"] == [] and store.state()["statement_checks"] == []
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
     assert result["imported"] == 5
@@ -469,42 +485,29 @@ def test_statement_settings_require_password_and_exact_senders(tmp_path):
         app.statement_settings(tmp_path)
 
 
-def test_panel_shows_statement_checks_and_balances(store):
-    from playwright.sync_api import sync_playwright
-    from monthly_close.server import create_server
-
+def test_panel_shows_statement_checks_and_balances(store, start_panel, new_page):
     statements = [st.parse("FIDUCUENTA", "202601", FUND), st.parse("HIPOTECARIO", "202601", MORTGAGE)]
     visa = st.parse("TARJETA_VISA", "202601", CARD)
     visa.owner = "manuela"
     report = st.reconcile(statements + [visa], [], date(2026, 1, 1))
     store.record_statements(report.checks(), [])
-    server = create_server(store, 0)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page()
-            errors = []
-            page.on("pageerror", lambda error: errors.append(str(error)))
-            page.goto(f"http://127.0.0.1:{server.server_port}/?month=2026-01&currency=COP&owner=santiago")
-            page.wait_for_load_state("networkidle")
-            text = page.locator("#statements-card").inner_text()
-            assert "Inversiones" in text and "Créditos" in text
-            assert re.search(r"1[.\s]?204[.\s]?950,00", text)
-            assert "Fiducuenta *0003" in text and "Visa" not in text
-            page.locator("#owner-switch").get_by_role("button", name="Manuela").click()
-            text = page.locator("#statements-card").inner_text()
-            assert "Visa *0002" in text and "Fiducuenta" not in text
-            page.locator("#owner-switch").get_by_role("button", name="Hogar").click()
-            text = page.locator("#statements-card").inner_text()
-            assert "Visa *0002 · Manuela" in text and "Fiducuenta *0003 · Santiago" in text
-            assert not errors
-            browser.close()
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    url = start_panel(store)
+    page = new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(f"{url}/?month=2026-01&currency=COP&owner=santiago")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    text = page.locator("#statements-card").inner_text()
+    assert "Inversiones" in text and "Créditos" in text
+    assert re.search(r"1[.\s]?204[.\s]?950,00", text)
+    assert "Fiducuenta *0003" in text and "Visa" not in text
+    page.locator("#owner-switch").get_by_role("button", name="Manuela").click()
+    text = page.locator("#statements-card").inner_text()
+    assert "Visa *0002" in text and "Fiducuenta" not in text
+    page.locator("#owner-switch").get_by_role("button", name="Hogar").click()
+    text = page.locator("#statements-card").inner_text()
+    assert "Visa *0002 · Manuela" in text and "Fiducuenta *0003 · Santiago" in text
+    assert not errors
 
 
 def test_payroll_deducted_instalment_adds_matching_payroll_income(store):
@@ -712,7 +715,7 @@ def test_reconcile_stores_protection_figures_without_importing_movements(store, 
         "0A81F6F5_PensionVoluntaria_202512.pdf": VOLUNTARY_PREVIOUS,  # before the start: skipped
     }
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
-    assert result == {"statements": 2, "matched": 0, "missing": 0, "imported": 0, "balances": 2, "reclassified": 0}
+    assert result == {"statements": 2, "matched": 0, "missing": 0, "imported": 0, "balances": 2, "reclassified": 0, "categories_proposed": 0}
     assert store.state()["transactions"] == []
     checks = {check["product"]: check for check in store.state()["statement_checks"]}
     assert checks["PROTECCION_VOLUNTARIA"]["contributions_minor"] == 50_000_000
@@ -724,9 +727,6 @@ def test_reconcile_stores_protection_figures_without_importing_movements(store, 
 
 
 def test_a_protection_statement_mail_is_never_sent_to_ollama(preferences):
-    from dataclasses import replace
-
-    from monthly_close.extraction import Mail, extract
 
     class NoModel:
         def complete_json(self, system, user):
@@ -788,9 +788,107 @@ def test_reconcile_corrects_pending_movements_it_imported_with_an_old_kind(store
     kinds = {row["id"]: (row["kind"], row["decision"]) for row in store.state()["transactions"]}
     assert kinds[events[0]["id"]] == ("purchase", None)
     assert kinds[decided] == ("card_payment", "exclude")  # a person's decision stands
-    assert kinds[events[2]["id"]] == ("card_payment", None)
+    # «PAGO SUC VIRT TC …» from savings is a fixed own-card payment: No cuenta.
+    assert kinds[events[2]["id"]] == ("card_payment", "exclude")
     with store.connect() as db:
         audit = db.execute("SELECT target, value FROM audit WHERE action='statement-reclassify'").fetchall()
     assert [tuple(row) for row in audit] == [(events[0]["id"], "card_payment -> purchase")]
     # Repeating it changes nothing.
     assert run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)["reclassified"] == 0
+
+
+def test_own_card_payment_wording_is_decided_not_counted_only_on_card_statements(store):
+    def line(event_id, merchant, account, owner="santiago", kind="card_payment"):
+        return statement_line(event_id, merchant, account=account, owner=owner, kind=kind, amount_minor=5000000)
+    store.record_statements([], [
+        line("amex", "ABONO SUCURSAL VIRTUAL", "Tarjeta de crédito Amex"),
+        line("visa", "Abono  sucursal-virtual", "Tarjeta de crédito Visa", owner="manuela"),
+        line("savings", "ABONO SUCURSAL VIRTUAL", "Cuenta de ahorros"),
+        line("other", "ABONO SUCURSAL VIRTUAL REF 123", "Tarjeta de crédito Master"),
+        line("buy", "ABONO SUCURSAL VIRTUAL", "Tarjeta de crédito Master", kind="purchase"),
+    ])
+
+    rows = {row["id"]: row for row in store.state()["transactions"]}
+    assert rows["stmt:amex"]["decision"] == rows["stmt:visa"]["decision"] == "exclude"
+    assert "pago propio" in rows["stmt:amex"]["reason"]
+    assert all(rows[f"stmt:{key}"]["decision"] is None for key in ("savings", "other", "buy"))
+    with store.connect() as db:
+        audit = db.execute("SELECT target,value FROM audit WHERE action='decision-statement-phrase'").fetchall()
+    assert sorted(map(tuple, audit)) == [("stmt:amex", "exclude: ABONO SUCURSAL VIRTUAL"), ("stmt:visa", "exclude: ABONO SUCURSAL VIRTUAL")]
+    assert store.monthly_totals("santiago").get("2026-01", {}).get("personal", 0) == 0
+
+    # A person's later change stands: recording statements again does not decide it back.
+    store.decide("stmt:amex", "third_party_payment")
+    store.record_statements([], [])
+    assert {row["id"]: row["decision"] for row in store.state()["transactions"]}["stmt:amex"] == "third_party_payment"
+
+
+
+def test_statement_purchases_arrive_with_a_proposed_category_but_pending(store):
+    store.add_rule("PEAJE", "Transporte", "family")
+    store.import_message("old", [{
+        "id": "old", "message_id": "old", "day": "2026-01-02", "merchant": "TIENDA LUNA",
+        "account": "Tarjeta A", "amount_minor": 100, "currency": "COP", "category": "Compras",
+        "kind": "purchase", "decision": None, "reason": "aviso",
+    }])
+    store.decide("old", "personal", "Salud y farmacia")
+
+    def line(event_id, merchant, kind="purchase"):
+        return statement_line(event_id, merchant, kind=kind, amount_minor=100)
+
+    class Down:
+        def suggest_categories(self, merchants, categories, examples=None):
+            raise LocalModelError("Ollama apagado")
+
+    events = [line("a", "FLYPASS PEAJE"), line("b", "TIENDA LUNA"), line("c", "COMERCIO RARO"), line("d", "TIENDA LUNA", "transfer")]
+    proposals, failed = propose_statement_categories(store, Down(), events)
+    assert failed and proposals == {
+        "stmt:a": {"category": "Transporte", "source": "rule"},
+        "stmt:b": {"category": "Salud y farmacia", "source": "history"},
+    }
+    assert [event["category"] for event in events] == ["Transporte", "Salud y farmacia", "Otros gastos", "Otros gastos"]
+    assert "una de tus reglas" in events[0]["reason"] and "decisiones anteriores" in events[1]["reason"]
+    store.record_statements([], events)
+    store.save_category_suggestions(proposals, replace=False)
+    state = store.state()
+    decided = {row["id"]: (row["decision"], row["category"]) for row in state["transactions"]}
+    # The rule now decides its statement purchase; the rest stay pending with a proposal.
+    assert decided["stmt:a"] == ("family", "Transporte") and decided["stmt:b"] == (None, "Salud y farmacia")
+    # Kept for the panel, only while the movement is pending.
+    assert "stmt:a" not in state["category_suggestions"]
+    assert state["category_suggestions"]["stmt:b"] == {"category": "Salud y farmacia", "source": "history"}
+    with pytest.raises(ValueError):
+        store.save_category_suggestions({"stmt:b": {"category": "Inventada", "source": "ollama"}}, replace=True)
+    assert store.state()["category_suggestions"] == {"stmt:b": {"category": "Salud y farmacia", "source": "history"}}
+
+
+def test_savings_interest_and_own_card_payments_are_decided_by_their_fixed_wording(store):
+    def line(event_id, merchant, account, kind):
+        category = "Otros ingresos" if kind == "income" else "Otros gastos"
+        return statement_line(event_id, merchant, account=account, kind=kind, category=category, owner="manuela")
+    store.record_statements([], [
+        line("interest", "ABONO INTERESES AHORROS", "Cuenta de ahorros", "income"),
+        line("master", "PAGO SUC VIRT TC MASTER DOLAR", "Cuenta de ahorros", "card_payment"),
+        line("visa", "PAGO SUC VIRT TC VISA", "Cuenta de ahorros", "card_payment"),
+        line("auto", "PAGO AUTOM TC MASTER DOLAR", "Cuenta de ahorros", "card_payment"),
+        line("elsewhere", "ABONO INTERESES AHORROS", "Fiducuenta", "income"),
+        line("other", "PAGO SUC VIRT TC OTRA", "Cuenta de ahorros", "card_payment"),
+    ])
+    rows = {row["id"]: row for row in store.state()["transactions"]}
+    assert (rows["stmt:interest"]["decision"], rows["stmt:interest"]["category"]) == ("income", "Otros ingresos")
+    assert rows["stmt:master"]["decision"] == rows["stmt:visa"]["decision"] == "exclude"
+    assert all(rows[f"stmt:{key}"]["decision"] is None for key in ("auto", "elsewhere", "other"))
+    assert "intereses" in rows["stmt:interest"]["reason"]
+
+
+def test_rules_never_decide_a_statement_line_marked_as_possible_duplicate(store):
+    store.record_statements([], [{
+        "id": "stmt:dup", "message_id": "statement:x", "day": "2026-01-10", "merchant": "TIENDA DOBLE",
+        "account": "Tarjeta de crédito Visa", "amount_minor": 1000, "currency": "COP",
+        "category": "Otros gastos", "kind": "purchase", "decision": None, "owner": "santiago",
+        "reason": "Leído del extracto.",
+    }])
+    with store.connect() as db:
+        db.execute("UPDATE transactions SET note=? WHERE id='stmt:dup'", (DUPLICATE_NOTE + " de prueba",))
+    store.add_rule("TIENDA DOBLE", "Compras", "personal")
+    assert store.state()["transactions"][0]["decision"] is None

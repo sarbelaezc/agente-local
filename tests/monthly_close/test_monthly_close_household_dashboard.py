@@ -2,14 +2,11 @@
 from __future__ import annotations
 
 import re
-import threading
 from datetime import datetime
 
 import pytest
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import expect
 
-from monthly_close.server import create_server
-from monthly_close.store import Store
 
 MONTH = "2026-03"
 
@@ -26,15 +23,8 @@ def member(event_id: str, amount: int, kind: str, decision: str | None, **extra)
 
 
 @pytest.fixture
-def household(tmp_path, categories):
-    store = Store(tmp_path / "close.sqlite3")
-    store.configure({
-        "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
-        "accounts": ["Tarjeta A"], "excluded_accounts": [],
-        "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": ["avisos@example.test"], "categories": categories,
-        "confidential_confirmed": True,
-    })
+def household(make_store, start_panel, new_page):
+    store = make_store()
     store.import_message("s1", [{
         "id": "s1", "message_id": "s1", "day": f"{MONTH}-02", "merchant": "TIENDA S",
         "account": "Tarjeta A", "amount_minor": 100000, "currency": "COP", "category": "Compras",
@@ -52,24 +42,16 @@ def household(tmp_path, categories):
         member("m333", 3000, "transfer", None, category="Otros gastos", group_key="tr:55550009999"),
         member("m4444", 7000, "transfer", None, category="Otros gastos", group_key="tr:55550009999"),
     ], {})
-    server = create_server(store, 0)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1280, "height": 1000})
-        page.set_default_timeout(3000)
-        errors = []
-        page.on("pageerror", lambda error: errors.append(str(error)))
-        page.goto(f"http://127.0.0.1:{server.server_port}/?month={MONTH}&currency=COP")
-        page.wait_for_load_state("networkidle")
-        try:
-            yield page, store, errors
-        finally:
-            browser.close()
-            server.shutdown()
-            thread.join(timeout=5)
-            server.server_close()
+    url = start_panel(store)
+    page = new_page(viewport={"width": 1280, "height": 1000})
+    page.set_default_timeout(3000)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(f"{url}/?month={MONTH}&currency=COP")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    yield page, store, errors
+    # Every panel test also proves the page raised no JavaScript error.
+    assert not errors, f"Errores de JavaScript en el panel: {errors}"
 
 
 def spend(page) -> str:
@@ -81,7 +63,7 @@ def choose(page, owner: str) -> None:
 
 
 def test_owner_switch_separates_members_and_household_adds_them(household):
-    page, store, errors = household
+    page, store, _ = household
     assert page.locator('#owner-switch button[aria-pressed="true"]').inner_text() == "Hogar"
     # Hogar: 1000 + 400 (Santiago) + 200 − 50 (Manuela) = 1550.
     assert re.search(r"\b1[.\s]?550,00", spend(page))
@@ -98,11 +80,10 @@ def test_owner_switch_separates_members_and_household_adds_them(household):
     details = page.locator("#category-details")
     details.locator("summary").first.click()
     assert "Categoría por confirmar" in details.inner_text()
-    assert not errors
 
 
 def test_between_members_mark_leaves_money_out_of_household_only(household):
-    page, store, errors = household
+    page, store, _ = household
     choose(page, "Santiago")
     page.locator("#tab-decisions").click()
     page.locator("#decision-history > summary").click()
@@ -117,11 +98,10 @@ def test_between_members_mark_leaves_money_out_of_household_only(household):
     assert re.search(r"\b1[.\s]?150,00", spend(page))
     assert "no cuentan en Hogar" in page.locator("#month-metrics").inner_text()
     assert next(tx for tx in store.state()["transactions"] if tx["id"] == "s2")["between_owners"] == 1
-    assert not errors
 
 
 def test_year_view_shows_income_for_each_member_and_household(household):
-    page, store, errors = household
+    page, store, _ = household
     store.import_message("s3", [{
         "id": "s3", "message_id": "s3", "day": f"{MONTH}-15", "merchant": "EMPRESA SINTETICA",
         "account": "Tarjeta A", "amount_minor": 300000, "currency": "COP", "category": "Nómina",
@@ -129,7 +109,7 @@ def test_year_view_shows_income_for_each_member_and_household(household):
     }])
     store.import_external("manuela", "manuela", [member("m55555", 50000, "income", "income", category="Nómina")], {})
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.locator("#tab-year").click()
     for owner, income in [("Hogar", r"3[.\s]?500,00"), ("Santiago", r"3[.\s]?000,00"), ("Manuela", r"\b500,00")]:
         choose(page, owner)
@@ -137,14 +117,13 @@ def test_year_view_shows_income_for_each_member_and_household(household):
         assert re.search(income, metric), (owner, metric)
         assert page.locator("#year-income-chart rect").count() >= 1, owner
         assert re.search(income, page.locator("#year-table").inner_text()), owner
-    assert not errors
 
 
 def test_year_summary_capitalizes_months_and_leaves_months_without_data_blank(household):
-    page, store, errors = household
+    page, store, _ = household
     page.clock.set_fixed_time(datetime(2026, 11, 16, 12))  # January elapsed, December still to come
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.locator("#tab-year").click()
     rows = page.locator("#year-table tbody tr")
     expect(rows).to_have_count(12)
@@ -164,11 +143,10 @@ def test_year_summary_capitalizes_months_and_leaves_months_without_data_blank(ho
     december = rows.nth(11)
     assert december.locator("td").nth(1).inner_text() == "Sin notificaciones del banco aún"
     assert "0,00" not in december.inner_text()
-    assert not errors
 
 
 def test_month_view_is_interactive_like_manuelas_dashboard(household):
-    page, store, errors = household
+    page, store, _ = household
     for event_id, day, merchant, amount, kind, decision, category in [
         ("u1", "20", "UBER RIDES", 15000, "purchase", "personal", "Transporte"),
         ("u2", "21", "UBER *TRIP", 25000, "purchase", "personal", "Transporte"),
@@ -180,7 +158,7 @@ def test_month_view_is_interactive_like_manuelas_dashboard(household):
             "kind": kind, "decision": decision, "reason": "Sintetico.",
         }])
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     tip = page.locator("#tip")
 
     # Instant tooltip on a chart slice, and on keyboard focus of a calendar day.
@@ -216,11 +194,10 @@ def test_month_view_is_interactive_like_manuelas_dashboard(household):
     spending = page.locator("#month-metrics .metric").filter(has_text="Gasto del mes")
     spending.locator("summary", has_text="Ver el abono de terceros").click()
     assert "Pagos de otras personas" in spending.inner_text()
-    assert not errors
 
 
 def test_months_live_under_the_tabs_and_only_in_the_month_view(household):
-    page, store, errors = household
+    page, store, _ = household
     chips = page.locator("#month-chips")
     expect(chips).to_be_visible()
     assert chips.bounding_box()["y"] > page.locator(".tabs").bounding_box()["y"]
@@ -255,11 +232,10 @@ def test_months_live_under_the_tabs_and_only_in_the_month_view(household):
     # A category of the donut opens its movements in the detail.
     page.locator("#category-chart").get_by_role("button", name=re.compile("^Compras:")).click()
     expect(page.locator('#category-details details[data-category="Compras"]')).to_have_attribute("open", "")
-    assert not errors
 
 
 def test_destination_card_decides_every_pending_payment_with_audit(household):
-    page, store, errors = household
+    page, store, _ = household
     page.locator("#tab-decisions").click()
     summary = page.locator("#decision-summary").inner_text()
     assert "1" in summary and "destino por decidir" in summary
@@ -282,4 +258,3 @@ def test_destination_card_decides_every_pending_payment_with_audit(household):
     assert store.state()["group_rules"][0]["decision"] == "family"
     page.locator("#tab-month").click()
     assert re.search(r"\b1[.\s]?650,00", spend(page))  # + 100 in family spending
-    assert not errors

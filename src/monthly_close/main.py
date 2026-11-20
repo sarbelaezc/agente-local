@@ -21,6 +21,7 @@ import httpx
 from shared.local_model import LocalModelError, validate_local_url
 from shared.storage import data_root
 from monthly_close.model import OllamaJsonModel
+from monthly_close.rule_suggestions import propose_statement_categories
 from monthly_close import credit_ledger
 from monthly_close import statements as statements_module
 from monthly_close.domain import EMAIL, OWNERS, Preferences, received_local
@@ -658,7 +659,17 @@ def reconcile_statements(
         )
         for candidate in report.missing
     ]
+    proposals: dict[str, dict] = {}
+    if not read_only and any(event["kind"] == "purchase" for event in events):
+        model = OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
+        proposals, model_failed = propose_statement_categories(store, model, events)
+        if model_failed:
+            print("Ollama no respondio: las categorias se sugirieron solo con tus reglas y decisiones anteriores.", flush=True)
     imported = 0 if read_only else store.record_statements(report.checks(), events)
+    if proposals:
+        # Kept so the panel can say where each proposed category came from.
+        store.save_category_suggestions(proposals, replace=False)
+    proposed = len(proposals)
     reclassified = 0 if read_only else store.reclassify_statement_movements(
         _statement_kinds(report, preferences),
     )
@@ -666,6 +677,7 @@ def reconcile_statements(
         "statements": len(found), "matched": len(report.matched), "missing": len(report.missing),
         "imported": imported, "balances": sum(s.balance_minor is not None for s in found.values()),
         "reclassified": reclassified,
+        "categories_proposed": proposed,
     }
 
 
@@ -808,7 +820,12 @@ def run(args: argparse.Namespace) -> None:
     data_dir = args.data_dir.expanduser().resolve()
     store = Store(data_dir / "close.sqlite3")
     if args.command == "serve":
-        server = create_server(store, args.port)
+        try:
+            settings = runtime(data_dir)
+            model = OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
+        except (ValueError, OSError):
+            model = None  # Without a valid runtime.json the panel works, minus rule suggestions.
+        server = create_server(store, args.port, model)
         print(f"Panel local: http://127.0.0.1:{server.server_port}", flush=True)
         try:
             server.serve_forever()
@@ -882,7 +899,9 @@ def run(args: argparse.Namespace) -> None:
             f"{result['balances']} saldos de inversiones y creditos. "
             + ("Solo lectura: nada se importo." if args.read_only else
                f"{result['imported']} importados como pendientes; decidelos en el panel."
-               + (f" {result['reclassified']} pendientes reclasificados." if result["reclassified"] else ""))
+               + (f" {result['reclassified']} pendientes reclasificados." if result["reclassified"] else "")
+               + (f" {result['categories_proposed']} compras con categoria sugerida (sin decidir)."
+                  if result["categories_proposed"] else ""))
         )
         if not args.read_only:
             refresh_reconciled_coverage(store, preferences)

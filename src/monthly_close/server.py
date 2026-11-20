@@ -8,14 +8,19 @@ from importlib.resources import files
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from shared.local_model import LocalModelError
+from monthly_close.rule_suggestions import CategoryModel, suggest_pending_categories, suggest_rules
 from monthly_close.store import Store
 
 # Changes that can complete or reopen a month, so its reconciliation is checked again.
 RECONCILE_AFTER = {"/api/decision", "/api/decision-group", "/api/failure/dismiss", "/api/card-series"}
 
 
-def create_server(store: Store, port: int = 8766) -> HTTPServer:
-    """Serve the dashboard on loopback only, with strict Host/Origin and CSRF checks."""
+def create_server(store: Store, port: int = 8766, model: CategoryModel | None = None) -> HTTPServer:
+    """Serve the dashboard on loopback only, with strict Host/Origin and CSRF checks.
+
+    `model` is the optional local Ollama client used only to suggest rules; it never writes.
+    """
     csrf = secrets.token_urlsafe(32)
 
     class Handler(BaseHTTPRequestHandler):
@@ -40,6 +45,20 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
             )
             self.end_headers()
             self.wfile.write(payload)
+
+        def discard_body(self) -> None:
+            """Read and drop a rejected request's body, within the usual limit.
+
+            Closing a socket with unread data makes Windows reset the connection, so the
+            client would see a network error instead of the 403. Nothing read is used.
+            """
+            self.close_connection = True
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                return
+            if 0 < length <= 32000 and self.headers.get("Transfer-Encoding") is None:
+                self.rfile.read(length)
 
         def json_response(self, status: int, value: dict) -> None:
             self.respond(
@@ -71,6 +90,7 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                 or self.headers.get("Content-Type", "").split(";")[0] != "application/json"
                 or self.headers.get("Transfer-Encoding") is not None
             ):
+                self.discard_body()
                 self.json_response(403, {"error": "Solicitud local no autorizada."})
                 return
             try:
@@ -105,8 +125,12 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                     scope, remember = raw.get("scope", "pending"), raw.get("remember", False)
                     if scope not in {"pending", "all"} or type(remember) is not bool:
                         raise ValueError("Alcance de la decision invalido.")
+                    category = raw.get("category")
+                    if category is not None and not isinstance(category, str):
+                        raise ValueError("Categoria invalida.")
                     store.decide_group(
                         owner, group, decision, pending_only=scope == "pending", remember=remember,
+                        category=category,
                     )
                 elif self.path == "/api/between-owners":
                     owner, group = raw.get("owner"), raw.get("group")
@@ -126,6 +150,16 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                     if not all(isinstance(value, str) for value in (pattern, category, decision)):
                         raise ValueError("Regla invalida.")
                     store.add_rule(pattern, category, decision)
+                elif self.path in {"/api/rules/suggest", "/api/category-suggestions"}:
+                    if model is None:
+                        raise ValueError("Ollama no esta configurado: revisa runtime.json.")
+                    if self.path == "/api/rules/suggest":
+                        self.json_response(200, {"suggestions": suggest_rules(store, model)})
+                    else:
+                        suggestions = suggest_pending_categories(store, model)
+                        store.save_category_suggestions(suggestions, replace=True)
+                        self.json_response(200, {"by_id": suggestions})
+                    return
                 elif self.path == "/api/rules/delete":
                     if type(raw.get("id")) is not int:
                         raise ValueError("Regla invalida.")
@@ -154,7 +188,7 @@ def create_server(store: Store, port: int = 8766) -> HTTPServer:
                     store.update_reconciled_coverage(
                         datetime.now(ZoneInfo(store.preferences().timezone)).date(),
                     )
-            except (ValueError, TypeError, ZoneInfoNotFoundError) as exc:
+            except (ValueError, TypeError, ZoneInfoNotFoundError, LocalModelError) as exc:
                 self.json_response(400, {"error": str(exc)})
                 return
             self.json_response(200, {"ok": True})

@@ -256,6 +256,24 @@ def test_the_server_answers_only_loopback_requests_with_its_token(tmp_path):
         panel.stop()
 
 
+def test_rejected_requests_with_a_body_always_get_their_403():
+    # The body of a rejected request is read and dropped: otherwise Windows can reset the
+    # connection and the client sees a network error instead of the refusal.
+    panel = started(actions={"/api/approve": lambda raw: {"finish": True}})
+    try:
+        with httpx.Client(trust_env=False) as client:
+            headers = {"Origin": "http://evil.example", "X-CSRF-Token": panel._csrf, "Content-Type": "application/json"}
+            body = json.dumps({"relleno": "x" * 20000})
+            statuses = [
+                client.post(panel.url + "api/approve", content=body, headers=headers).status_code
+                for _ in range(300)
+            ]
+        assert statuses == [403] * 300
+        assert not panel._decided.is_set()
+    finally:
+        panel.stop()
+
+
 def test_an_approval_ends_the_review_and_later_actions_are_refused():
     panel = started(actions={"/api/approve": lambda raw: {"finish": True}})
     try:
@@ -330,8 +348,7 @@ def test_finishing_waits_for_the_page_to_close_the_panel():
 # ---------------------------------------------------------------- the page in a browser
 
 
-def test_the_page_requires_a_complete_approval_and_shows_progress(tmp_path, book, journal):
-    sync_api = pytest.importorskip("playwright.sync_api")
+def test_the_page_requires_a_complete_approval_and_shows_progress(tmp_path, book, journal, new_page):
     messages = [message("m1"), message("m2", errors=["Adjunto ilegible: FE.pdf"])]
     view, pdfs = br.batch_view(messages, FOLDERS, settings(tmp_path, book), None, book)
     approvals = []
@@ -343,39 +360,34 @@ def test_the_page_requires_a_complete_approval_and_shows_progress(tmp_path, book
 
     panel = started(view=lambda: br.refresh_view(view, messages), actions={"/api/approve": approve}, pdfs=pdfs)
     try:
-        with sync_api.sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            try:
-                page = browser.new_page()
-                page.goto(panel.url)
-                page.get_by_role("heading", name="Facturas por aprobar").wait_for()
-                cards = page.locator("article.card")
-                assert cards.count() == 2
-                assert cards.nth(1).locator(".choose").is_disabled()  # extraction errors block it
-                assert not cards.nth(0).locator(".choose").is_checked()  # nothing is preselected
-                page.get_by_role("button", name="Aprobar y ejecutar").click()
-                page.get_by_role("alert").get_by_text("Selecciona al menos un correo apto").wait_for()
-                assert approvals == []
+        page = new_page()
+        page.goto(panel.url)
+        page.get_by_role("heading", name="Facturas por aprobar").wait_for()
+        cards = page.locator("article.card")
+        assert cards.count() == 2
+        assert cards.nth(1).locator(".choose").is_disabled()  # extraction errors block it
+        assert not cards.nth(0).locator(".choose").is_checked()  # nothing is preselected
+        page.get_by_role("button", name="Aprobar y ejecutar").click()
+        page.get_by_role("alert").get_by_text("Selecciona al menos un correo apto").wait_for()
+        assert approvals == []
 
-                cards.nth(0).locator(".choose").check()
-                page.get_by_text("1 correo y 2 facturas seleccionados").wait_for()
-                amount = cards.nth(0).get_by_label("Valor").first
-                amount.fill("")
-                page.get_by_role("button", name="Aprobar y ejecutar 1 correo").click()
-                page.get_by_role("link", name="Valor: Completa este dato.").wait_for()
-                assert amount.get_attribute("aria-invalid") == "true" and approvals == []
+        cards.nth(0).locator(".choose").check()
+        page.get_by_text("1 correo y 2 facturas seleccionados").wait_for()
+        amount = cards.nth(0).get_by_label("Valor").first
+        amount.fill("")
+        page.get_by_role("button", name="Aprobar y ejecutar 1 correo").click()
+        page.get_by_role("link", name="Valor: Completa este dato.").wait_for()
+        assert amount.get_attribute("aria-invalid") == "true" and approvals == []
 
-                amount.fill("119.000")
-                cards.nth(0).get_by_label("Carpeta destino").select_option("Hogar/Servicios")
-                page.get_by_role("button", name="Aprobar y ejecutar 1 correo").click()
-                page.get_by_text("Ejecutando el lote").wait_for()
-                assert approvals[0]["messages"][0]["folder"] == "Hogar/Servicios"
-                assert journal.load()[0].state == "approved"
+        amount.fill("119.000")
+        cards.nth(0).get_by_label("Carpeta destino").select_option("Hogar/Servicios")
+        page.get_by_role("button", name="Aprobar y ejecutar 1 correo").click()
+        page.get_by_text("Ejecutando el lote").wait_for()
+        assert approvals[0]["messages"][0]["folder"] == "Hogar/Servicios"
+        assert journal.load()[0].state == "approved"
 
-                messages[0].state = "moved"
-                panel.finish({"summary": "1 archivado y verificado", "failed": False}, wait=False)
-            finally:
-                browser.close()
+        messages[0].state = "moved"
+        panel.finish({"summary": "1 archivado y verificado", "failed": False}, wait=False)
     finally:
         panel._closed.set()
 

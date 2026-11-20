@@ -1,29 +1,19 @@
 """Automatic reconciliation of a month's coverage against every owner's statements (synthetic data)."""
 from __future__ import annotations
 
-import threading
 from datetime import date
 
 import httpx
 import pytest
 
-from monthly_close.domain import Preferences
-from monthly_close.server import create_server
 from monthly_close.store import Store
 
 TODAY = date(2026, 4, 15)
 
 
 @pytest.fixture
-def store(tmp_path, categories) -> Store:
-    store = Store(tmp_path / "close.sqlite3")
-    store.configure(Preferences.parse({
-        "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
-        "accounts": ["Tarjeta A"], "excluded_accounts": [], "transfer_label": "Familiar",
-        "ask_savings": True, "ask_people": True, "approved_senders": ["avisos@example.test"],
-        "categories": categories, "confidential_confirmed": True,
-    }).to_dict())
-    return store
+def store(make_store) -> Store:
+    return make_store()
 
 
 def check(product: str, start: str, end: str, missing: int = 0, suffix: str = "0001", owner: str = "santiago") -> dict:
@@ -186,24 +176,13 @@ def test_a_new_movement_reopens_a_reconciled_month(store):
     assert coverage(store)["2026-01"] == "partial"
 
 
-def test_a_panel_decision_reconciles_the_month_it_completes(store):
+def test_a_panel_decision_reconciles_the_month_it_completes(store, start_panel):
     movement(store, "pending", "2026-01-10", decision=None)
     store.record_statements(first_quarter(), [])
     store.update_reconciled_coverage(TODAY)
     assert coverage(store).get("2026-01") != "reconciled"
-    server = create_server(store, 0)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    url = f"http://127.0.0.1:{server.server_port}"
-    try:
-        with httpx.Client(base_url=url, trust_env=False) as client:
-            headers = {"Origin": url, "X-CSRF-Token": client.get("/api/state").json()["csrf"]}
-            response = client.post("/api/decision", headers=headers, json={"id": "pending", "decision": "personal", "category": "Compras"})
-            assert response.status_code == 200, response.text
-    finally:
-        server.shutdown()
-        thread.join(timeout=5)
-        server.server_close()
+    response = post(start_panel(store), "/api/decision", {"id": "pending", "decision": "personal", "category": "Compras"})
+    assert response.status_code == 200, response.text
     # Real today is after January 2026, so the decision completes that month.
     assert coverage(store)["2026-01"] == "reconciled"
 
@@ -221,19 +200,11 @@ def notes(store: Store) -> dict[str, str]:
     return {row["month"]: row["note"] for row in store.state()["coverage"]}
 
 
-def post(store: Store, path: str, payload: dict) -> httpx.Response:
-    server = create_server(store, 0)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    url = f"http://127.0.0.1:{server.server_port}"
-    try:
-        with httpx.Client(base_url=url, trust_env=False) as client:
-            headers = {"Origin": url, "X-CSRF-Token": client.get("/api/state").json()["csrf"]}
-            return client.post(path, headers=headers, json=payload)
-    finally:
-        server.shutdown()
-        thread.join(timeout=5)
-        server.server_close()
+def post(url: str, path: str, payload: dict) -> httpx.Response:
+    """Send one authorised request to a running panel."""
+    with httpx.Client(base_url=url, trust_env=False) as client:
+        headers = {"Origin": url, "X-CSRF-Token": client.get("/api/state").json()["csrf"]}
+        return client.post(path, headers=headers, json=payload)
 
 
 def test_cards_seen_from_the_first_statements_are_not_asked_about(store):
@@ -248,7 +219,7 @@ def scanned(store: Store, *months: str) -> None:
         store.coverage(month, "partial", "Lectura del buzon")
 
 
-def test_a_new_card_number_is_asked_and_joined_to_the_card_it_replaces(store):
+def test_a_new_card_number_is_asked_and_joined_to_the_card_it_replaces(store, start_panel):
     movement(store, "a", "2026-01-10")
     scanned(store, "2026-02", "2026-03")
     store.record_statements(changed_card(), [])
@@ -264,7 +235,7 @@ def test_a_new_card_number_is_asked_and_joined_to_the_card_it_replaces(store):
     assert [(o["product"], o["suffix"], o["last"]) for o in question["options"]] == [
         ("TARJETA_MASTERCARD", "0002", "2026-02-01"),
     ]
-    response = post(store, "/api/card-series", {
+    response = post(start_panel(store), "/api/card-series", {
         "owner": "santiago", "product": "TARJETA_MASTERCARD", "suffix": "0009", "replaces": "TARJETA_MASTERCARD:0002",
     })
     assert response.status_code == 200, response.text
@@ -297,7 +268,7 @@ def test_a_new_credit_card_keeps_its_own_statements(store):
     assert coverage(store)["2026-03"] == "reconciled"
 
 
-def test_a_card_can_only_be_joined_to_an_earlier_card_of_the_same_owner(store):
+def test_a_card_can_only_be_joined_to_an_earlier_card_of_the_same_owner(store, start_panel):
     store.record_statements(changed_card(
         other=check("TARJETA_AMEX", "2026-01-01", "2026-01-31", suffix="0007", owner="manuela"),
     ), [])
@@ -307,7 +278,7 @@ def test_a_card_can_only_be_joined_to_an_earlier_card_of_the_same_owner(store):
             store.decide_card_series("santiago", "TARJETA_MASTERCARD", "0009", replaces)
     with pytest.raises(ValueError, match="pregunta pendiente"):
         store.decide_card_series("santiago", "TARJETA_MASTERCARD", "0002", None)
-    response = post(store, "/api/card-series", {
+    response = post(start_panel(store), "/api/card-series", {
         "owner": "santiago", "product": "TARJETA_MASTERCARD", "suffix": "0009", "replaces": 2,
     })
     assert response.status_code == 400

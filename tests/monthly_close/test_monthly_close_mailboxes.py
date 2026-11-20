@@ -10,7 +10,6 @@ import pytest
 
 from monthly_close import gmail_client
 from monthly_close import main as app
-from monthly_close.domain import Preferences
 from monthly_close.gmail_client import GmailClient, GmailError, validate_gmail_url
 from monthly_close.gmail_reader import GmailSourceReader
 from monthly_close.graph_client import GraphError, validate_graph_url
@@ -24,17 +23,6 @@ CLIENT_ID = "11111111-2222-3333-4444-555555555555"
 GRAPH = "https://graph.microsoft.com/v1.0"
 GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
 BOGOTA = datetime(2026, 11, 1, 5, tzinfo=timezone.utc)  # 2026-11-01 00:00 in Bogota
-
-
-@pytest.fixture
-def preferences(categories) -> Preferences:
-    return Preferences.parse({
-        "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
-        "accounts": ["Tarjeta A"], "excluded_accounts": ["Cuenta B"],
-        "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": [SENDER], "categories": categories,
-        "confidential_confirmed": True,
-    })
 
 
 def mime(identifier: str, received: str, amount: str = "$ 1.234,56", subject: str = "Compra Tienda") -> bytes:

@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
@@ -53,6 +54,9 @@ CREATE TABLE IF NOT EXISTS group_rules (
     between_owners INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (owner, group_key)
 );
 CREATE TABLE IF NOT EXISTS owner_accounts (suffix TEXT PRIMARY KEY, owner TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS category_suggestions (
+    event_id TEXT PRIMARY KEY, category TEXT NOT NULL, source TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS payroll_deductions (
     owner TEXT NOT NULL, suffix TEXT NOT NULL, PRIMARY KEY (owner, suffix)
 );
@@ -110,6 +114,35 @@ NOT_DUPLICATE = f"(note IS NULL OR note NOT LIKE '{DUPLICATE_NOTE}%')"
 KEPT = (
     "SELECT 1 FROM transactions WHERE message_id=? "
     "AND NOT (kind='card_payment' AND category<>'Pago de tarjeta')"
+)
+
+
+@dataclass(frozen=True)
+class FixedStatementLine:
+    """A statement wording that both owners confirmed always means the same decision."""
+
+    wording: str  # regular expression over the line's words (see merchant_words)
+    account: str  # SQL LIKE pattern for the account it appears in
+    kind: str
+    decision: str
+    category: str | None
+    reason: str
+
+
+FIXED_STATEMENT_LINES = (
+    FixedStatementLine(
+        r"ABONO SUCURSAL VIRTUAL", "Tarjeta de cr%", "card_payment", "exclude", None,
+        "en el extracto de la tarjeta es un pago propio desde la cuenta de ahorros: no cuenta.",
+    ),
+    FixedStatementLine(
+        r"PAGO SUC VIRT TC (?:MASTER|AMEX|VISA)(?: DOLAR)?", "Cuenta de ahorros", "card_payment",
+        "exclude", None,
+        "es la salida de ahorros con la que pagaste tu propia tarjeta: no cuenta, el gasto son las compras.",
+    ),
+    FixedStatementLine(
+        r"ABONO INTERESES AHORROS", "Cuenta de ahorros", "income", "income", "Otros ingresos",
+        "son intereses de la cuenta de ahorros: ingreso.",
+    ),
 )
 
 
@@ -171,6 +204,9 @@ class Store:
             for column in INVESTMENT_FIGURES:
                 if column not in checks:
                     db.execute(f"ALTER TABLE statement_checks ADD COLUMN {column} INTEGER")
+            # A destination rule may also remember the category chosen with it.
+            if "category" not in {row["name"] for row in db.execute("PRAGMA table_info(group_rules)")}:
+                db.execute("ALTER TABLE group_rules ADD COLUMN category TEXT")
             if backup is not None:
                 self._audit(db, "migrate-household", self.path.name, backup.name)
 
@@ -449,8 +485,7 @@ class Store:
         with self.connect() as db:
             pending = db.execute(
                 """SELECT id,merchant,kind FROM transactions
-                WHERE decision IS NULL AND kind IN ('purchase','income') AND id NOT LIKE 'stmt:%'
-                AND """ + NOT_DUPLICATE,
+                WHERE decision IS NULL AND kind IN ('purchase','income') AND """ + NOT_DUPLICATE,
             ).fetchall()
         decided = 0
         for row in pending:
@@ -471,28 +506,90 @@ class Store:
             decided += 1
         return decided
 
+    def save_category_suggestions(self, suggestions: dict[str, dict], *, replace: bool) -> int:
+        """Keep proposed categories so the panel shows them after a reload; nothing is decided.
+
+        replace drops every earlier proposal first (a full recalculation); otherwise new
+        proposals are added or updated. Only sources and categories that a proposal can
+        carry are stored, and only for movements that exist.
+        """
+        allowed = set(self.preferences().categories) | {"Retiro en efectivo"}
+        with self.connect() as db:
+            if replace:
+                db.execute("DELETE FROM category_suggestions")
+            saved = 0
+            for event_id, item in suggestions.items():
+                if item.get("source") not in {"rule", "history", "ollama"} or item.get("category") not in allowed:
+                    raise ValueError("Sugerencia de categoria invalida.")
+                if db.execute("SELECT 1 FROM transactions WHERE id=?", (event_id,)).fetchone() is None:
+                    continue
+                db.execute(
+                    """INSERT INTO category_suggestions VALUES (?,?,?) ON CONFLICT(event_id)
+                    DO UPDATE SET category=excluded.category, source=excluded.source""",
+                    (event_id, item["category"], item["source"]),
+                )
+                saved += 1
+            self._audit(db, "category-suggestions", "pending", f"{saved} {'recalculadas' if replace else 'nuevas'}")
+        return saved
+
+    def pending_purchases(self) -> list[dict]:
+        """Id and merchant of every pending purchase, from notices and statements."""
+        with self.connect() as db:
+            return [dict(row) for row in db.execute(
+                "SELECT id,merchant FROM transactions WHERE decision IS NULL AND kind='purchase'",
+            )]
+
+    def confirmed_purchase_categories(self) -> list[dict]:
+        """Merchant and category of purchases a person (or their rule) decided as expense."""
+        with self.connect() as db:
+            return [dict(row) for row in db.execute(
+                """SELECT merchant,category FROM transactions
+                WHERE kind='purchase' AND decision IN ('personal','family') AND category IS NOT NULL""",
+            )]
+
+    def unruled_merchants(self, limit: int = 25) -> list[dict]:
+        """Merchants of pending purchases that no rule covers, most frequent first."""
+        with self.connect() as db:
+            pending = db.execute(
+                """SELECT merchant FROM transactions
+                WHERE decision IS NULL AND kind='purchase' AND """ + NOT_DUPLICATE,
+            ).fetchall()
+        patterns = [rule["pattern"] for rule in self.rules() if rule["decision"] != "income"]
+        counts: dict[str, int] = {}
+        for row in pending:
+            words = merchant_words(row["merchant"])
+            if len(words.strip()) >= 3 and not any(f" {pattern} " in words for pattern in patterns):
+                counts[words.strip()] = counts.get(words.strip(), 0) + 1
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
+        return [{"merchant": merchant, "count": count} for merchant, count in ranked]
+
     def _apply_group_rules(self) -> int:
-        """Decide pending movements whose destination has a remembered decision."""
+        """Decide pending movements, from notices or statements, whose destination has a remembered decision.
+
+        Possible duplicates are never decided, and a movement that fails validation (for
+        example USD without a rate) stays pending for a person.
+        """
         with self.connect() as db:
             rules = {
-                (row["owner"], row["group_key"]): row["decision"]
+                (row["owner"], row["group_key"]): (row["decision"], row["category"])
                 for row in db.execute("SELECT * FROM group_rules WHERE decision IS NOT NULL")
             }
             if not rules:
                 return 0
             pending = db.execute(
-                "SELECT * FROM transactions WHERE decision IS NULL AND id NOT LIKE 'stmt:%' AND " + NOT_DUPLICATE,
+                "SELECT * FROM transactions WHERE decision IS NULL AND " + NOT_DUPLICATE,
             ).fetchall()
         decided = 0
         for row in pending:
             group = group_of(row)
-            decision = rules.get((row["owner"], group))
-            if decision is None:
+            rule = rules.get((row["owner"], group))
+            if rule is None:
                 continue
+            decision, category = rule
             try:
                 with self.connect() as db:
                     self._decide(
-                        db, row["id"], decision, None,
+                        db, row["id"], decision, category,
                         audit=("decision-group-rule", f"{decision}: {group}"),
                     )
             except ValueError:
@@ -645,13 +742,16 @@ class Store:
 
     def decide_group(
         self, owner: str, group: str, decision: str, *,
-        pending_only: bool = True, remember: bool = False,
+        pending_only: bool = True, remember: bool = False, category: str | None = None,
     ) -> int:
         """Apply one person's decision to every movement to a destination, all or nothing.
 
         Each movement passes the same validation as a single decision and gets its own
         audit row. remember also decides later movements to the same destination.
+        category, chosen by the person, applies only to Personal or Familiar decisions.
         """
+        if category is not None and decision not in {"personal", "family"}:
+            raise ValueError("Solo Gasto personal o Familiar admiten una categoria para todo el destino.")
         owner = owner_id(owner)
         group = clean_text(group, 200)
         with self.connect() as db:
@@ -660,16 +760,17 @@ class Store:
                 raise ValueError("Destino sin movimientos por decidir.")
             for row in rows:
                 self._decide(
-                    db, row["id"], decision, None,
+                    db, row["id"], decision, category,
                     audit=("decision-group-local-user", f"{decision}: {group}"),
                 )
             if remember:
                 db.execute(
-                    """INSERT INTO group_rules(owner,group_key,decision) VALUES (?,?,?)
-                    ON CONFLICT(owner,group_key) DO UPDATE SET decision=excluded.decision""",
-                    (owner, group, decision),
+                    """INSERT INTO group_rules(owner,group_key,decision,category) VALUES (?,?,?,?)
+                    ON CONFLICT(owner,group_key) DO UPDATE SET decision=excluded.decision,
+                    category=excluded.category""",
+                    (owner, group, decision, category),
                 )
-                self._audit(db, "group-rule-local-user", f"{owner}/{group}", decision)
+                self._audit(db, "group-rule-local-user", f"{owner}/{group}", f"{decision}/{category}" if category else decision)
             self._sync_payroll_income(db)
         return len(rows)
 
@@ -733,6 +834,7 @@ class Store:
             for event_id in moved:
                 self._audit(db, "category-merge-local-user", event_id, f"{source} -> {target}")
             rules = db.execute("UPDATE merchant_rules SET category=? WHERE category=?", (target, source)).rowcount
+            rules += db.execute("UPDATE group_rules SET category=? WHERE category=?", (target, source)).rowcount
             db.execute("UPDATE settings SET value=? WHERE id=1", (json.dumps(settings, ensure_ascii=False),))
             self._audit(db, "category-merge-local-user", source, f"-> {target}: {len(moved)} movimientos, {rules} reglas")
         return {"movements": len(moved), "rules": rules}
@@ -943,8 +1045,9 @@ class Store:
     def record_statements(self, checks: list[dict], events: list[dict]) -> int:
         """Store each statement's reconciliation and import the movements it alone shows.
 
-        Imported movements stay pending: a person decides each one. Repeating the
-        reconciliation changes nothing, because every imported id is derived from the
+        Imported movements stay pending unless a fixed wording the owners confirmed or one
+        of the person's own rules decides them (never possible duplicates). Repeating the
+        reconciliation imports nothing twice, because every imported id is derived from the
         statement line and existing ids are skipped.
         """
         now = datetime.now(timezone.utc).isoformat()
@@ -989,8 +1092,38 @@ class Store:
                     inserted.append(event["id"])
                     self._audit(db, "statement-import", event["id"], event["message_id"])
             self._flag_between_owners(db, inserted)
-        # No rule decides them: what only a statement shows is always confirmed by a person.
+            # Fixed wordings the owners confirmed first; then the person's own rules, with the
+            # same safeguards as for notices. Ollama never decides.
+            self._decide_fixed_statement_lines(db)
+        self.apply_rules()
         return len(inserted)
+
+    def _decide_fixed_statement_lines(self, db: sqlite3.Connection) -> int:
+        """Decide pending statement lines whose exact wording has one meaning for both owners.
+
+        Only the wordings in FIXED_STATEMENT_LINES, in their account and kind, are decided;
+        a decision already taken is never changed. Each one is audited and can be corrected.
+        """
+        decided = 0
+        for line in FIXED_STATEMENT_LINES:
+            rows = db.execute(
+                """SELECT id,merchant FROM transactions WHERE decision IS NULL AND id LIKE 'stmt:%'
+                AND kind=? AND account LIKE ?""", (line.kind, line.account),
+            ).fetchall()
+            for row in rows:
+                words = merchant_words(row["merchant"]).strip()
+                if not re.fullmatch(line.wording, words):
+                    continue
+                self._decide(
+                    db, row["id"], line.decision, line.category,
+                    audit=("decision-statement-phrase", f"{line.decision}: {words}"),
+                )
+                db.execute(
+                    "UPDATE transactions SET reason=? WHERE id=?",
+                    (f"«{words}» {line.reason} Puedes cambiarlo aqui.", row["id"]),
+                )
+                decided += 1
+        return decided
 
     def reclassify_statement_movements(self, kinds: dict[str, str]) -> int:
         """Correct the kind of statement movements still pending, after the reader improved.
@@ -1453,6 +1586,14 @@ class Store:
                     )
                 ],
                 "coverage": [dict(row) for row in db.execute("SELECT * FROM coverage ORDER BY month")],
+                # Proposals only for movements still pending; a decision makes them irrelevant.
+                "category_suggestions": {
+                    row["event_id"]: {"category": row["category"], "source": row["source"]}
+                    for row in db.execute(
+                        """SELECT s.* FROM category_suggestions s JOIN transactions t
+                        ON t.id=s.event_id WHERE t.decision IS NULL""",
+                    )
+                },
                 "rules": [
                     dict(row) for row in db.execute("SELECT * FROM merchant_rules ORDER BY pattern")
                 ],

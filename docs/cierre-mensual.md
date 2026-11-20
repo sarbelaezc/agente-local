@@ -121,17 +121,43 @@ abrir el panel.
 ## Decidir movimientos
 
 La pestaña **Decisión** agrupa los pendientes por **destino**: titular más
-destino del pago (o las palabras del comercio, si el aviso no trae destino). Cada
-tarjeta muestra el número de movimientos, el rango de fechas, el total y una
-pista, con botones que deciden todos sus movimientos a la vez.
+destino del pago (o las palabras del comercio, si el aviso no trae destino), con
+los más antiguos primero: va primero el destino cuyo movimiento más antiguo es más
+viejo, y a igual fecha el de mayor total, para cerrar antes los meses que bloquean
+la conciliación. Cada tarjeta muestra el número de movimientos, el rango de fechas,
+el total y una pista, con botones que deciden todos sus movimientos a la vez.
+«Decisiones anteriores» va del más reciente al más antiguo.
 
+- **Progreso.** Arriba, «Por decidir» muestra los destinos, los movimientos y el
+  importe pendientes de la vista, y un botón por titular con sus movimientos por
+  decidir («Santiago: 16», «Manuela: 68») que abre la vista de ese titular.
+- **Siguiente tarjeta.** Al decidir un destino o un movimiento, el foco pasa a la
+  tarjeta que ocupa ahora su lugar, para seguir con el teclado o sin desplazarte.
 - **Todo o nada.** Si un movimiento no pasa la validación (por ejemplo, una compra
   en USD sin tasa), no cambia ninguno.
-- **Pagos futuros.** «Aplicar también a pagos futuros a este destino» crea una
-  regla de destino, que se puede borrar en «Reglas por destino». Sin esa casilla
+- **Pagos futuros.** «Aplicar también a pagos futuros a este destino, con la
+  categoría elegida» crea una regla de destino que recuerda la decisión y, si
+  elegiste una, la categoría. Decide lo que llegue a ese destino por aviso o por
+  extracto (por ejemplo un «TRASLADO A NEQUI» como Retiro en efectivo y Gasto
+  personal), salvo posibles duplicados y lo que no pase la validación, como una
+  compra en USD sin tasa. Se puede borrar en «Reglas por destino». Sin esa casilla
   no se crea ninguna regla.
-- **Uno por uno.** Debajo de cada tarjeta se puede decidir cada movimiento, con
-  su categoría y su tasa USD. Decidir un movimiento confirma su categoría.
+- **Categoría del destino.** Una tarjeta con varios movimientos que admiten Gasto
+  personal o Familiar (compras, transferencias como un traslado a Nequi, cuotas
+  de crédito o movimientos sin tipo) tiene el selector «Categoría para los N
+  movimientos (Gasto personal o Familiar)», que incluye «Retiro en efectivo» para
+  traslados que sacaste en efectivo. Los traslados a inversiones no lo
+  tienen: Inversión y Retiro de inversión asignan su propia categoría. Al decidir
+  Gasto personal o Familiar, todos toman esa categoría, con la misma validación
+  todo o nada y una auditoría por movimiento; las demás decisiones no la usan.
+  Muestra la sugerencia común si la pediste, si no la categoría que ya comparten,
+  y si no «Mantener la de cada movimiento», que no cambia ninguna. También está
+  en «Decisiones anteriores» para recategorizar un destino ya decidido.
+- **Uno por uno.** «Ver N movimientos», en cada tarjeta, permite decidir cada
+  movimiento con su categoría. Decidir un movimiento confirma su categoría. Cada
+  movimiento indica su origen («Extracto Visa *1234») o el motivo del aviso; la
+  moneda se corrige en «Corregir moneda», que viene cerrado, salvo en los
+  movimientos en USD, que muestran «Moneda y tasa» abierto.
 - **Corregir.** «Decisiones anteriores» muestra el historial y permite cambiar
   una decisión. Para volver un movimiento a gasto, elige primero una categoría de
   consumo.
@@ -142,7 +168,7 @@ pista, con botones que deciden todos sus movimientos a la vez.
 
 En **Decisión**, «Reglas por comercio» evita repetir la misma decisión: «si el
 comercio contiene `PRIMAX`, es Transporte y Familiar». Las escribes tú; Ollama no
-las crea ni las aplica.
+las aplica ni decide nada por su cuenta.
 
 - Coinciden por palabras completas, sin distinguir mayúsculas ni signos: `UBER`
   coincide con `UBER*RIDES`, pero `IPS` no coincide con `TIPS`. Si coinciden
@@ -150,11 +176,62 @@ las crea ni las aplica.
 - Solo deciden **compras** pendientes como Gasto personal o Familiar con una
   categoría configurada. También admiten el tipo **Ingreso** para dinero recibido
   («si quien paga contiene `EMPRESA`, es Nómina»).
-- Nunca deciden transferencias, inversiones, cuentas excluidas, compras en USD sin
-  tasa, movimientos importados de un extracto ni posibles duplicados.
-- Se aplican al importar y al guardar la regla. Nunca cambian una decisión ya
+- Deciden lo que llega por avisos y por extractos. Nunca deciden transferencias,
+  inversiones, cuentas excluidas, compras en USD sin tasa ni posibles duplicados.
+- Se aplican al importar avisos o extractos y al guardar la regla. Nunca cambian una decisión ya
   tomada; cada decisión automática indica su regla y se puede corregir. Borrar una
   regla no deshace lo que ya decidió.
+
+### Sugerencias de reglas
+
+El botón **Sugerir reglas** (en «Reglas por comercio») propone una categoría para
+los comercios de compras pendientes que ninguna regla cubre (hasta 25,
+los más frecuentes primero). Usa el mismo historial y los mismos ejemplos que las
+[sugerencias de categoría](#sugerencias-de-categoría-para-pendientes). Requiere un
+`runtime.json` válido y Ollama activo.
+
+- Cada sugerencia aparece con el comercio (editable), la categoría y el tipo
+  (Gasto personal o Familiar). **Aprobar regla** la guarda como una regla normal,
+  con su auditoría; **Descartar** la quita. Ollama no elige Personal o Familiar,
+  y mientras no apruebes no se guarda ni se decide nada.
+- Las sugerencias no se conservan: al recargar el panel hay que pedirlas de nuevo.
+- Si no queda ninguna compra pendiente sin regla, no hay nada que sugerir.
+
+### Sugerencias de categoría para pendientes
+
+Las compras que solo muestra un extracto llegan ya con una **categoría sugerida**:
+al registrar extractos (`reconcile-statements`, no con `-ReadOnly`) se calcula como
+se explica abajo y la razón del movimiento dice su origen («Categoría sugerida por
+tus decisiones anteriores de este comercio; confírmala al decidir»). No decide nada:
+siguen pendientes. Si Ollama no responde, la importación sigue con solo tus reglas
+y decisiones anteriores, y lo demás queda en «Otros gastos»; el comando lo avisa.
+
+En **Decisión**, el botón **Volver a sugerir categorías** recalcula la sugerencia
+para todas las compras pendientes, por ejemplo después de crear reglas o decidir
+más movimientos, o para las que se importaron antes con «Otros gastos». Solo
+preselecciona, sin guardar. Requiere un `runtime.json` válido y Ollama activo.
+
+- Primero, sin Ollama: si una de tus reglas por comercio coincide, se sugiere su
+  categoría; si no, y ya decidiste ese mismo comercio como Gasto personal o
+  Familiar siempre con la misma categoría, se sugiere esa. Un comercio decidido
+  con categorías distintas no se sugiere así.
+- Los demás van a Ollama (hasta 60, los más frecuentes) con tu lista de
+  categorías y, como ejemplos, hasta 5 comercios ya decididos por cada uno que
+  comparten palabras con él (los números de sucursal no cuentan) o reglas tuyas
+  parecidas, con un máximo de 150 ejemplos por consulta. Ollama no recibe todo tu
+  historial ni aprende de él: cada consulta empieza de cero.
+- Ollama solo ve nombres de comercio y categorías, sin importes, fechas ni
+  cuentas. Su respuesta se trata como texto no confiable: se descartan los
+  comercios no preguntados y las categorías fuera de tu lista. No incluye ingresos.
+- La sugerencia solo **preselecciona** la categoría, con una nota que dice si
+  viene de tus reglas, de tus decisiones anteriores o de Ollama: en cada
+  movimiento, y en el selector de categoría de la tarjeta del destino cuando
+  todos sus movimientos tienen la misma sugerencia (ver
+  [Decidir movimientos](#decidir-movimientos)).
+- Nada se decide hasta que pulsas una decisión. Las sugerencias se guardan aparte
+  de los movimientos (tabla `category_suggestions`, solo categoría y origen), así
+  que siguen ahí al recargar el panel; dejan de mostrarse cuando decides el
+  movimiento. «Volver a sugerir categorías» las reemplaza todas.
 
 ## Compras en dólares
 
@@ -169,9 +246,14 @@ aviso con marcas de COP y USD a la vez se detiene por ambiguo.
    equivalente en COP, que es el que suman los totales. Sin tasa, el movimiento
    no suma a COP; «No cuenta» lo excluye sin tasa.
 
+La tarjeta de un destino con varias compras muestra su total en la moneda de cada
+movimiento (por ejemplo `US$ 35,00`), nunca 0,00 COP por falta de tasa. Con COP
+seleccionado, añade el estimado en COP solo si todos sus movimientos en dólares
+tienen tasa.
+
 La tasa la pones tú: no se consulta una tasa externa ni la propone el modelo. Si
 un aviso en USD quedó guardado como COP, comprueba el correo original, cambia
-**Moneda original del aviso** a USD y pon la tasa al decidir.
+**Moneda original del aviso** a USD en «Corregir moneda» y pon la tasa al decidir.
 
 Tras actualizar el código, reinicia el servidor del panel: recargar la página no
 basta, y el panel bloquea las decisiones si detecta un servidor anterior.
@@ -340,8 +422,26 @@ Fiducuenta, crédito de consumo e hipotecario):
   que extractos consecutivos repiten.
 - Un movimiento del extracto **coincide** con uno conocido del mismo importe y
   moneda con hasta 5 días de diferencia; cada uno se usa una sola vez. Lo que solo
-  muestra el extracto entra **pendiente** (`statement-import`) y siempre lo decide
-  una persona. Repetir no importa nada dos veces.
+  muestra el extracto entra **pendiente** (`statement-import`); si es una compra,
+  con una categoría sugerida (ver
+  [Sugerencias de categoría](#sugerencias-de-categoría-para-pendientes)). Repetir no
+  importa nada dos veces.
+- Al registrar extractos se aplican tus [reglas por comercio](#reglas-por-comercio)
+  y tus reglas por destino, con las mismas salvaguardas que para los avisos: nunca
+  deciden posibles duplicados, compras en USD sin tasa ni cuentas excluidas, ni
+  cambian una decisión tomada. Ollama nunca decide.
+- Excepción: las líneas con un texto fijo que los dos titulares confirmaron que
+  siempre significa lo mismo quedan decididas al registrar extractos
+  (`decision-statement-phrase`), también las que ya estaban pendientes:
+
+  | Texto exacto | Dónde | Decisión |
+  |---|---|---|
+  | «ABONO SUCURSAL VIRTUAL» | Extracto de tarjeta de crédito | **No cuenta**: pago propio desde la cuenta de ahorros; el gasto son las compras |
+  | «PAGO SUC VIRT TC MASTER», «… AMEX» o «… VISA», con o sin «DOLAR» | Cuenta de ahorros | **No cuenta**: la salida con la que pagaste tu tarjeta |
+  | «ABONO INTERESES AHORROS» | Cuenta de ahorros | **Ingreso**, categoría «Otros ingresos» |
+
+  Cualquier otro texto, aunque se parezca (por ejemplo «PAGO AUTOM TC…»), sigue
+  pendiente. Nunca cambia una decisión tomada y se puede corregir en el historial.
 - Se guarda el saldo de cada inversión de Fiducuenta y el saldo de capital de cada
   crédito.
 - Las cuotas de crédito cuentan como gasto si se deciden Personal o Familiar.
@@ -566,7 +666,9 @@ claro u oscuro del sistema y el botón «Tema» puede fijar uno.
 - **Resumen por mes:** Gasto, Personal, Familiar, Abonos, Ingresos, Balance (con
   signo y color), Inversiones, Efectivo, Pendiente y Cobertura, con fila de total.
   Un guion (—) significa que no hubo movimientos de ese tipo, nunca gasto cero; los
-  meses que aún no llegan dicen «Sin notificaciones del banco aún».
+  meses que aún no llegan dicen «Sin notificaciones del banco aún». La fila del mes
+  en curso lleva una barra de color a la izquierda, y el total de Cobertura se
+  muestra como «X/Y» (el detalle completo aparece al pasar el cursor).
 - Tocar un mes de la tabla o una barra abre ese mes.
 
 **Decisión:** ver [Decidir movimientos](#decidir-movimientos),
@@ -691,6 +793,8 @@ origen. Las etiquetas principales:
 | `rule-local-user`, `group-rule-local-user`, `group-rule-between-local-user`, `group-rule-delete-local-user` | Regla por comercio o por destino creada, marcada entre titulares o borrada |
 | `decision-manuela`, `group-rule-manuela` | Decisiones importadas del panel anterior de Manuela |
 | `statement-import`, `statement-reclassify` | Movimiento importado de un extracto, o su tipo corregido |
+| `category-suggestions` | Sugerencias de categoría guardadas o recalculadas (solo el número) |
+| `decision-statement-phrase` | Línea de extracto decidida por un texto fijo confirmado (ver «Conciliar extractos») |
 | `destination-backfill` | Destino completado con `backfill-destinations` |
 | `payroll-deduction-income` | Ingreso espejo de una cuota descontada de la nómina |
 | `mailbox-possible-duplicate` | Posible duplicado entre el Gmail de Manuela y su archivo |
@@ -758,6 +862,17 @@ tablas. No cambia importes, decisiones ni auditoría.
   abono por…» quedaba en cola porque el lector fijo no lo reconocía y Ollama lo
   proponía como préstamo. Leído de nuevo en solo lectura, ahora sale sin Ollama
   como un pago de tarjeta pendiente.
+- Sugerencias de reglas con Ollama: probadas por el usuario en el panel con datos
+  reales (2026-11-19); una regla sugerida, ajustada y aprobada.
+- Sugerencias de categoría (2026-11-19), en solo lectura sobre la base real con
+  `qwen2.5:7b`: 62 de 64 compras pendientes de extractos con sugerencia (9 por
+  regla, 51 por decisiones anteriores, 2 por Ollama), frente a 30 solo con
+  Ollama. En tres muestras de comercios ya decididos y ocultados del historial
+  (148 en total), Ollama coincidió con tu categoría en 45 sin ejemplos (30 %),
+  en 59-65 con 3 ejemplos por comercio (40-44 %) y en 71-75 con 5 (48-51 %), en
+  varias corridas; acierta en cerca de la mitad de lo que responde, así que sus
+  sugerencias hay que revisarlas. Falta decidir con las sugerencias desde
+  el panel.
 - Las pruebas (`pytest tests\monthly_close`) cubren reglas, importes, zona
   horaria, decisiones, lectores simulados de Graph y Gmail, el lanzador y el panel
   en Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas).
