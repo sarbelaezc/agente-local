@@ -79,6 +79,16 @@ va en `src/shared/`.
 - Las pruebas del panel usan Chromium con Playwright (lo instala
   `bootstrap.ps1`). Las del lanzador ejecutan PowerShell con un Python y un Ollama
   simulados.
+- Datos sintéticos del cierre: `tests/monthly_close/builders.py` construye un
+  movimiento de aviso (`movement`), una línea de extracto (`statement_line`) y las
+  respuestas del paso 0 (`settings`); cada prueba indica solo los campos que le
+  importan. Las fixtures `make_store(**cambios)`, `make_preferences(**cambios)`,
+  `preferences` y `mail` (`tests/monthly_close/conftest.py`) dan una tienda y unas
+  preferencias configuradas sin repetir la configuración.
+- Las pruebas del cierre van por tema: `extraction` (leer avisos), `decisions`
+  (qué cuenta), `scan` (lectura de buzones y cierre programado), `panel`
+  (servidor), `dashboard` (página), `rules`, `statements`, `reconciliation` y las
+  demás de `tests/monthly_close/`.
 - Para escribir una prueba del panel, usa las fixtures, no arranques nada a mano:
   - `new_page(**opciones)` (`tests/conftest.py`) abre una página en un contexto
     nuevo de un único Chromium por ejecución; lanzar uno por prueba costaba cerca
@@ -90,6 +100,8 @@ va en `src/shared/`.
     `expect(page.locator("main")).to_have_attribute("aria-busy", "false")`, que
     marca el fin de la primera carga, en vez de `networkidle` (que espera medio
     segundo sin tráfico).
+  - Las fixtures `dashboard` y `household` fallan solas si la página lanzó algún
+    error de JavaScript; la prueba no necesita comprobarlo.
 - Deben demostrar que nada se escribe ni se mueve sin aprobación, que lo aprobado
   coincide con lo escrito, que el agente se detiene ante errores de sesión o de
   buzón y que nunca ejecuta código del modelo.

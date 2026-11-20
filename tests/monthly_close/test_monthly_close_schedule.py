@@ -7,7 +7,6 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -23,14 +22,8 @@ CLIENT_ID = "11111111-2222-3333-4444-555555555555"
 
 
 @pytest.fixture
-def preferences(categories) -> Preferences:
-    return Preferences.parse({
-        "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
-        "accounts": ["Tarjeta A"], "excluded_accounts": [],
-        "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": ["avisos@example.test"], "categories": categories,
-        "confidential_confirmed": True,
-    })
+def preferences(make_preferences) -> Preferences:
+    return make_preferences()  # no excluded accounts
 
 
 # ---------------------------------------------------------------- run logs

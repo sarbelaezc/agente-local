@@ -6,19 +6,24 @@ import io
 import json
 import re
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import date, datetime, timezone
 
 import pytest
 from playwright.sync_api import expect
 from pypdf import PdfWriter
 
+from builders import statement_line
 from monthly_close import main as app
 from monthly_close import statements as st
 from monthly_close.domain import Preferences
+from monthly_close.extraction import Mail, extract
 from monthly_close.gmail_reader import GmailSourceReader
 from monthly_close.graph_reader import GraphSourceReader
 from monthly_close.outlook import OutlookError
-from monthly_close.store import Store
+from monthly_close.rule_suggestions import propose_statement_categories
+from monthly_close.store import DUPLICATE_NOTE, Store
+from shared.local_model import LocalModelError
 
 SAVINGS = """Extracto de cuenta
 DESDE: 2026/01/01 HASTA: 2026/03/31
@@ -76,14 +81,8 @@ NÚMERO DE CRÉDITO
 
 
 @pytest.fixture
-def preferences(categories) -> Preferences:
-    return Preferences.parse({
-        "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
-        "accounts": ["Tarjeta A"], "excluded_accounts": [],
-        "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": ["avisos@example.test"], "categories": categories,
-        "confidential_confirmed": True,
-    })
+def preferences(make_preferences) -> Preferences:
+    return make_preferences()  # no excluded accounts
 
 
 @pytest.fixture
@@ -728,9 +727,6 @@ def test_reconcile_stores_protection_figures_without_importing_movements(store, 
 
 
 def test_a_protection_statement_mail_is_never_sent_to_ollama(preferences):
-    from dataclasses import replace
-
-    from monthly_close.extraction import Mail, extract
 
     class NoModel:
         def complete_json(self, system, user):
@@ -803,12 +799,7 @@ def test_reconcile_corrects_pending_movements_it_imported_with_an_old_kind(store
 
 def test_own_card_payment_wording_is_decided_not_counted_only_on_card_statements(store):
     def line(event_id, merchant, account, owner="santiago", kind="card_payment"):
-        return {
-            "id": f"stmt:{event_id}", "message_id": "statement:x", "day": "2026-01-10",
-            "merchant": merchant, "account": account, "amount_minor": 5000000, "currency": "COP",
-            "category": "Otros gastos", "kind": kind, "decision": None, "owner": owner,
-            "reason": "Leído del extracto.",
-        }
+        return statement_line(event_id, merchant, account=account, owner=owner, kind=kind, amount_minor=5000000)
     store.record_statements([], [
         line("amex", "ABONO SUCURSAL VIRTUAL", "Tarjeta de crédito Amex"),
         line("visa", "Abono  sucursal-virtual", "Tarjeta de crédito Visa", owner="manuela"),
@@ -834,9 +825,6 @@ def test_own_card_payment_wording_is_decided_not_counted_only_on_card_statements
 
 
 def test_statement_purchases_arrive_with_a_proposed_category_but_pending(store):
-    from shared.local_model import LocalModelError
-    from monthly_close.rule_suggestions import propose_statement_categories
-
     store.add_rule("PEAJE", "Transporte", "family")
     store.import_message("old", [{
         "id": "old", "message_id": "old", "day": "2026-01-02", "merchant": "TIENDA LUNA",
@@ -846,12 +834,7 @@ def test_statement_purchases_arrive_with_a_proposed_category_but_pending(store):
     store.decide("old", "personal", "Salud y farmacia")
 
     def line(event_id, merchant, kind="purchase"):
-        return {
-            "id": f"stmt:{event_id}", "message_id": "statement:x", "day": "2026-01-10",
-            "merchant": merchant, "account": "Tarjeta de crédito Visa", "amount_minor": 100,
-            "currency": "COP", "category": "Otros gastos", "kind": kind, "decision": None,
-            "owner": "santiago", "reason": "Leído del extracto.",
-        }
+        return statement_line(event_id, merchant, kind=kind, amount_minor=100)
 
     class Down:
         def suggest_categories(self, merchants, categories, examples=None):
@@ -881,12 +864,8 @@ def test_statement_purchases_arrive_with_a_proposed_category_but_pending(store):
 
 def test_savings_interest_and_own_card_payments_are_decided_by_their_fixed_wording(store):
     def line(event_id, merchant, account, kind):
-        return {
-            "id": f"stmt:{event_id}", "message_id": "statement:x", "day": "2026-01-10",
-            "merchant": merchant, "account": account, "amount_minor": 1000, "currency": "COP",
-            "category": "Otros ingresos" if kind == "income" else "Otros gastos", "kind": kind,
-            "decision": None, "owner": "manuela", "reason": "Leído del extracto.",
-        }
+        category = "Otros ingresos" if kind == "income" else "Otros gastos"
+        return statement_line(event_id, merchant, account=account, kind=kind, category=category, owner="manuela")
     store.record_statements([], [
         line("interest", "ABONO INTERESES AHORROS", "Cuenta de ahorros", "income"),
         line("master", "PAGO SUC VIRT TC MASTER DOLAR", "Cuenta de ahorros", "card_payment"),
@@ -903,8 +882,6 @@ def test_savings_interest_and_own_card_payments_are_decided_by_their_fixed_wordi
 
 
 def test_rules_never_decide_a_statement_line_marked_as_possible_duplicate(store):
-    from monthly_close.store import DUPLICATE_NOTE
-
     store.record_statements([], [{
         "id": "stmt:dup", "message_id": "statement:x", "day": "2026-01-10", "merchant": "TIENDA DOBLE",
         "account": "Tarjeta de crédito Visa", "amount_minor": 1000, "currency": "COP",

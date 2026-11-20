@@ -16,14 +16,8 @@ RECEIVED = "2026-03-01T15:00:00Z"
 
 
 @pytest.fixture
-def preferences(categories) -> Preferences:
-    return Preferences.parse({
-        "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
-        "accounts": ["Tarjeta A"], "excluded_accounts": [],
-        "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": ["avisos@example.test"], "categories": categories,
-        "confidential_confirmed": True,
-    })
+def preferences(make_preferences) -> Preferences:
+    return make_preferences()  # no excluded accounts
 
 
 @pytest.mark.parametrize(("text", "expected"), [

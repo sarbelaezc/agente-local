@@ -6,22 +6,14 @@ from datetime import date
 import httpx
 import pytest
 
-from monthly_close.domain import Preferences
 from monthly_close.store import Store
 
 TODAY = date(2026, 4, 15)
 
 
 @pytest.fixture
-def store(tmp_path, categories) -> Store:
-    store = Store(tmp_path / "close.sqlite3")
-    store.configure(Preferences.parse({
-        "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
-        "accounts": ["Tarjeta A"], "excluded_accounts": [], "transfer_label": "Familiar",
-        "ask_savings": True, "ask_people": True, "approved_senders": ["avisos@example.test"],
-        "categories": categories, "confidential_confirmed": True,
-    }).to_dict())
-    return store
+def store(make_store) -> Store:
+    return make_store()
 
 
 def check(product: str, start: str, end: str, missing: int = 0, suffix: str = "0001", owner: str = "santiago") -> dict:

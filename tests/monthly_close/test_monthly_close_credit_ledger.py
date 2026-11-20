@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import date, datetime
 
 import pytest
@@ -132,7 +133,6 @@ def test_statement_instalments_are_not_imported_again_for_a_credit_with_register
             for name in texts:
                 yield name, name.encode()
 
-    from contextlib import contextmanager
 
     @contextmanager
     def fake_source(*args):

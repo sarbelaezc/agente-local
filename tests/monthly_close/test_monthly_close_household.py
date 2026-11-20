@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from builders import statement_line
 from monthly_close.household_import import (
     DECISIONS_FILE, MOVEMENTS_FILE, PARITY_FILE, import_member, parity_report,
 )
@@ -19,17 +20,8 @@ SRC = Path(__file__).parents[2] / "src"
 
 
 @pytest.fixture
-def store(tmp_path, categories) -> Store:
-    store = Store(tmp_path / "close.sqlite3")
-    store.configure({
-        "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
-        "accounts": ["Tarjeta A"], "excluded_accounts": [],
-        "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": ["avisos@example.test"],
-        "categories": categories + ["Domicilios y restaurantes"],
-        "confidential_confirmed": True,
-    })
-    return store
+def store(make_store, categories) -> Store:
+    return make_store(categories=categories + ["Domicilios y restaurantes"])
 
 
 def santiago_event(event_id: str, amount: int, **extra) -> dict:
@@ -318,23 +310,13 @@ def test_cli_imports_member_files_without_mailbox_or_ollama(tmp_path, store):
     assert "abonos de terceros 3000.00" in result.stdout
 
 
-def test_destination_rule_remembers_its_category_and_decides_statement_lines(tmp_path):
-    from monthly_close.store import Store
-
-    store = Store(tmp_path / "group.sqlite3")
-    store.configure({
-        "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
-        "accounts": ["Cuenta de ahorros"], "excluded_accounts": [], "transfer_label": "Familiar",
-        "ask_savings": True, "ask_people": True, "approved_senders": ["avisos@example.test"],
-        "categories": ["Compras", "Otros gastos"], "confidential_confirmed": True,
-    })
+def test_destination_rule_remembers_its_category_and_decides_statement_lines(make_store):
+    store = make_store("group.sqlite3", accounts=["Cuenta de ahorros"], categories=["Compras", "Otros gastos"])
     def line(event_id, day, currency="COP"):
-        return {
-            "id": f"stmt:{event_id}", "message_id": "statement:x", "day": f"2026-01-{day}",
-            "merchant": "TRASLADO A NEQUI", "account": "Cuenta de ahorros", "amount_minor": 5000000,
-            "currency": currency, "category": "Otros gastos", "kind": "unknown", "decision": None,
-            "owner": "santiago", "reason": "Leído del extracto.",
-        }
+        return statement_line(
+            event_id, "TRASLADO A NEQUI", day=f"2026-01-{day}", account="Cuenta de ahorros",
+            amount_minor=5000000, currency=currency, kind="unknown",
+        )
     store.record_statements([], [line("a", "05"), line("b", "06")])
     store.decide_group("santiago", "com:TRASLADO A NEQUI", "personal", remember=True, category="Retiro en efectivo")
 

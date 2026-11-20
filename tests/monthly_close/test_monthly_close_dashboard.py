@@ -12,6 +12,7 @@ import pytest
 import httpx
 from playwright.sync_api import expect
 
+from builders import movement
 from monthly_close.store import Store
 
 
@@ -28,15 +29,8 @@ def test_idle_browser_connection_does_not_block_dashboard(tmp_path, start_panel)
 
 
 @pytest.fixture
-def dashboard(tmp_path, categories, start_panel, new_page):
-    store = Store(tmp_path / "dashboard.sqlite3")
-    store.configure({
-        "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
-        "accounts": ["Tarjeta A"], "excluded_accounts": [],
-        "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": ["avisos@example.test"], "categories": categories,
-        "confidential_confirmed": True,
-    })
+def dashboard(make_store, start_panel, new_page):
+    store = make_store("dashboard.sqlite3")
     month = date.today().strftime("%Y-%m")
     for index, (decision, amount) in enumerate([(None, 50002), ("personal", 120056), ("family", 30001)]):
         store.import_message(str(index), [{
@@ -54,11 +48,12 @@ def dashboard(tmp_path, categories, start_panel, new_page):
     page.goto(url)
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     yield page, store, month, errors
+    # Every panel test also proves the page raised no JavaScript error.
+    assert not errors, f"Errores de JavaScript en el panel: {errors}"
 
 
 def test_dashboard_renders_without_scripts_from_untrusted_text(dashboard):
-    page, _, _, errors = dashboard
-    assert not errors
+    page, _, _, _ = dashboard
     assert page.get_by_role("tab", name="Mes", exact=True).count() == 1
     assert page.get_by_role("tab", name=re.compile("A.o")).count() == 1
     assert page.locator("img").count() == 0
@@ -70,7 +65,7 @@ def test_dashboard_renders_without_scripts_from_untrusted_text(dashboard):
 
 
 def test_extraction_review_is_visible_across_currencies_and_renders_only_text(dashboard):
-    page, store, month, errors = dashboard
+    page, store, month, _ = dashboard
     store.record_extraction_failure(
         "blocked", "avisos@example.test", "<img src=x onerror=alert(1)> Aviso bloqueado",
         month + "-06T12:00:00-05:00", month + "-06", "dinero / banco", "merchant",
@@ -91,11 +86,10 @@ def test_extraction_review_is_visible_across_currencies_and_renders_only_text(da
     page.reload()
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     assert not page.locator("#extraction-warning").is_visible()
-    assert not errors
 
 
 def test_queued_notice_can_be_discarded_from_the_panel(dashboard):
-    page, store, month, errors = dashboard
+    page, store, month, _ = dashboard
     store.record_extraction_failure(
         "informative", "avisos@example.test", "Aviso informativo",
         month + "-06T12:00:00-05:00", month + "-06", "dinero / banco", "amount_text",
@@ -124,11 +118,10 @@ def test_queued_notice_can_be_discarded_from_the_panel(dashboard):
     review.wait_for(state="hidden")
     assert store.state()["extraction_failures"] == []
     assert store.seen("informative")
-    assert not errors
 
 
 def test_decision_persists_and_updates_totals(dashboard):
-    page, store, _, errors = dashboard
+    page, store, _, _ = dashboard
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     button = page.get_by_role("button", name="Gasto personal", exact=True).first
     assert button.count(), page.locator("#panel-decisions").inner_text()[:3000]
@@ -141,11 +134,10 @@ def test_decision_persists_and_updates_totals(dashboard):
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     assert store.state()["transactions"][0]["decision"] == "personal"
     assert re.search(r"\b1[.\s]?700,58", page.locator("#month-metrics").inner_text())
-    assert not errors
 
 
 def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
-    page, store, month, errors = dashboard
+    page, store, month, _ = dashboard
     store.import_message("usd", [{
         "id": "usd", "message_id": "usd", "day": month + "-06",
         "merchant": "AMAZON MKTPLACE", "account": "Tarjeta A",
@@ -177,11 +169,10 @@ def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
     assert "12,34" in history.inner_text()
     assert re.search(r"51[.\s]?834,17", history.inner_text())
     assert history.get_by_label(re.compile("Tasa estimada COP por USD")).input_value() == "4200.50"
-    assert not errors
 
 
 def test_grouped_usd_purchases_show_dollars_not_zero_cop(dashboard):
-    page, store, month, errors = dashboard
+    page, store, month, _ = dashboard
     for number, amount in (("1", 1000), ("2", 2500)):
         store.import_message(f"usd-group-{number}", [{
             "id": f"usd-group-{number}", "message_id": f"usd-group-{number}", "day": f"{month}-0{number}",
@@ -196,11 +187,10 @@ def test_grouped_usd_purchases_show_dollars_not_zero_cop(dashboard):
     amount = card.locator(".group-amount").inner_text()
     assert "35,00" in amount and "US$" in amount
     assert "0,00" not in amount.replace("35,00", "")
-    assert not errors
 
 
 def test_legacy_cop_record_can_be_corrected_to_usd_only_on_decision(dashboard):
-    page, store, _, errors = dashboard
+    page, store, _, _ = dashboard
     page.locator("#tab-decisions").click()
     card = page.locator("#pending-list .decision-card").first
     card.get_by_text("Corregir moneda").click()  # folded away: rarely needed
@@ -214,11 +204,10 @@ def test_legacy_cop_record_can_be_corrected_to_usd_only_on_decision(dashboard):
     assert row["currency"] == "USD"
     assert row["amount_minor"] == 50002
     assert row["cop_amount_minor"] == 200008000
-    assert not errors
 
 
 def test_stale_backend_cannot_silently_ignore_exchange_fields(dashboard):
-    page, _, _, errors = dashboard
+    page, _, _, _ = dashboard
 
     def stale_state(route):
         response = route.fetch()
@@ -233,11 +222,10 @@ def test_stale_backend_cannot_silently_ignore_exchange_fields(dashboard):
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     assert "Reinicia el servidor" in page.locator("body").inner_text()
     assert not page.locator("#dashboard-area").is_visible()
-    assert not errors
 
 
 def test_investment_choice_updates_separate_month_year_totals_and_history(dashboard):
-    page, store, month, errors = dashboard
+    page, store, month, _ = dashboard
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     with page.expect_response(
         lambda response: response.url.endswith("/api/decision") and response.request.method == "POST"
@@ -266,11 +254,10 @@ def test_investment_choice_updates_separate_month_year_totals_and_history(dashbo
     assert page.locator('#history-list button[aria-pressed="true"]').filter(
         has_text="Inversión",
     ).count() == 1
-    assert not errors
 
 
 def test_dashboard_mobile_and_desktop_screenshots(dashboard, tmp_path):
-    page, _, _, errors = dashboard
+    page, _, _, _ = dashboard
     output = Path(os.environ.get("MONTHLY_CLOSE_SCREENSHOTS", str(tmp_path)))
     output.mkdir(parents=True, exist_ok=True)
     for width, label in [(1440, "desktop"), (390, "mobile"), (320, "narrow")]:
@@ -284,14 +271,12 @@ def test_dashboard_mobile_and_desktop_screenshots(dashboard, tmp_path):
     page.get_by_role("button", name=re.compile("tema", re.I)).click()
     page.locator("#tab-month").click()
     page.screenshot(path=str(output / "mobile-dark.png"), full_page=True)
-    assert not errors
 
 
 def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(dashboard):
-    page, _, month, errors = dashboard
+    page, _, month, _ = dashboard
     page.goto(f"{page.url.split('?')[0]}?tab=year&month={month}&year={month[:4]}&currency=COP")
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
-    assert not errors
     page.keyboard.press("Tab")
     skip_link = page.locator(".skip-link")
     assert skip_link.get_attribute("href") == "#main-content"
@@ -304,11 +289,10 @@ def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(d
     assert params == {"tab": "year", "month": month, "year": month[:4], "currency": "COP", "owner": "hogar"}
     page.locator("#tab-decisions").click()
     assert page.evaluate("new URLSearchParams(location.search).get('tab')") == "decisions"
-    assert not errors
 
 
 def test_decision_lists_only_render_fifty_cards_at_a_time(dashboard):
-    page, store, _, errors = dashboard
+    page, store, _, _ = dashboard
     original = next(tx for tx in store.state()["transactions"] if tx["id"] == "1")
     for index in range(51):
         event_id = f"pending-{index}"
@@ -324,23 +308,21 @@ def test_decision_lists_only_render_fifty_cards_at_a_time(dashboard):
     assert pending.count() == 50
     page.get_by_role("button", name="Mostrar 2 destinos pendientes más").click()
     assert pending.count() == 52
-    assert not errors
 
 
 def test_legacy_cash_withdrawal_updates_cumulative_personal_total(dashboard):
-    page, store, _, errors = dashboard
+    page, store, _, _ = dashboard
     store.decide("0", "cash_withdrawal")
     page.reload()
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     text = page.locator("#cumulative-chart .legend-row").inner_text()
     assert re.search(r"Personal\s+1[.\s]?700,58", text), text
     assert "Familiar 300,01" in text
-    assert not errors
 
 
 @pytest.mark.parametrize("configured", [True, False])
 def test_failed_state_load_can_be_retried(dashboard, configured):
-    page, store, _, errors = dashboard
+    page, store, _, _ = dashboard
     if not configured:
         with store.connect() as db:
             db.execute("DELETE FROM settings")
@@ -353,11 +335,10 @@ def test_failed_state_load_can_be_retried(dashboard, configured):
     retry.click()
     page.locator("#dashboard-area" if configured else "#setup-area").wait_for(state="visible")
     assert page.locator("#load-error").is_hidden()
-    assert not errors
 
 
 def test_saving_blocks_duplicate_decisions_and_recovers_after_error(dashboard):
-    page, store, _, errors = dashboard
+    page, store, _, _ = dashboard
     requests = []
     page.route("**/api/decision", lambda route: requests.append(route))
     page.locator("#tab-decisions").click()
@@ -376,11 +357,10 @@ def test_saving_blocks_duplicate_decisions_and_recovers_after_error(dashboard):
     assert "Fallo simulado" in page.locator("#global-message").inner_text()
     assert next(tx for tx in store.state()["transactions"] if tx["id"] == "0")["decision"] is None
     assert button.is_enabled()
-    assert not errors
 
 
 def test_category_chart_uses_unique_consistent_colors_for_every_category(dashboard, categories):
-    page, store, month, errors = dashboard
+    page, store, month, _ = dashboard
     original = next(tx for tx in store.state()["transactions"] if tx["id"] == "1")
     extended_categories = categories + ["Categoria adicional A", "Categoria adicional B"]
     store.configure({**store.preferences().to_dict(), "categories": extended_categories})
@@ -409,7 +389,6 @@ def test_category_chart_uses_unique_consistent_colors_for_every_category(dashboa
         ]))
     """)
     assert month_colors == year_colors
-    assert not errors
 
 
 def test_primary_buttons_have_readable_contrast_in_both_themes(dashboard):
@@ -445,7 +424,7 @@ def test_closing_configuration_returns_keyboard_focus(dashboard):
 def test_withdrawal_buttons_persist_and_apply_correct_expense_totals(
     dashboard, decision, label, category,
 ):
-    page, store, _, errors = dashboard
+    page, store, _, _ = dashboard
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     assert next(tx for tx in store.state()["transactions"] if tx["id"] == "0")["decision"] is None
     assert page.get_by_role("button", name="Retiro en efectivo", exact=True).count() == 0
@@ -501,11 +480,10 @@ def test_withdrawal_buttons_persist_and_apply_correct_expense_totals(
             "button", name="No cuenta", exact=True,
         ).click()
     assert excluded.value.status == 200
-    assert not errors
 
 
 def test_configuration_form_saves_all_step_zero_answers(dashboard):
-    page, store, _, errors = dashboard
+    page, store, _, _ = dashboard
     with store.connect() as db:
         db.execute("DELETE FROM settings")
     page.reload()
@@ -534,11 +512,10 @@ def test_configuration_form_saves_all_step_zero_answers(dashboard):
     assert saved.transfer_label == "Entre mis cuentas"
     assert saved.categories == ["Compras", "Vacaciones"]
     assert saved.ask_savings and saved.ask_people
-    assert not errors
 
 
 def test_configuration_edit_preserves_existing_decisions(dashboard):
-    page, store, _, errors = dashboard
+    page, store, _, _ = dashboard
     page.locator("button").filter(has_text="Configuración").click()
     host = page.locator("#config-form-host")
     host.locator("[name=timezone]").fill("Europe/Madrid")
@@ -555,7 +532,6 @@ def test_configuration_edit_preserves_existing_decisions(dashboard):
     assert store.preferences().timezone == "Europe/Madrid"
     assert len(store.state()["transactions"]) == 3
     assert next(row for row in store.state()["transactions"] if row["id"] == "1")["decision"] == "personal"
-    assert not errors
 
 
 def test_annual_chart_has_visible_numeric_axis_labels(dashboard):
@@ -578,17 +554,16 @@ def test_annual_chart_has_visible_numeric_axis_labels(dashboard):
 
 
 def test_year_category_legend_sits_under_the_chart(dashboard):
-    page, _, _, errors = dashboard
+    page, _, _, _ = dashboard
     page.locator("#tab-year").click()
     chart = page.locator("#year-chart-svg").bounding_box()
     legend = page.locator("#year-category-legend").bounding_box()
     assert legend["y"] >= chart["y"] + chart["height"] - 1
     assert legend["width"] > chart["width"] * .8  # it spans the card instead of a side column
-    assert not errors
 
 
 def test_pending_card_hides_when_everything_is_decided_and_the_rest_share_one_row(dashboard):
-    page, store, _, errors = dashboard
+    page, store, _, _ = dashboard
     for panel in ("#month-metrics", "#year-metrics"):
         if panel == "#year-metrics":
             page.locator("#tab-year").click()
@@ -608,11 +583,10 @@ def test_pending_card_hides_when_everything_is_decided_and_the_rest_share_one_ro
         assert "Por decidir" not in page.locator(panel).inner_text()
         tops = {round(heroes.nth(index).bounding_box()["y"]) for index in range(3)}
         assert len(tops) == 1, (panel, tops)
-    assert not errors
 
 
 def test_a_new_card_number_is_asked_in_decisions_with_the_option_of_a_new_card(dashboard):
-    page, store, _, errors = dashboard
+    page, store, _, _ = dashboard
 
     def card(product: str, suffix: str, start: str) -> dict:
         return {
@@ -650,11 +624,10 @@ def test_a_new_card_number_is_asked_in_decisions_with_the_option_of_a_new_card(d
     review.wait_for(state="hidden")
     with store.connect() as db:
         assert db.execute("SELECT replaces FROM card_series WHERE suffix='0009'").fetchone()[0] == "TARJETA_VISA:0002"
-    assert not errors
 
 
 def test_rule_panel_buttons_and_fields_are_readable_in_both_themes(dashboard):
-    page, _, _, errors = dashboard
+    page, _, _, _ = dashboard
     page.route("**/api/rules/suggest", lambda route: route.fulfill(
         status=200, content_type="application/json",
         body='{"suggestions":[{"pattern":"FLYPASS PEAJE","category":"Compras","count":2}]}',
@@ -686,11 +659,10 @@ def test_rule_panel_buttons_and_fields_are_readable_in_both_themes(dashboard):
         })""")
         assert len(ratios) >= 7
         assert all(ratio >= 4.5 for _, ratio in ratios), (theme, ratios)
-    assert not errors
 
 
 def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(dashboard):
-    page, store, month, errors = dashboard
+    page, store, month, _ = dashboard
     store.import_message("stmt", [
         {
             "id": f"stmt:{index}", "message_id": "stmt", "day": f"{month}-0{index}",
@@ -721,17 +693,12 @@ def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(da
     expect(page.get_by_role("status").filter(has_text="2 movimientos")).to_be_visible()
     saved = {row["id"]: (row["decision"], row["category"]) for row in store.state()["transactions"]}
     assert saved["stmt:6"] == saved["stmt:7"] == ("family", "Transporte")
-    assert not errors
 
 
 def test_group_category_can_be_set_without_suggestions_or_kept_per_movement(dashboard):
-    page, store, month, errors = dashboard
+    page, store, month, _ = dashboard
     def purchase(event_id, merchant, category, day):
-        return {
-            "id": event_id, "message_id": "g", "day": f"{month}-0{day}", "merchant": merchant,
-            "account": "Tarjeta A", "amount_minor": 1000000, "currency": "COP", "category": category,
-            "kind": "purchase", "decision": None, "reason": "Extracto.",
-        }
+        return movement(event_id, merchant, message_id="g", day=f"{month}-0{day}", amount_minor=1000000, category=category)
     store.import_message("g", [
         purchase("same:1", "PEAJE NORTE", "Compras", 6), purchase("same:2", "PEAJE NORTE", "Compras", 7),
         purchase("mixed:1", "TIENDA SOL", "Compras", 6), purchase("mixed:2", "TIENDA SOL", "Transporte", 7),
@@ -755,20 +722,15 @@ def test_group_category_can_be_set_without_suggestions_or_kept_per_movement(dash
     assert saved["same:1"] == saved["same:2"] == ("personal", "Transporte")
     # "Keep each one's" sends no category, so each movement keeps its own.
     assert saved["mixed:1"] == ("family", "Compras") and saved["mixed:2"] == ("family", "Transporte")
-    assert not errors
 
 
 def test_group_category_shows_for_transfers_but_not_for_investments(dashboard):
-    page, store, month, errors = dashboard
-    def movement(event_id, merchant, kind, day):
-        return {
-            "id": event_id, "message_id": "k", "day": f"{month}-0{day}", "merchant": merchant,
-            "account": "Tarjeta A", "amount_minor": 1000000, "currency": "COP", "category": "Compras",
-            "kind": kind, "decision": None, "reason": "Aviso.",
-        }
+    page, store, month, _ = dashboard
+    def of_kind(event_id, merchant, kind, day):
+        return movement(event_id, merchant, message_id="k", day=f"{month}-0{day}", amount_minor=1000000, kind=kind)
     store.import_message("k", [
-        movement("tr:1", "TRASLADO A NEQUI", "transfer", 6), movement("tr:2", "TRASLADO A NEQUI", "transfer", 7),
-        movement("inv:1", "TRASLADO A FONDO", "investment", 6), movement("inv:2", "TRASLADO A FONDO", "investment", 7),
+        of_kind("tr:1", "TRASLADO A NEQUI", "transfer", 6), of_kind("tr:2", "TRASLADO A NEQUI", "transfer", 7),
+        of_kind("inv:1", "TRASLADO A FONDO", "investment", 6), of_kind("inv:2", "TRASLADO A FONDO", "investment", 7),
     ])
     page.reload()
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
@@ -783,19 +745,14 @@ def test_group_category_shows_for_transfers_but_not_for_investments(dashboard):
 
     saved = {row["id"]: (row["decision"], row["category"]) for row in store.state()["transactions"]}
     assert saved["tr:1"] == saved["tr:2"] == ("family", "Retiro en efectivo")
-    assert not errors
 
 
 def test_saved_suggestions_survive_a_reload_and_owner_counts_filter_the_view(dashboard):
-    page, store, month, errors = dashboard
-    def purchase(event_id, merchant, owner, day):
-        return {
-            "id": event_id, "message_id": f"p-{event_id}", "day": f"{month}-0{day}", "merchant": merchant,
-            "account": "Tarjeta A", "amount_minor": 1000000, "currency": "COP", "category": "Compras",
-            "kind": "purchase", "decision": None, "reason": "Extracto.",
-        }
-    store.import_message("p-s", [purchase("s1", "PEAJE NORTE", "santiago", 6)])
-    store.import_message("p-m", [purchase("m1", "TIENDA SOL", "manuela", 7)], owner="manuela")
+    page, store, month, _ = dashboard
+    def purchase(event_id, merchant, day):
+        return movement(event_id, merchant, day=f"{month}-0{day}", amount_minor=1000000)
+    store.import_message("p-s", [purchase("s1", "PEAJE NORTE", 6)])
+    store.import_message("p-m", [purchase("m1", "TIENDA SOL", 7)], owner="manuela")
     store.save_category_suggestions({"s1": {"category": "Transporte", "source": "history"}}, replace=True)
     page.reload()
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
@@ -810,11 +767,10 @@ def test_saved_suggestions_survive_a_reload_and_owner_counts_filter_the_view(das
     expect(page.locator("#owner-switch button[data-owner='manuela']")).to_have_attribute("aria-pressed", "true")
     expect(page.locator("#pending-list").get_by_text("PEAJE NORTE")).to_have_count(0)
     expect(page.locator("#pending-list").get_by_text("TIENDA SOL")).to_be_visible()
-    assert not errors
 
 
 def test_focus_moves_to_the_next_pending_card_after_a_decision(dashboard):
-    page, store, month, errors = dashboard
+    page, store, month, _ = dashboard
     store.import_message("f", [{
         "id": f"f{index}", "message_id": "f", "day": f"{month}-0{index}", "merchant": f"COMERCIO {name}",
         "account": "Tarjeta A", "amount_minor": amount, "currency": "COP", "category": "Compras",
@@ -829,11 +785,10 @@ def test_focus_moves_to_the_next_pending_card_after_a_decision(dashboard):
     expect(page.locator("#pending-list > article").first).to_contain_text("COMERCIO DOS")
     focused = page.evaluate("document.activeElement && document.activeElement.textContent")
     assert focused == "COMERCIO DOS"
-    assert not errors
 
 
 def test_owner_count_buttons_are_readable_and_large_enough_in_both_themes(dashboard):
-    page, _, _, errors = dashboard
+    page, _, _, _ = dashboard
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     page.locator("#owner-switch button[data-owner='santiago']").click()
     for theme in ["light", "dark"]:
@@ -853,11 +808,10 @@ def test_owner_count_buttons_are_readable_and_large_enough_in_both_themes(dashbo
         })""")
         assert len(found) == 2
         assert all(ratio >= 4.5 and height >= 38 for ratio, height in found), (theme, found)
-    assert not errors
 
 
 def test_pending_destinations_are_ordered_oldest_first(dashboard):
-    page, store, month, errors = dashboard
+    page, store, month, _ = dashboard
     store.import_message("o", [{
         "id": f"o{day}", "message_id": "o", "day": f"{month}-0{day}", "merchant": name,
         "account": "Tarjeta A", "amount_minor": amount, "currency": "COP", "category": "Compras",
@@ -869,4 +823,3 @@ def test_pending_destinations_are_ordered_oldest_first(dashboard):
     titles = page.locator("#pending-list > article h3").all_inner_texts()
     order = [title for title in titles if title in {"RECIENTE GRANDE", "ANTIGUO PEQUENO", "MEDIO"}]
     assert order == ["ANTIGUO PEQUENO", "MEDIO", "RECIENTE GRANDE"]
-    assert not errors
