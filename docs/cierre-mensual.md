@@ -153,8 +153,11 @@ el total y una pista, con botones que deciden todos sus movimientos a la vez.
   Muestra la sugerencia común si la pediste, si no la categoría que ya comparten,
   y si no «Mantener la de cada movimiento», que no cambia ninguna. También está
   en «Decisiones anteriores» para recategorizar un destino ya decidido.
-- **Uno por uno.** Debajo de cada tarjeta se puede decidir cada movimiento, con
-  su categoría y su tasa USD. Decidir un movimiento confirma su categoría.
+- **Uno por uno.** «Ver N movimientos», en cada tarjeta, permite decidir cada
+  movimiento con su categoría. Decidir un movimiento confirma su categoría. Cada
+  movimiento indica su origen («Extracto Visa *1234») o el motivo del aviso; la
+  moneda se corrige en «Corregir moneda», que viene cerrado, salvo en los
+  movimientos en USD, que muestran «Moneda y tasa» abierto.
 - **Corregir.** «Decisiones anteriores» muestra el historial y permite cambiar
   una decisión. Para volver un movimiento a gasto, elige primero una categoría de
   consumo.
@@ -250,7 +253,7 @@ tienen tasa.
 
 La tasa la pones tú: no se consulta una tasa externa ni la propone el modelo. Si
 un aviso en USD quedó guardado como COP, comprueba el correo original, cambia
-**Moneda original del aviso** a USD y pon la tasa al decidir.
+**Moneda original del aviso** a USD en «Corregir moneda» y pon la tasa al decidir.
 
 Tras actualizar el código, reinicia el servidor del panel: recargar la página no
 basta, y el panel bloquea las decisiones si detecta un servidor anterior.

@@ -182,6 +182,7 @@
     #year-categories .bar-row { grid-template-columns: minmax(0, 170px) minmax(0, 1fr) auto; }
     .axis-label.current { fill: var(--ink); font-weight: 700; }
     .decision-summary strong { font-size: 30px; }
+    .currency-fix > summary { color: var(--ink2); font-size: 13px; font-weight: 500; cursor: pointer; margin: 6px 0; }
     .owner-progress { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
     .owner-progress .chip { min-height: 38px; }
     .owner-progress .chip[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
@@ -466,7 +467,7 @@
         </section>
 
         <section id="panel-decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden>
-          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Agrupadas por destino: una decisión vale para todos los pagos pendientes a ese mismo destino, y cada movimiento sigue disponible por separado. Se muestran todos los meses de la moneda seleccionada; en COP también aparecen los movimientos USD para ingresar su tasa estimada. Las categorías solo se cuentan en gastos si eliges Personal o Familiar.</p></div></div>
+          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Agrupadas por destino, de la más antigua a la más reciente: los botones de la tarjeta deciden todos sus movimientos pendientes; «Ver movimientos» permite decidir uno por uno. Para efectivo, elige la categoría Retiro en efectivo; Inversión y Retiro de inversión ponen su categoría solos.</p></div></div>
           <div id="decision-summary" class="metric hero decision-summary" aria-live="polite"></div>
           <section id="card-review" hidden>
             <h3>Tarjetas con número nuevo · confirma cuál es</h3>
@@ -481,7 +482,7 @@
           <h3 id="pending-heading" hidden>Movimientos por decidir</h3>
           <div id="category-suggest" class="decision-actions" style="align-items:center;margin:8px 0 12px">
             <button type="button" id="suggest-categories" class="button">Volver a sugerir categorías</button>
-            <p class="hint" style="margin:0">Las compras de extractos ya llegan con una categoría sugerida. Esto la recalcula para las pendientes con tus reglas, tus decisiones anteriores y Ollama (que solo ve el nombre del comercio), y solo la preselecciona: tú decides.</p>
+            <p class="hint" style="margin:0">Recalcula la categoría sugerida de las compras pendientes con tus reglas, tu historial y Ollama (solo ve el comercio). No decide nada.</p>
           </div>
           <div id="pending-list" class="decision-list"></div>
           <details class="history-detail" id="rules-detail">
@@ -2131,7 +2132,7 @@
           el("span", "label", "Por decidir"),
           el("strong", "", String(pending.length)),
           el("small", "", pending.length
-            ? `${pending.length === 1 ? "destino" : "destinos"} por decidir · ${pendingMovements} ${pendingMovements === 1 ? "movimiento" : "movimientos"} · ${formatMoney(pendingAmount)} que todavía no suman al gasto. Cada decisión vale para todos los pagos pendientes a ese mismo destino.`
+            ? `${pending.length === 1 ? "destino" : "destinos"} por decidir · ${pendingMovements} ${pendingMovements === 1 ? "movimiento" : "movimientos"} · ${formatMoney(pendingAmount)} sin sumar al gasto`
             : "No hay destinos por decidir."),
           ownerProgress()
         );
@@ -2214,9 +2215,9 @@
           item && typeof item.category === "string" && ["rule", "history", "ollama"].includes(item.source)));
       }
       const suggestionNotes = {
-        rule: "Sugerida por una de tus reglas; cámbiala si no corresponde.",
-        history: "Sugerida por tus decisiones anteriores de este comercio; cámbiala si no corresponde.",
-        ollama: "Sugerida por Ollama; cámbiala si no corresponde."
+        rule: "Sugerida por tu regla.",
+        history: "Sugerida por tus decisiones anteriores.",
+        ollama: "Sugerida por Ollama: revísala."
       };
       const decidedValues = new Set(["income", "personal", "family", "investment", "investment_withdrawal", "cash_withdrawal", "exclude", "third_party_payment"]);
       const counterpartKinds = new Set(["transfer", "own_transfer", "income", "unknown", "card_payment", "pse"]);
@@ -2381,7 +2382,7 @@
           card.append(line);
         }
         const details = el("details");
-        details.append(el("summary", "", `Ver ${entry.rows.length} movimientos y decidir uno por uno`));
+        details.append(el("summary", "", `Ver ${entry.rows.length} movimientos`));
         const list = el("div", "decision-list");
         entry.rows.forEach(tx => list.append(makeDecisionCard(tx, isPrevious)));
         details.append(list);
@@ -2544,6 +2545,14 @@
         if (saved) form.elements.pattern.value = "";
       });
 
+      // A statement line says only where it came from; other reasons (a notice, a rule) stay as written.
+      function reasonNode(tx) {
+        const reason = typeof tx.reason === "string" && tx.reason.trim() ? tx.reason.trim() : "Sin motivo anotado.";
+        const statement = reason.match(/^Leído del extracto (.+?);/);
+        if (statement) return el("p", "hint", `Extracto ${statement[1]}`);
+        return el("p", "reason", reason);
+      }
+
       function makeDecisionCard(tx, isPrevious) {
         const card = el("article", "decision-card");
         const meta = el("div", "decision-meta");
@@ -2557,8 +2566,7 @@
         if (txCurrency(tx) === "USD" && Number.isSafeInteger(tx.cop_amount_minor)) {
           card.append(el("p", "hint", `Estimado: ${formatMoney(tx.cop_amount_minor, "COP")} · Tasa manual: ${tx.exchange_rate} COP por USD.`));
         }
-        const reason = typeof tx.reason === "string" && tx.reason.trim() ? tx.reason : "Sin motivo anotado.";
-        card.append(el("p", "reason", reason));
+        card.append(reasonNode(tx));
         const categoryField = el("div", "field decision-category");
         const categoryLabel = el("label", "", "Categoría");
         categoryLabel.htmlFor = `decision-category-${decisionCardSequence++}`;
@@ -2598,7 +2606,13 @@
             currencySelect.append(option);
           });
           currencyField.append(currencyLabel, currencySelect);
-          card.append(currencyField, el("p", "hint", "Corrige la moneda solo después de comprobar el aviso original; el nombre del comercio no determina la moneda."));
+          const currencyBox = el("details", "currency-fix");
+          currencyBox.open = txCurrency(tx) === "USD";
+          currencyBox.append(
+            el("summary", "", txCurrency(tx) === "USD" ? "Moneda y tasa" : "Corregir moneda"),
+            currencyField, el("p", "hint", "Cámbiala solo si el aviso original dice otra moneda.")
+          );
+          card.append(currencyBox);
           const rateField = el("div", "field decision-category");
           const rateLabel = el("label", "", `Tasa estimada COP por USD para ${tx.day}`);
           rateLabel.htmlFor = `decision-rate-${decisionCardSequence++}`;
@@ -2610,10 +2624,10 @@
           rateInput.autocomplete = "off";
           rateInput.placeholder = "4200,50…";
           rateInput.value = tx.exchange_rate || "";
-          rateField.append(rateLabel, rateInput, el("p", "hint", "Estimación ingresada por ti para la fecha del movimiento; no se consulta ni se calcula una tasa automáticamente."));
+          rateField.append(rateLabel, rateInput, el("p", "hint", "La pones tú; no se consulta ninguna tasa."));
           rateField.hidden = currencySelect.value !== "USD";
           currencySelect.addEventListener("change", () => { rateField.hidden = currencySelect.value !== "USD"; });
-          card.append(rateField);
+          currencyBox.append(rateField);
         }
         const options = decisionOptions(tx);
         if (tx.kind === "card_payment") {
@@ -2627,7 +2641,6 @@
         } else if (tx.kind === "own_transfer" || isExcludedAccount(tx)) {
           card.append(el("p", "hint", "Transferencia propia o cuenta excluida: no puede marcarse Personal."));
         }
-        card.append(el("p", "hint", "Inversión suma aportes; Retiro de inversión los resta y asignan su categoría automáticamente. Para efectivo, selecciona Retiro en efectivo en Categoría y confirma Gasto personal o Familiar."));
         const actions = el("div", "decision-actions");
         options.forEach(([decision, label]) => {
           const button = el("button", `button small${decision === "exclude" ? " danger" : ""}`, label);

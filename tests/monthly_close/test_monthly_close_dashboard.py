@@ -219,6 +219,7 @@ def test_legacy_cop_record_can_be_corrected_to_usd_only_on_decision(dashboard):
     page, store, _, errors = dashboard
     page.locator("#tab-decisions").click()
     card = page.locator("#pending-list .decision-card").first
+    card.get_by_text("Corregir moneda").click()  # folded away: rarely needed
     card.get_by_label("Moneda original del aviso", exact=True).select_option("USD")
     assert store.state()["transactions"][0]["currency"] == "COP"
     card.get_by_label(re.compile("Tasa estimada COP por USD")).fill("4000")
@@ -504,7 +505,7 @@ def test_withdrawal_buttons_persist_and_apply_correct_expense_totals(
     ).locator('button[aria-pressed="true"]').filter(has_text=label).count() == 1
     page.locator("#decision-history > summary").click()
     # The three movements share a merchant, so they form one destination card.
-    page.locator("#history-list .group-card details > summary").click()
+    page.locator("#history-list .group-card > details > summary").click()
     with page.expect_response(
         lambda response: response.url.endswith("/api/decision") and response.request.method == "POST"
     ) as excluded:
@@ -730,7 +731,7 @@ def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(da
         re.compile("Categoría para los 2 movimientos"),
     )
     expect(group_select).to_have_value("Transporte")
-    expect(page.get_by_text("Sugerida por tus decisiones anteriores de este comercio").first).to_be_visible()
+    expect(page.get_by_text("Sugerida por tus decisiones anteriores").first).to_be_visible()
     assert all(row["decision"] is None for row in store.state()["transactions"] if row["id"].startswith("stmt:"))
     page.get_by_role("button", name=re.compile("^Familiar: 2 movimientos")).click()
     expect(page.get_by_role("status").filter(has_text="2 movimientos")).to_be_visible()
