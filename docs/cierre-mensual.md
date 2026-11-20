@@ -385,6 +385,22 @@ Vuelve a leer por Graph, en solo lectura y sin Ollama, los avisos de pagos
 salientes de Santiago sin destino. Solo completa destinos vacíos (auditados como
 `destination-backfill`); no cambia importes, categorías ni decisiones.
 
+**Corregir la tarjeta de movimientos ya importados.** Aplica a los avisos de
+Santiago importados antes la misma regla que los nuevos: la tarjeta que nombran
+sus últimos 4 dígitos (ver [Validación de lo que propone
+Ollama](#validación-de-lo-que-propone-ollama)).
+
+```powershell
+.\scripts\agente-local.ps1 backfill-card-accounts -ReadOnly   # cuenta lo que cambiaría
+.\scripts\agente-local.ps1 backfill-card-accounts             # lo aplica
+```
+
+Vuelve a leer por Graph, en solo lectura y sin Ollama, los avisos que leyó el
+modelo; los de frases fijas e ingresos no cambian. Antes de escribir copia la base
+(`close.sqlite3.backup-…`) y audita cada cambio con la tarjeta anterior
+(`card-account-backfill`). Solo cambia la cuenta: importes, categorías, decisiones
+y totales quedan iguales; sí cambia el reparto por medio de pago.
+
 ## Conciliar extractos
 
 Requiere `statements.json` ([configuración](configuracion.md#6-extractos-y-créditos-opcional)).
@@ -802,6 +818,7 @@ origen. Las etiquetas principales:
 | `category-suggestions` | Sugerencias de categoría guardadas o recalculadas (solo el número) |
 | `decision-statement-phrase` | Línea de extracto decidida por un texto fijo confirmado (ver «Conciliar extractos») |
 | `destination-backfill` | Destino completado con `backfill-destinations` |
+| `card-account-backfill` | Tarjeta corregida con `backfill-card-accounts` (con la anterior) |
 | `payroll-deduction-income` | Ingreso espejo de una cuota descontada de la nómina |
 | `mailbox-possible-duplicate` | Posible duplicado entre el Gmail de Manuela y su archivo |
 | `reprocess-replace-card-payments` | Pagos de tarjeta reemplazados por `-ReprocessEmpty` |
@@ -888,8 +905,15 @@ tablas. No cambia importes, decisiones ni auditoría.
   guardado en los 60, y tipo en 58. La cuenta era el punto débil: Ollama nombraba
   otra tarjeta en unos 17 de 44 avisos (por ejemplo «Visa» para la Mastercard).
   Con la tarjeta por sus dígitos, la cuenta coincide con los dígitos del aviso en
-  todos los que nombran una tarjeta conocida; 7 movimientos importados antes
-  quedaron con la tarjeta equivocada y no se han corregido.
+  todos los que nombran una tarjeta conocida.
+- `backfill-card-accounts` (2026-11-20): de 547 avisos de Santiago, 234
+  movimientos de 2026 tenían otra tarjeta que la de sus dígitos (132 Amex que eran
+  Mastercard, 51 Visa que eran Mastercard, 23 Mastercard que eran Amex…). En todos,
+  los dígitos aparecían en la forma del banco («con tu T.Cred \*NNNN»). Corregidos
+  con copia previa; comparado con la copia, solo cambió la cuenta de esos 234 y una
+  segunda vista previa no propuso cambios. La tarjeta Visa no tiene dígitos
+  conocidos en los extractos de Santiago, así que sus avisos siguen dependiendo de
+  Ollama.
 
 **Pendiente**
 

@@ -1022,6 +1022,31 @@ class Store:
                         changes += 1
         return changes
 
+    def set_card_accounts(self, changes: dict[str, str]) -> tuple[int, Path | None]:
+        """Correct the card of movements whose notice names its digits; returns (count, backup).
+
+        Only the account changes: amounts, categories and decisions stay. A copy of the
+        database is made first, and every change is audited with the previous account.
+        Accounts outside the configuration, or excluded ones, are refused.
+        """
+        preferences = self.preferences()
+        if any(account not in preferences.accounts for account in changes.values()):
+            raise ValueError("Solo se asigna una tarjeta configurada y no excluida.")
+        if not changes:
+            return 0, None
+        changed = 0
+        with self.connect() as db:
+            backup = self._backup(db)
+            for event_id, account in changes.items():
+                row = db.execute("SELECT account FROM transactions WHERE id=?", (event_id,)).fetchone()
+                if row is None or row["account"] == account:
+                    continue
+                db.execute("UPDATE transactions SET account=? WHERE id=?", (account, event_id))
+                self._audit(db, "card-account-backfill", event_id, f"{row['account']} -> {account}")
+                changed += 1
+            self._audit(db, "card-account-backfill-local-user", self.path.name, f"{changed} / {backup.name}")
+        return changed, backup
+
     def card_statement_suffixes(self, owner: str) -> list[tuple[str, str]]:
         """(product, last four digits) of every credit card a member's statements showed."""
         with self.connect() as db:

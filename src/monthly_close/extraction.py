@@ -120,13 +120,8 @@ def extract(
         # The attached statement is read by reconcile-statements; the mail moves no money.
         return []
     received = received_local(mail.received, preferences.timezone)
-    body = clean_text(mail.body, 40000)
-    source = mail.subject + "\n" + body
-    fixed = (
-        _card_payments(mail, preferences, source) or _account_transfers(mail, preferences, source)
-        or _card_abonos(mail, preferences, source) or _key_transfers(mail, preferences, source)
-        or _received_transfers(mail, preferences, source)
-    )
+    source = _source(mail)
+    fixed = _fixed_events(mail, preferences, source)
     if fixed:
         return _mark_own_transfers(assign_destinations(fixed, source), own_accounts)
     context = {
@@ -456,6 +451,33 @@ def _literal_merchant(merchant: str, source: str, allow_partial: bool) -> str:
                 if len(found) == 1:
                     return clean_text(found.pop(), 150)
     raise EvidenceError("merchant")
+
+
+def _source(mail: Mail) -> str:
+    return mail.subject + "\n" + clean_text(mail.body, 40000)
+
+
+def _fixed_events(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """Movements read from the bank's fixed sentences, without the model."""
+    return (
+        _card_payments(mail, preferences, source) or _account_transfers(mail, preferences, source)
+        or _card_abonos(mail, preferences, source) or _key_transfers(mail, preferences, source)
+        or _received_transfers(mail, preferences, source)
+    )
+
+
+def card_named_in(mail: Mail, preferences: Preferences, card_accounts: dict[str, str]) -> str | None:
+    """The account extract() gives a notice's movements by the card digits it names.
+
+    None for statement notices and fixed sentences (which never use the digits) and when
+    the notice names no known card, or more than one.
+    """
+    if is_statement_notice(mail.sender, mail.subject):
+        return None
+    source = _source(mail)
+    if _fixed_events(mail, preferences, source):
+        return None
+    return _named_card(source, card_accounts)
 
 
 def _named_card(source: str, card_accounts: dict[str, str]) -> str | None:
