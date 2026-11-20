@@ -203,13 +203,16 @@ def test_statement_movements_enter_pending_audited_and_only_once(store):
         store.record_statements([], [{**events[0], "id": "stmt:x", "decision": "personal"}])
 
 
-def test_merchant_rules_never_decide_statement_movements(store):
+def test_the_persons_rules_decide_statement_movements_except_possible_duplicates(store):
     store.add_rule("TIENDA FICTICIA", "Compras", "personal")
     card = st.parse("TARJETA_MASTERCARD", "202601", CARD)
     report = st.reconcile([card], [], date(2026, 1, 1))
-    store.record_statements(report.checks(), [st.missing_event(c, "Otros gastos", "Otros ingresos") for c in report.missing])
-    store.apply_rules()  # e.g. a later notice import runs every rule again
-    assert {r["decision"] for r in store.state()["transactions"] if r["merchant"] != "ABONO SUCURSAL VIRTUAL"} == {None}
+    events = [st.missing_event(c, "Otros gastos", "Otros ingresos") for c in report.missing]
+    store.record_statements(report.checks(), events)
+    rows = [r for r in store.state()["transactions"] if "TIENDA FICTICIA" in r["merchant"]]
+    assert rows and {(r["decision"], r["category"]) for r in rows} == {("personal", "Compras")}
+    with store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM audit WHERE action='decision-rule'").fetchone()[0] == len(rows)
 
 
 def test_loan_instalment_counts_only_as_personal_family_or_nothing(store):
@@ -878,11 +881,12 @@ def test_statement_purchases_arrive_with_a_proposed_category_but_pending(store):
     store.record_statements([], events)
     store.save_category_suggestions(proposals, replace=False)
     state = store.state()
-    assert {row["id"]: row["decision"] for row in state["transactions"]}["stmt:a"] is None
+    decided = {row["id"]: (row["decision"], row["category"]) for row in state["transactions"]}
+    # The rule now decides its statement purchase; the rest stay pending with a proposal.
+    assert decided["stmt:a"] == ("family", "Transporte") and decided["stmt:b"] == (None, "Salud y farmacia")
     # Kept for the panel, only while the movement is pending.
-    assert state["category_suggestions"]["stmt:a"] == {"category": "Transporte", "source": "rule"}
-    store.decide("stmt:a", "family", "Transporte")
-    assert "stmt:a" not in store.state()["category_suggestions"]
+    assert "stmt:a" not in state["category_suggestions"]
+    assert state["category_suggestions"]["stmt:b"] == {"category": "Salud y farmacia", "source": "history"}
     with pytest.raises(ValueError):
         store.save_category_suggestions({"stmt:b": {"category": "Inventada", "source": "ollama"}}, replace=True)
     assert store.state()["category_suggestions"] == {"stmt:b": {"category": "Salud y farmacia", "source": "history"}}
@@ -909,3 +913,18 @@ def test_savings_interest_and_own_card_payments_are_decided_by_their_fixed_wordi
     assert rows["stmt:master"]["decision"] == rows["stmt:visa"]["decision"] == "exclude"
     assert all(rows[f"stmt:{key}"]["decision"] is None for key in ("auto", "elsewhere", "other"))
     assert "intereses" in rows["stmt:interest"]["reason"]
+
+
+def test_rules_never_decide_a_statement_line_marked_as_possible_duplicate(store):
+    from monthly_close.store import DUPLICATE_NOTE
+
+    store.record_statements([], [{
+        "id": "stmt:dup", "message_id": "statement:x", "day": "2026-01-10", "merchant": "TIENDA DOBLE",
+        "account": "Tarjeta de crédito Visa", "amount_minor": 1000, "currency": "COP",
+        "category": "Otros gastos", "kind": "purchase", "decision": None, "owner": "santiago",
+        "reason": "Leído del extracto.",
+    }])
+    with store.connect() as db:
+        db.execute("UPDATE transactions SET note=? WHERE id='stmt:dup'", (DUPLICATE_NOTE + " de prueba",))
+    store.add_rule("TIENDA DOBLE", "Compras", "personal")
+    assert store.state()["transactions"][0]["decision"] is None

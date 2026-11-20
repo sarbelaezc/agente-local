@@ -135,8 +135,12 @@ el total y una pista, con botones que deciden todos sus movimientos a la vez.
   tarjeta que ocupa ahora su lugar, para seguir con el teclado o sin desplazarte.
 - **Todo o nada.** Si un movimiento no pasa la validación (por ejemplo, una compra
   en USD sin tasa), no cambia ninguno.
-- **Pagos futuros.** «Aplicar también a pagos futuros a este destino» crea una
-  regla de destino, que se puede borrar en «Reglas por destino». Sin esa casilla
+- **Pagos futuros.** «Aplicar también a pagos futuros a este destino, con la
+  categoría elegida» crea una regla de destino que recuerda la decisión y, si
+  elegiste una, la categoría. Decide lo que llegue a ese destino por aviso o por
+  extracto (por ejemplo un «TRASLADO A NEQUI» como Retiro en efectivo y Gasto
+  personal), salvo posibles duplicados y lo que no pase la validación, como una
+  compra en USD sin tasa. Se puede borrar en «Reglas por destino». Sin esa casilla
   no se crea ninguna regla.
 - **Categoría del destino.** Una tarjeta con varios movimientos que admiten Gasto
   personal o Familiar (compras, transferencias como un traslado a Nequi, cuotas
@@ -169,16 +173,16 @@ las aplica ni decide nada por su cuenta.
 - Solo deciden **compras** pendientes como Gasto personal o Familiar con una
   categoría configurada. También admiten el tipo **Ingreso** para dinero recibido
   («si quien paga contiene `EMPRESA`, es Nómina»).
-- Nunca deciden transferencias, inversiones, cuentas excluidas, compras en USD sin
-  tasa, movimientos importados de un extracto ni posibles duplicados.
-- Se aplican al importar y al guardar la regla. Nunca cambian una decisión ya
+- Deciden lo que llega por avisos y por extractos. Nunca deciden transferencias,
+  inversiones, cuentas excluidas, compras en USD sin tasa ni posibles duplicados.
+- Se aplican al importar avisos o extractos y al guardar la regla. Nunca cambian una decisión ya
   tomada; cada decisión automática indica su regla y se puede corregir. Borrar una
   regla no deshace lo que ya decidió.
 
 ### Sugerencias de reglas
 
 El botón **Sugerir reglas** (en «Reglas por comercio») propone una categoría para
-los comercios de compras pendientes de avisos que ninguna regla cubre (hasta 25,
+los comercios de compras pendientes que ninguna regla cubre (hasta 25,
 los más frecuentes primero). Usa el mismo historial y los mismos ejemplos que las
 [sugerencias de categoría](#sugerencias-de-categoría-para-pendientes). Requiere un
 `runtime.json` válido y Ollama activo.
@@ -188,9 +192,7 @@ los más frecuentes primero). Usa el mismo historial y los mismos ejemplos que l
   con su auditoría; **Descartar** la quita. Ollama no elige Personal o Familiar,
   y mientras no apruebes no se guarda ni se decide nada.
 - Las sugerencias no se conservan: al recargar el panel hay que pedirlas de nuevo.
-- Solo cubren compras de avisos de correo. Si no queda ninguna sin regla, no hay
-  nada que sugerir: las compras de extractos nunca las decide una regla. Para esas
-  usa las sugerencias de categoría.
+- Si no queda ninguna compra pendiente sin regla, no hay nada que sugerir.
 
 ### Sugerencias de categoría para pendientes
 
@@ -417,10 +419,14 @@ Fiducuenta, crédito de consumo e hipotecario):
   que extractos consecutivos repiten.
 - Un movimiento del extracto **coincide** con uno conocido del mismo importe y
   moneda con hasta 5 días de diferencia; cada uno se usa una sola vez. Lo que solo
-  muestra el extracto entra **pendiente** (`statement-import`) y lo decide una
-  persona; si es una compra, con una categoría sugerida (ver
+  muestra el extracto entra **pendiente** (`statement-import`); si es una compra,
+  con una categoría sugerida (ver
   [Sugerencias de categoría](#sugerencias-de-categoría-para-pendientes)). Repetir no
   importa nada dos veces.
+- Al registrar extractos se aplican tus [reglas por comercio](#reglas-por-comercio)
+  y tus reglas por destino, con las mismas salvaguardas que para los avisos: nunca
+  deciden posibles duplicados, compras en USD sin tasa ni cuentas excluidas, ni
+  cambian una decisión tomada. Ollama nunca decide.
 - Excepción: las líneas con un texto fijo que los dos titulares confirmaron que
   siempre significa lo mismo quedan decididas al registrar extractos
   (`decision-statement-phrase`), también las que ya estaban pendientes:

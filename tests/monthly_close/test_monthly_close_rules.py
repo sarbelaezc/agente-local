@@ -306,11 +306,13 @@ def test_rules_and_consistent_past_decisions_answer_without_the_model(store):
 
     result = suggest_pending_categories(store, model)
 
-    assert result["stmt:1"] == {"category": TRANSPORT, "source": "rule"}
+    # The rule decided its statement purchase on import, so it needs no suggestion.
+    assert (rows(store)["stmt:1"]["decision"], rows(store)["stmt:1"]["category"]) == ("family", TRANSPORT)
+    assert "stmt:1" not in result
     assert result["stmt:2"] == {"category": "Salud y farmacia", "source": "history"}
     assert result["stmt:3"] == {"category": "Compras", "source": "ollama"}
     assert sorted(model.asked[0]) == ["DROGUERIA SOL", "LUNA TIENDA NORTE"]
     # Examples are the confirmed merchants that share words with the asked ones.
     assert {"merchant": "TIENDA LUNA 123", "category": "Salud y farmacia"} in model.examples
     assert {"merchant": "DROGUERIA SOL", "category": "Compras"} in model.examples
-    assert all(row["decision"] is None for key, row in rows(store).items() if key.startswith("stmt:"))
+    assert all(row["decision"] is None for key, row in rows(store).items() if key in {"stmt:2", "stmt:3", "stmt:4"})

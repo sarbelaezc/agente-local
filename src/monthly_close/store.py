@@ -204,6 +204,9 @@ class Store:
             for column in INVESTMENT_FIGURES:
                 if column not in checks:
                     db.execute(f"ALTER TABLE statement_checks ADD COLUMN {column} INTEGER")
+            # A destination rule may also remember the category chosen with it.
+            if "category" not in {row["name"] for row in db.execute("PRAGMA table_info(group_rules)")}:
+                db.execute("ALTER TABLE group_rules ADD COLUMN category TEXT")
             if backup is not None:
                 self._audit(db, "migrate-household", self.path.name, backup.name)
 
@@ -482,8 +485,7 @@ class Store:
         with self.connect() as db:
             pending = db.execute(
                 """SELECT id,merchant,kind FROM transactions
-                WHERE decision IS NULL AND kind IN ('purchase','income') AND id NOT LIKE 'stmt:%'
-                AND """ + NOT_DUPLICATE,
+                WHERE decision IS NULL AND kind IN ('purchase','income') AND """ + NOT_DUPLICATE,
             ).fetchall()
         decided = 0
         for row in pending:
@@ -550,8 +552,7 @@ class Store:
         with self.connect() as db:
             pending = db.execute(
                 """SELECT merchant FROM transactions
-                WHERE decision IS NULL AND kind='purchase' AND id NOT LIKE 'stmt:%'
-                AND """ + NOT_DUPLICATE,
+                WHERE decision IS NULL AND kind='purchase' AND """ + NOT_DUPLICATE,
             ).fetchall()
         patterns = [rule["pattern"] for rule in self.rules() if rule["decision"] != "income"]
         counts: dict[str, int] = {}
@@ -563,27 +564,32 @@ class Store:
         return [{"merchant": merchant, "count": count} for merchant, count in ranked]
 
     def _apply_group_rules(self) -> int:
-        """Decide pending movements whose destination has a remembered decision."""
+        """Decide pending movements, from notices or statements, whose destination has a remembered decision.
+
+        Possible duplicates are never decided, and a movement that fails validation (for
+        example USD without a rate) stays pending for a person.
+        """
         with self.connect() as db:
             rules = {
-                (row["owner"], row["group_key"]): row["decision"]
+                (row["owner"], row["group_key"]): (row["decision"], row["category"])
                 for row in db.execute("SELECT * FROM group_rules WHERE decision IS NOT NULL")
             }
             if not rules:
                 return 0
             pending = db.execute(
-                "SELECT * FROM transactions WHERE decision IS NULL AND id NOT LIKE 'stmt:%' AND " + NOT_DUPLICATE,
+                "SELECT * FROM transactions WHERE decision IS NULL AND " + NOT_DUPLICATE,
             ).fetchall()
         decided = 0
         for row in pending:
             group = group_of(row)
-            decision = rules.get((row["owner"], group))
-            if decision is None:
+            rule = rules.get((row["owner"], group))
+            if rule is None:
                 continue
+            decision, category = rule
             try:
                 with self.connect() as db:
                     self._decide(
-                        db, row["id"], decision, None,
+                        db, row["id"], decision, category,
                         audit=("decision-group-rule", f"{decision}: {group}"),
                     )
             except ValueError:
@@ -759,11 +765,12 @@ class Store:
                 )
             if remember:
                 db.execute(
-                    """INSERT INTO group_rules(owner,group_key,decision) VALUES (?,?,?)
-                    ON CONFLICT(owner,group_key) DO UPDATE SET decision=excluded.decision""",
-                    (owner, group, decision),
+                    """INSERT INTO group_rules(owner,group_key,decision,category) VALUES (?,?,?,?)
+                    ON CONFLICT(owner,group_key) DO UPDATE SET decision=excluded.decision,
+                    category=excluded.category""",
+                    (owner, group, decision, category),
                 )
-                self._audit(db, "group-rule-local-user", f"{owner}/{group}", decision)
+                self._audit(db, "group-rule-local-user", f"{owner}/{group}", f"{decision}/{category}" if category else decision)
             self._sync_payroll_income(db)
         return len(rows)
 
@@ -827,6 +834,7 @@ class Store:
             for event_id in moved:
                 self._audit(db, "category-merge-local-user", event_id, f"{source} -> {target}")
             rules = db.execute("UPDATE merchant_rules SET category=? WHERE category=?", (target, source)).rowcount
+            rules += db.execute("UPDATE group_rules SET category=? WHERE category=?", (target, source)).rowcount
             db.execute("UPDATE settings SET value=? WHERE id=1", (json.dumps(settings, ensure_ascii=False),))
             self._audit(db, "category-merge-local-user", source, f"-> {target}: {len(moved)} movimientos, {rules} reglas")
         return {"movements": len(moved), "rules": rules}
@@ -1037,8 +1045,9 @@ class Store:
     def record_statements(self, checks: list[dict], events: list[dict]) -> int:
         """Store each statement's reconciliation and import the movements it alone shows.
 
-        Imported movements stay pending: a person decides each one. Repeating the
-        reconciliation changes nothing, because every imported id is derived from the
+        Imported movements stay pending unless a fixed wording the owners confirmed or one
+        of the person's own rules decides them (never possible duplicates). Repeating the
+        reconciliation imports nothing twice, because every imported id is derived from the
         statement line and existing ids are skipped.
         """
         now = datetime.now(timezone.utc).isoformat()
@@ -1083,9 +1092,10 @@ class Store:
                     inserted.append(event["id"])
                     self._audit(db, "statement-import", event["id"], event["message_id"])
             self._flag_between_owners(db, inserted)
-            # No rule decides them: what only a statement shows is confirmed by a person,
-            # except the fixed wordings each owner confirmed always mean the same thing.
+            # Fixed wordings the owners confirmed first; then the person's own rules, with the
+            # same safeguards as for notices. Ollama never decides.
             self._decide_fixed_statement_lines(db)
+        self.apply_rules()
         return len(inserted)
 
     def _decide_fixed_statement_lines(self, db: sqlite3.Connection) -> int:

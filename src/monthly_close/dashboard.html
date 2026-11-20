@@ -499,7 +499,7 @@
             <div id="rule-suggestions" class="decision-list" style="margin-top:12px"></div>
             <div id="rules-list" class="decision-list" style="margin-top:12px"></div>
             <h3 style="margin:18px 0 6px">Reglas por destino</h3>
-            <p class="hint">Se crean al marcar «Aplicar también a pagos futuros» en una tarjeta de destino. Borrar una regla conserva las decisiones que ya tomó.</p>
+            <p class="hint">Se crean al marcar «Aplicar también a pagos futuros» en una tarjeta de destino y deciden lo que llegue a ese destino, por aviso o por extracto, con la categoría elegida si la hay. Nunca deciden posibles duplicados. Borrar una regla conserva las decisiones que ya tomó.</p>
             <div id="group-rules-list" class="decision-list" style="margin-top:8px"></div>
           </details>
           <details class="history-detail" id="decision-history">
@@ -2377,7 +2377,7 @@
         if (options.length) {
           const line = el("label", "check-line");
           line.htmlFor = remember.id;
-          line.append(remember, document.createTextNode("Aplicar también a pagos futuros a este destino"));
+          line.append(remember, document.createTextNode("Aplicar también a pagos futuros a este destino, con la categoría elegida"));
           card.append(line);
         }
         const details = el("details");
@@ -2435,7 +2435,7 @@
           });
           const actions = el("div", "decision-actions");
           actions.append(remove);
-          const what = [rule.decision ? decisionNames[rule.decision] || rule.decision : "", rule.between_owners === 1 ? "Entre Santiago y Manuela" : ""].filter(Boolean).join(" · ");
+          const what = [rule.decision ? decisionNames[rule.decision] || rule.decision : "", typeof rule.category === "string" && rule.category ? itemText(rule.category) : "", rule.between_owners === 1 ? "Entre Santiago y Manuela" : ""].filter(Boolean).join(" · ");
           const heading = el("h3", "", rule.group_key);
           card.append(heading, el("p", "", `${ownerLabel(rule.owner)} · ${what}`), actions);
           groupHost.append(card);
@@ -2521,7 +2521,7 @@
         ruleSuggestions = safeArray(body.suggestions).filter(item => item && typeof item.pattern === "string" && typeof item.category === "string");
         renderRuleSuggestions();
         return ruleSuggestions.length ? `${ruleSuggestions.length} sugerencia(s) por revisar.`
-          : "No hay sugerencias: o ya no quedan compras de avisos sin regla (las de extractos nunca las decide una regla), o Ollama no reconoció los comercios. Las de extractos ya llegan con categoría sugerida; para recalcularla usa «Volver a sugerir categorías» arriba.";
+          : "No hay sugerencias: ya no quedan compras pendientes sin regla, o ni tu historial ni Ollama reconocieron sus comercios.";
       }));
 
       $("#suggest-categories").addEventListener("click", () => askOllama("/api/category-suggestions", async () => {
