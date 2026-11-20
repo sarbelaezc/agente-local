@@ -1107,6 +1107,17 @@ def test_panel_requires_origin_csrf_and_loopback_host(panel, preferences):
     assert client.get("/api/state", headers={"Host": "evil.test"}).status_code == 403
 
 
+def test_rejected_requests_with_a_body_always_get_their_403(panel):
+    # The body of a rejected request is read and dropped: otherwise Windows can reset the
+    # connection and the client sees a network error instead of the refusal.
+    _, client, _ = panel
+    csrf = client.get("/api/state").json()["csrf"]
+    body = {"relleno": "x" * 20000}
+    headers = {"Origin": "https://evil.test", "X-CSRF-Token": csrf}
+    statuses = [client.post("/api/config", headers=headers, json=body).status_code for _ in range(300)]
+    assert statuses == [403] * 300
+
+
 def test_panel_validation_errors_are_visible(panel, preferences):
     _, client, url = panel
     state = client.get("/api/state").json()
