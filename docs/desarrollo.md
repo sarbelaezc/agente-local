@@ -102,6 +102,20 @@ va en `src/shared/`.
     segundo sin tráfico).
   - Las fixtures `dashboard` y `household` fallan solas si la página lanzó algún
     error de JavaScript; la prueba no necesita comprobarlo.
+  - Legibilidad: `tests/monthly_close/page_checks.py` da `in_both_themes(page)` y
+    `assert_readable(locator, tema, at_least=…, min_height=…)`, que exige contraste
+    de al menos 4,5:1 frente al fondo real y, si se pide, una altura mínima. Úsalo
+    para cada control nuevo del panel.
+- Textos en las pruebas:
+  - Escribe literalmente los nombres con que se usa un control (botones,
+    etiquetas, roles: `get_by_role`, `get_by_label`) y los textos que llegan de
+    fuera, como las frases fijas del banco. Son el contrato: si cambian, que falle
+    una prueba es lo correcto. No importes esas constantes del código, porque la
+    prueba ya no detectaría un valor equivocado.
+  - No compruebes ayudas ni notas por su redacción: expón el dato en un atributo
+    (por ejemplo `data-suggestion-source="history"`) y comprueba el atributo.
+  - Busca por rol y nombre, no por estructura genérica como `details > summary`,
+    que se rompe al añadir otro desplegable.
 - Deben demostrar que nada se escribe ni se mueve sin aprobación, que lo aprobado
   coincide con lo escrito, que el agente se detiene ante errores de sesión o de
   buzón y que nunca ejecuta código del modelo.
