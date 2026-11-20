@@ -221,18 +221,22 @@ terminar, con el mismo estilo del panel del cierre mensual y tema claro u oscuro
 
 ## Sugerencia de carpetas
 
-Como cada correo trae una factura, la carpeta la propone Ollama a partir del
-contenido: proveedor, conceptos y texto de hasta 10 facturas, el asunto y el
-cuerpo del correo, la lista de carpetas existentes y los ejemplos que ya
-confirmaste. `folder_rules` y el historial por remitente solo se usan cuando no
-hay contenido (solo metadatos); nunca imponen el destino de una factura. Sin
-Ollama no hay sugerencia y eliges la carpeta tú. La sugerencia siempre es una
-carpeta existente; nunca se crean carpetas.
+1. **Proveedor ya confirmado.** Si todas tus decisiones confirmadas con ese
+   proveedor (comparado sin tildes, mayúsculas ni espacios de más) fueron a la
+   misma carpeta, y esa carpeta existe, se sugiere esa sin consultar a Ollama:
+   «Sugerida: Compras/Falabella (tus decisiones anteriores con …)». Funciona
+   también con `--no-model`. Si el proveedor es nuevo o lo archivaste en
+   carpetas distintas, decide el paso siguiente.
+2. **Ollama**, a partir del contenido: proveedor, conceptos y texto de hasta 10
+   facturas, el asunto y el cuerpo del correo, la lista de carpetas existentes y
+   hasta 6 ejemplos confirmados relacionados por contenido. Sin Ollama no hay
+   sugerencia para estos correos y eliges la carpeta tú.
 
-Los ejemplos confirmados (en el lote o con `--classify-invoices`) se usan como
-contexto en las siguientes ejecuciones: hasta 6 relacionados por contenido, sin
-carpetas que ya no existen. Son ejemplos, no reglas automáticas ni entrenamiento
-del modelo; `--no-model` no los usa para decidir.
+`folder_rules` y el historial por remitente solo se usan cuando no hay contenido
+(solo metadatos); nunca imponen el destino de una factura. La sugerencia siempre
+es una carpeta existente; nunca se crean carpetas. Las decisiones confirmadas (en
+el lote o con `--classify-invoices`) son ejemplos y antecedentes por proveedor,
+no entrenamiento del modelo; siempre puedes cambiar la carpeta antes de aprobar.
 
 ## Estados de un lote
 
@@ -306,6 +310,13 @@ personales: no las subas a Git.
 - Registro de ejecuciones y limpieza de lotes en la base real (2026-11-18).
 - En los 25 correos procesados hasta noviembre de 2026 todas las facturas llegaron
   en ZIP.
+- Sugerencia de carpeta (2026-11-20), en solo lectura con tus 32 decisiones
+  confirmadas, ocultando cada una: 24 correctas (75 %) con el proveedor primero,
+  frente a 21 (66 %) solo con Ollama. Las 19 resueltas por proveedor fueron todas
+  correctas; los errores restantes son proveedores nuevos o archivados en
+  carpetas distintas, sobre todo entre subcarpetas de Compras. Restringir la
+  respuesta de Ollama a la lista de carpetas no cambió el resultado (el modelo
+  nunca propuso una carpeta inexistente) y no se aplicó.
 
 **Cubierto por pruebas** (`pytest tests\mail_invoices`): Graph simulado (lista de
 operaciones permitidas, reintentos, carpetas, adjuntos, huella del cuerpo,
