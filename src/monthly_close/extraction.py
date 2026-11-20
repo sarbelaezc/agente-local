@@ -105,12 +105,14 @@ class EvidenceError(ValueError):
 
 def extract(
     mail: Mail, preferences: Preferences, model: JsonModel, own_accounts: list[str] | None = None,
-    known_credits: list[dict] | None = None,
+    known_credits: list[dict] | None = None, card_accounts: dict[str, str] | None = None,
 ) -> list[dict]:
     """Extract evidence-backed proposals; no model proposal is a human approval.
 
     own_accounts are the last four digits of the person's own accounts (for example a
-    Nequi wallet), so the model can recognise a transfer between them.
+    Nequi wallet), so the model can recognise a transfer between them. card_accounts maps
+    the last four digits of known credit cards to their account: when the notice names
+    exactly one of them, that is the account, whatever the model proposed.
     """
     if mail.sender.lower() not in preferences.approved_senders:
         raise ValueError("Remitente no autorizado. No se envia contenido a Ollama.")
@@ -118,13 +120,8 @@ def extract(
         # The attached statement is read by reconcile-statements; the mail moves no money.
         return []
     received = received_local(mail.received, preferences.timezone)
-    body = clean_text(mail.body, 40000)
-    source = mail.subject + "\n" + body
-    fixed = (
-        _card_payments(mail, preferences, source) or _account_transfers(mail, preferences, source)
-        or _card_abonos(mail, preferences, source) or _key_transfers(mail, preferences, source)
-        or _received_transfers(mail, preferences, source)
-    )
+    source = _source(mail)
+    fixed = _fixed_events(mail, preferences, source)
     if fixed:
         return _mark_own_transfers(assign_destinations(fixed, source), own_accounts)
     context = {
@@ -172,6 +169,7 @@ def extract(
         try:
             proposals = _proposals(
                 result, mail, preferences, received, source, last_attempt=bool(attempt),
+                card_account=_named_card(source, card_accounts or {}),
             )
             if not proposals and not attempt and MONEY_LEFT.search(source):
                 # The notice says money left the account but the model returned nothing:
@@ -455,9 +453,45 @@ def _literal_merchant(merchant: str, source: str, allow_partial: bool) -> str:
     raise EvidenceError("merchant")
 
 
+def _source(mail: Mail) -> str:
+    return mail.subject + "\n" + clean_text(mail.body, 40000)
+
+
+def _fixed_events(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """Movements read from the bank's fixed sentences, without the model."""
+    return (
+        _card_payments(mail, preferences, source) or _account_transfers(mail, preferences, source)
+        or _card_abonos(mail, preferences, source) or _key_transfers(mail, preferences, source)
+        or _received_transfers(mail, preferences, source)
+    )
+
+
+def card_named_in(mail: Mail, preferences: Preferences, card_accounts: dict[str, str]) -> str | None:
+    """The account extract() gives a notice's movements by the card digits it names.
+
+    None for statement notices and fixed sentences (which never use the digits) and when
+    the notice names no known card, or more than one.
+    """
+    if is_statement_notice(mail.sender, mail.subject):
+        return None
+    source = _source(mail)
+    if _fixed_events(mail, preferences, source):
+        return None
+    return _named_card(source, card_accounts)
+
+
+def _named_card(source: str, card_accounts: dict[str, str]) -> str | None:
+    """The one known card whose last four digits the notice names, if exactly one."""
+    named = {
+        account for suffix, account in card_accounts.items()
+        if re.fullmatch(r"\d{4}", suffix) and re.search(rf"(?<!\d){suffix}(?!\d)", source)
+    }
+    return named.pop() if len(named) == 1 else None
+
+
 def _proposals(
     result: dict, mail: Mail, preferences: Preferences, received: datetime, source: str,
-    last_attempt: bool = False,
+    last_attempt: bool = False, card_account: str | None = None,
 ) -> list[dict]:
     events = result.get("events")
     if not isinstance(events, list) or len(events) > 30:
@@ -492,6 +526,9 @@ def _proposals(
         account = clean_text(event.get("account"), 150)
         if account not in preferences.accounts + preferences.excluded_accounts + ["Desconocida"]:
             raise ValueError("Ollama propuso una cuenta no configurada.")
+        if card_account and event.get("kind") != "income":
+            # The card's own digits in the notice decide; the model often names another card.
+            account = card_account
         currency = clean_text(event.get("currency"), 3).upper()
         if currency != notice_currency(source, preferences.currency):
             raise ValueError("Moneda sin evidencia en el aviso: requiere revision manual.")

@@ -25,7 +25,7 @@ from monthly_close.rule_suggestions import propose_statement_categories
 from monthly_close import credit_ledger
 from monthly_close import statements as statements_module
 from monthly_close.domain import EMAIL, OWNERS, Preferences, received_local
-from monthly_close.extraction import EvidenceError, extract, income_category
+from monthly_close.extraction import EvidenceError, card_named_in, extract, income_category
 from monthly_close.graph_client import (
     AUTHORITIES, CLIENT_ID, GraphClient, interactive_login, silent_token,
 )
@@ -383,6 +383,7 @@ def _walk(
                         {"suffix": c.suffix, "name": c.name}
                         for c in credit_ledger.load_configs(data_dir) if c.owner == box.owner
                     ],
+                    card_accounts=card_accounts(store, box.owner, preferences),
                 )
             except EvidenceError as exc:
                 folder = " / ".join(reader.active_folder or ())
@@ -494,6 +495,21 @@ def require_model(settings: dict) -> None:
         raise LocalModelError("El modelo configurado no esta instalado en el endpoint de Ollama.")
 
 
+def card_accounts(store: Store, owner: str, preferences: Preferences) -> dict[str, str]:
+    """Last four digits -> configured card account, from the member's own statements.
+
+    Only accounts in the configuration count, and digits seen on two different cards
+    are left out, so the notice reading never guesses between them.
+    """
+    labels: dict[str, set[str]] = {}
+    allowed = set(preferences.accounts + preferences.excluded_accounts)
+    for product, suffix in store.card_statement_suffixes(owner):
+        label = statements_module.PRODUCTS.get(product)
+        if label in allowed:
+            labels.setdefault(suffix, set()).add(label)
+    return {suffix: found.pop() for suffix, found in labels.items() if len(found) == 1}
+
+
 def run_pilot(store: Store, data_dir: Path, settings: dict, read_only: bool) -> None:
     """Validate or import at most one visible authorized notice, without a broad scan."""
     preferences = store.preferences()
@@ -512,7 +528,10 @@ def run_pilot(store: Store, data_dir: Path, settings: dict, read_only: bool) -> 
         print("Piloto: aviso ya importado; se conservan las decisiones existentes.")
         return
     model = OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
-    proposals = extract(mail, preferences, model, store.own_account_suffixes("santiago"))
+    proposals = extract(
+        mail, preferences, model, store.own_account_suffixes("santiago"),
+        card_accounts=card_accounts(store, "santiago", preferences),
+    )
     store.import_message(mail.id, proposals)
     for month in {event["day"][:7] for event in proposals}:
         store.coverage(month, "partial", "Piloto de un solo aviso; no representa el gasto del mes.")
@@ -581,6 +600,64 @@ def backfill_destinations(
         "notices": len(by_notice), "read": len(by_notice) - len(remaining),
         "updated": updated, "without_destination": len(rows) - len(found),
     }
+
+
+def backfill_card_accounts(
+    store: Store, data_dir: Path, settings: dict, preferences: Preferences, read_only: bool,
+) -> dict:
+    """Read Santiago's notices again (read-only, no Ollama) and correct the card by its digits.
+
+    Applies the same rule as a new import: a notice read by the model that names the last
+    four digits of exactly one known card gets that card. Read-only mode only counts what
+    would change; otherwise the database is copied first and each change is audited.
+    """
+    known = card_accounts(store, "santiago", preferences)
+    with store.connect() as db:
+        rows = db.execute(
+            "SELECT id,message_id,day,account FROM transactions WHERE owner='santiago' "
+            "AND id NOT LIKE 'stmt:%' AND message_id NOT LIKE 'statement:%' AND kind<>'income'",
+        ).fetchall()
+    by_notice: dict[str, list] = {}
+    for row in rows:
+        by_notice.setdefault(row["message_id"], []).append(row)
+    result = {"notices": len(by_notice), "read": 0, "changes": {}, "updated": 0, "backup": None}
+    if not by_notice or not known:
+        return result
+    oldest = min(date.fromisoformat(row["day"]) for row in rows) - timedelta(days=10)
+    remaining = set(by_notice)
+    changes: dict[str, str] = {}
+    pairs: dict[str, int] = {}
+    with open_source(data_dir, settings, preferences.approved_senders) as reader:
+
+        def visit(candidate: Candidate) -> bool | None:
+            if candidate.sender not in preferences.approved_senders:
+                raise OutlookError("La carpeta devolvio un remitente no autorizado. Detenido.")
+            stamp = getattr(reader, "_received", {}).get(candidate.item_id)
+            if isinstance(stamp, str) and received_local(stamp, preferences.timezone).date() < oldest:
+                return False
+            mail = reader.read(candidate)
+            if mail.id not in remaining:
+                return None
+            remaining.discard(mail.id)
+            card = card_named_in(mail, preferences, known)
+            for row in by_notice[mail.id]:
+                if card and row["account"] != card:
+                    changes[row["id"]] = card
+                    pair = f"{row['account']} -> {card}"
+                    pairs[pair] = pairs.get(pair, 0) + 1
+            if not remaining:
+                raise _AllFound
+            return None
+
+        try:
+            reader.walk_folders(settings["max_messages"], visit)
+        except _AllFound:
+            pass
+    result.update(read=len(by_notice) - len(remaining), changes=pairs)
+    if not read_only:
+        result["updated"], backup = store.set_card_accounts(changes)
+        result["backup"] = backup.name if backup else None
+    return result
 
 
 STATEMENTS_FILE = "statements.json"
@@ -890,6 +967,17 @@ def run(args: argparse.Namespace) -> None:
             "Solo lectura del buzon; sin Ollama ni cambios de decisiones."
         )
         return
+    if args.command == "backfill-card-accounts":
+        result = backfill_card_accounts(store, data_dir, settings, preferences, args.read_only)
+        detail = "; ".join(f"{count} x {pair}" for pair, count in sorted(result["changes"].items())) or "ninguno"
+        print(
+            f"Tarjetas: {result['notices']} avisos por revisar, {result['read']} leidos. "
+            f"Cambios {'que se harian' if args.read_only else 'aplicados'}: {detail}. "
+            + ("Solo lectura: nada se guardo." if args.read_only else
+               f"{result['updated']} movimientos corregidos; copia previa: {result['backup'] or 'no hizo falta'}.")
+            + " Sin Ollama; importes, categorias y decisiones no cambian."
+        )
+        return
     if args.command == "reconcile-statements":
         start = date.fromisoformat(args.start) if args.start else date(now.year, 1, 1)
         result = reconcile_statements(store, data_dir, settings, preferences, start, args.read_only)
@@ -951,7 +1039,7 @@ def main() -> None:
         "command",
         choices=[
             "serve", "login", "pilot", "scan", "summary", "scheduled", "check-config",
-            "import-manuela", "owner-account", "backfill-destinations", "reconcile-statements", "payroll-deduction", "import-credit-ledger", "merge-category",
+            "import-manuela", "owner-account", "backfill-destinations", "backfill-card-accounts", "reconcile-statements", "payroll-deduction", "import-credit-ledger", "merge-category",
         ],
     )
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
@@ -988,8 +1076,8 @@ def main() -> None:
         parser.error("--reprocess-empty solo se permite con scan, sin --read-only.")
     if args.mailbox and args.command != "login":
         parser.error("--mailbox solo se permite con login.")
-    if args.read_only and args.command not in {"pilot", "scan", "reconcile-statements"}:
-        parser.error("--read-only solo se permite con pilot, scan o reconcile-statements.")
+    if args.read_only and args.command not in {"pilot", "scan", "reconcile-statements", "backfill-card-accounts"}:
+        parser.error("--read-only solo se permite con pilot, scan, reconcile-statements o backfill-card-accounts.")
     data_dir = args.data_dir.expanduser().resolve()
     try:
         with run_log(data_dir, args.command, args.log_file):

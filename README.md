@@ -83,6 +83,7 @@ estas opciones a los comandos de Python.
 | `import-credit-ledger` | Importa los pagos de los créditos desde tu Excel | No |
 | `merge-category -FromCategory <a> -ToCategory <b>` | Une una categoría de gasto a otra | No |
 | `backfill-destinations` | Completa el destino de pagos de Santiago ya importados | No |
+| `backfill-card-accounts [-ReadOnly]` | Corrige la tarjeta de movimientos de Santiago ya importados según los dígitos del aviso | No |
 | `scheduled` | Cierre automático de la tarea programada | Solo si toca cerrar |
 | `invoices [-BatchSize 1-20] [-Days 1-365] [-Resume]` | Lote de facturas: 10 correos de los últimos 90 días por defecto | Sí |
 | `invoices-cleanup [-OlderThanDays N] [-Apply]` | Limpia estados de lotes que ya no hace falta guardar | No |

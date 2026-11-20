@@ -217,3 +217,65 @@ def test_merge_category_moves_movements_and_rules_and_removes_it(preferences, tm
     with pytest.raises(ValueError):
         store.merge_category("Predial", "Vivienda")
 
+
+
+def test_backfill_card_accounts_previews_then_fixes_only_the_card_named_by_digits(make_store, tmp_path, monkeypatch):
+    accounts = ["Cuenta de ahorros", "Tarjeta de crédito Master", "Tarjeta de crédito Visa"]
+    store = make_store(accounts=accounts)
+    preferences = store.preferences()
+    store.record_statements([{
+        "identity": "TARJETA_MASTERCARD|0002|2026-02-01", "owner": "santiago", "product": "TARJETA_MASTERCARD",
+        "suffix": "0002", "period_start": "2026-02-01", "period_end": "2026-02-28", "movements": 1,
+        "matched": 1, "missing": 0, "balance_minor": None,
+    }], [])
+
+    def row(event_id, account, kind="purchase"):
+        return {**santiago_row(event_id, 123456, kind=kind), "account": account, "merchant": "Tienda"}
+
+    store.import_message("msg-wrong", [row("wrong", "Tarjeta de crédito Visa")])
+    store.import_message("msg-right", [row("right", "Tarjeta de crédito Master")])
+    store.import_message("msg-fixed", [row("fixed", "Desconocida", kind="card_payment")])
+    store.import_message("msg-income", [row("income", "Cuenta de ahorros", kind="income")])
+    store.decide("wrong", "personal", "Compras")
+    bodies = {
+        "msg-wrong": "Compraste $1.234,56 en Tienda con tu tarjeta *0002.",
+        "msg-right": "Compraste $1.234,56 en Tienda con tu tarjeta *0002.",
+        # A fixed sentence names the card it pays, but keeps its account Desconocida.
+        "msg-fixed": "Pagaste $218,699 en la tarjeta de credito *0002 desde la cuenta *0111, el 14/10/2026 11:47.",
+        "msg-income": "Recibiste $1.234,56 en tu tarjeta *0002.",
+    }
+
+    class Reader:
+        _received = {key: RECEIVED for key in bodies}
+
+        def walk_folders(self, limit, visit):
+            for key in bodies:
+                visit(Candidate(key, "avisos@example.test", "Alertas"))
+            return []
+
+        def read(self, candidate):
+            return Mail(candidate.item_id, candidate.sender, "Aviso", RECEIVED, bodies[candidate.item_id])
+
+    @contextmanager
+    def fake_source(*args):
+        yield Reader()
+
+    monkeypatch.setattr(app, "open_source", fake_source)
+    settings = {"max_messages": 100}
+    preview = app.backfill_card_accounts(store, tmp_path, settings, preferences, read_only=True)
+    assert preview["changes"] == {"Tarjeta de crédito Visa -> Tarjeta de crédito Master": 1}
+    assert preview["updated"] == 0 and preview["backup"] is None
+    assert {r["id"]: r["account"] for r in store.state()["transactions"]}["wrong"] == "Tarjeta de crédito Visa"
+
+    applied = app.backfill_card_accounts(store, tmp_path, settings, preferences, read_only=False)
+    assert applied["updated"] == 1 and (tmp_path / applied["backup"]).exists()
+    rows = {r["id"]: r for r in store.state()["transactions"]}
+    assert (rows["wrong"]["account"], rows["wrong"]["decision"], rows["wrong"]["amount_minor"]) == (
+        "Tarjeta de crédito Master", "personal", 123456,
+    )
+    assert rows["fixed"]["account"] == "Desconocida" and rows["income"]["account"] == "Cuenta de ahorros"
+    with store.connect() as db:
+        assert [tuple(r) for r in db.execute("SELECT target, value FROM audit WHERE action='card-account-backfill'")] == [
+            ("wrong", "Tarjeta de crédito Visa -> Tarjeta de crédito Master"),
+        ]
+    assert app.backfill_card_accounts(store, tmp_path, settings, preferences, read_only=False)["updated"] == 0

@@ -96,7 +96,7 @@ def test_scan_queues_invalid_evidence_continues_and_retries_without_losing_decis
                 visit(Candidate(identity, preferences.approved_senders[0], "Aviso"))
             return []
 
-    def extraction(mail, prefs, model, own_accounts=None, known_credits=None):
+    def extraction(mail, prefs, model, own_accounts=None, known_credits=None, card_accounts=None):
         chosen = FakeExtractionModel(merchant="Inventado") if mail.id == "bad" and invalid[0] else FakeExtractionModel()
         return extract(mail, prefs, chosen)
 
@@ -180,7 +180,7 @@ def test_scan_does_not_continue_after_other_failures(tmp_path, preferences, monk
             for identity in ["first", "second"]:
                 visit(Candidate(identity, preferences.approved_senders[0], "Aviso"))
 
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise error
 
     monkeypatch.setattr(app, "open_source", lambda *args: nullcontext(Reader()))
