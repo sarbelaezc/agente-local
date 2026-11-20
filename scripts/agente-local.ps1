@@ -4,7 +4,8 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet(
         "serve", "login", "check-config", "pilot", "scan", "import", "summary", "scheduled", "invoices", "invoices-cleanup",
-        "import-manuela", "owner-account", "backfill-destinations", "backfill-card-accounts", "reconcile-statements", "payroll-deduction", "import-credit-ledger", "merge-category"
+        "import-manuela", "owner-account", "backfill-destinations", "backfill-card-accounts", "reconcile-statements", "payroll-deduction", "import-credit-ledger", "merge-category",
+        "devices", "lan-firewall"
     )]
     [string]$Command = "serve",
     [string]$DataDir,
@@ -30,7 +31,15 @@ param(
     [switch]$Resume,
     [ValidateRange(0, 3650)]
     [int]$OlderThanDays = 30,
-    [switch]$Apply
+    [switch]$Apply,
+    # serve / invoices: also open the panel to paired devices of the home network.
+    [switch]$Red,
+    # devices: revoke one device by name, or all of them.
+    [ValidateLength(1, 40)]
+    [string]$Revoke,
+    [switch]$RevokeAll,
+    # lan-firewall: remove the rule instead of creating it.
+    [switch]$Remove
 )
 
 $ErrorActionPreference = "Stop"
@@ -139,6 +148,31 @@ function Wait-OllamaModels {
 }
 
 $root = Split-Path $PSScriptRoot -Parent
+if ($Red -and $Command -notin @("serve", "invoices")) {
+    throw "-Red solo aplica a serve e invoices."
+}
+if ($Command -eq "lan-firewall") {
+    # Inbound TCP to the two network panel ports, only on Private networks and from the
+    # local subnet. Nothing listens there unless a panel runs with -Red.
+    $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw "Abre PowerShell como administrador para crear o quitar la regla del firewall."
+    }
+    $ruleName = "agente-local paneles en la red de casa"
+    Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+    if ($Remove) {
+        Write-Host "Regla del firewall quitada: los paneles ya no son alcanzables desde la red."
+        exit 0
+    }
+    New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow -Protocol TCP `
+        -LocalPort 8767, 8768 -Profile Private -RemoteAddress LocalSubnet | Out-Null
+    Write-Host "Regla creada: puertos 8767 (cierre) y 8768 (facturas), solo redes privadas y tu subred."
+    $public = Get-NetConnectionProfile | Where-Object { $_.NetworkCategory -ne "Private" -and $_.NetworkCategory -ne "DomainAuthenticated" }
+    foreach ($network in $public) {
+        Write-Warning "La red '$($network.Name)' es $($network.NetworkCategory): la regla no aplica en ella. Marcala como privada solo si es la red de tu casa."
+    }
+    exit 0
+}
 $python = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $python)) {
     throw "Falta .venv. Ejecuta scripts\bootstrap.ps1."
@@ -166,6 +200,14 @@ $exitCode = 1
 Push-Location $root
 try {
     $env:PYTHONPATH = Join-Path $root "src"
+
+    if ($Command -eq "devices") {
+        # Lists, or revokes, the devices paired with each panel; no Ollama, no mailbox.
+        $devices = @("-u", "-m", "shared.lan_access")
+        if ($RevokeAll) { $devices += "--revoke-all" } elseif ($Revoke) { $devices += @("--revoke", $Revoke) }
+        & $python @devices
+        exit $LASTEXITCODE
+    }
 
     if ($invoiceLogin) {
         # Opens Microsoft's page in the system browser; the agent never sees the password.
@@ -205,8 +247,12 @@ try {
         $ollamaProcess = Start-SharedOllama $endpoint
         Wait-OllamaModels $endpoint $ollamaProcess | Out-Null
         $mode = if ($Resume) { "--resume-invoice-batch" } else { "--process-invoice-batch" }
-        & $python -u -m mail_invoices.main --config "config\settings.yaml" $mode `
-            --batch-size "$BatchSize" --days "$Days" --log-file $script:logFile
+        $batch = @(
+            "-u", "-m", "mail_invoices.main", "--config", "config\settings.yaml", $mode,
+            "--batch-size", "$BatchSize", "--days", "$Days", "--log-file", $script:logFile
+        )
+        if ($Red) { $batch += "--lan" }
+        & $python @batch
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 0) {
             Write-Warning "El lote de facturas termino con codigo $exitCode. Revisa su informe antes de repetir: $($script:logFile)"
@@ -261,6 +307,7 @@ try {
     if ($ToCategory) { $arguments += @("--to", $ToCategory) }
     if ($ReadOnly) { $arguments += "--read-only" }
     if ($ReprocessEmpty) { $arguments += "--reprocess-empty" }
+    if ($Red) { $arguments += "--lan" }
     if ($Command -eq "import") {
         Write-Step "Iniciando recorrido del buzon."
     }
