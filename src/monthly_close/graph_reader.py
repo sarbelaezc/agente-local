@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
-import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterator
@@ -13,7 +11,7 @@ from monthly_close.domain import EMAIL, clean_text
 from monthly_close.extraction import Mail
 from monthly_close.graph_client import GRAPH_ROOT, GraphClient, GraphError
 from monthly_close.outlook import Candidate, OutlookError
-from monthly_close.source_reader import parse_source
+from monthly_close.source_reader import checkpoint_key, parse_source
 
 # Message identifiers hash this origin with the Message-ID. Keep the Outlook Web value so
 # notices imported before Graph was used are recognised, not imported twice.
@@ -378,14 +376,7 @@ class GraphSourceReader:
         )
 
     def checkpoint_key(self, candidate: Candidate) -> str:
-        """Hash folder and exact list metadata; never persist message text."""
-        received = self._received.get(candidate.item_id)
-        if received is None:
-            raise OutlookError("Aviso desconocido para este recorrido; no hay punto de reanudacion.")
-        return hashlib.sha256(json.dumps(
-            [self.active_folder, candidate.item_id, candidate.sender, candidate.subject, received],
-            sort_keys=True, ensure_ascii=False,
-        ).encode()).hexdigest()
+        return checkpoint_key(self.active_folder, candidate, self._received.get(candidate.item_id))
 
     def statement_files(
         self, sender: str, since: datetime, name_pattern, max_bytes: int,
