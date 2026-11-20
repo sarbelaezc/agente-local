@@ -1,22 +1,22 @@
 """Local web panel where a person reviews and approves the invoices of a batch.
 
-It listens on 127.0.0.1 only, on a free port, with the same protections as the
-monthly close dashboard: exact Host and Origin, a per-run CSRF token and small
+It listens on 127.0.0.1 only, on a free port, with the checks every local panel
+shares (shared.local_panel): exact Host and Origin, a per-run CSRF token and small
 JSON bodies. PDFs are served by a token of this batch, never by path. If the page
 stops checking in (the tab was closed), the review ends without approving.
 """
 from __future__ import annotations
 
-import json
 import secrets
 import threading
 import time
 import webbrowser
 from collections.abc import Callable
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
-from urllib.parse import urlsplit
+
+from shared.local_panel import LocalPanelHandler
 
 PAGE = "review.html"
 MAX_BODY = 512_000
@@ -25,10 +25,6 @@ HEARTBEAT_SECONDS = 90
 FIRST_VISIT_SECONDS = 600
 REVIEW_LIMIT_SECONDS = 4 * 3600
 DONE_GRACE_SECONDS = 300
-PANEL_CSP = (
-    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-    "connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-)
 # A PDF opens in the browser's own viewer, which a sandbox or script ban would break.
 PDF_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
@@ -121,51 +117,14 @@ class ReviewPanel:
     def _handler(self):
         panel = self
 
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self, format: str, *args: object) -> None:
-                pass
-
-            def valid_host(self) -> bool:
-                return self.headers.get("Host") == f"127.0.0.1:{panel._server.server_port}"
-
-            def respond(
-                self, status: int, payload: bytes, content_type: str,
-                csp: str = PANEL_CSP, extra: dict | None = None,
-            ) -> None:
-                self.send_response(status)
-                self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(len(payload)))
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("X-Content-Type-Options", "nosniff")
-                self.send_header("Referrer-Policy", "no-referrer")
-                self.send_header("Content-Security-Policy", csp)
-                for name, value in (extra or {}).items():
-                    self.send_header(name, value)
-                self.end_headers()
-                self.wfile.write(payload)
-
-            def discard_body(self) -> None:
-                """Read and drop a rejected request's body, within the usual limit.
-
-                Closing a socket with unread data makes Windows reset the connection, so the
-                client would see a network error instead of the 403. Nothing read is used.
-                """
-                self.close_connection = True
-                try:
-                    length = int(self.headers.get("Content-Length", "0"))
-                except ValueError:
-                    return
-                if 0 < length <= MAX_BODY and self.headers.get("Transfer-Encoding") is None:
-                    self.rfile.read(length)
-
-            def json_response(self, status: int, value: dict) -> None:
-                self.respond(status, json.dumps(value, ensure_ascii=False).encode(), "application/json; charset=utf-8")
+        class Handler(LocalPanelHandler):
+            csrf = panel._csrf
+            max_body = MAX_BODY
 
             def do_GET(self) -> None:
-                if not self.valid_host():
-                    self.json_response(403, {"error": "Host no autorizado."})
+                if not self.allowed_get():
                     return
-                path = urlsplit(self.path).path
+                path = self.route
                 if path == "/":
                     self.respond(200, files("mail_invoices").joinpath(PAGE).read_bytes(), "text/html; charset=utf-8")
                 elif path == "/api/view":
@@ -188,27 +147,14 @@ class ReviewPanel:
                     self.json_response(404, {"error": "Ruta inexistente."})
 
             def do_POST(self) -> None:
-                origin = f"http://127.0.0.1:{panel._server.server_port}"
-                if (
-                    not self.valid_host() or self.headers.get("Origin") != origin
-                    or not secrets.compare_digest(self.headers.get("X-CSRF-Token", "").encode(), panel._csrf.encode())
-                    or self.headers.get("Content-Type", "").split(";")[0] != "application/json"
-                    or self.headers.get("Transfer-Encoding") is not None
-                ):
-                    self.discard_body()
-                    self.json_response(403, {"error": "Solicitud local no autorizada."})
+                if not self.allowed_post():
                     return
                 try:
-                    length = int(self.headers.get("Content-Length", "0"))
-                    if not 0 < length <= MAX_BODY:
-                        raise ValueError("Tamaño de solicitud inválido.")
-                    raw = json.loads(self.rfile.read(length))
-                    if not isinstance(raw, dict):
-                        raise ValueError("Solicitud JSON inválida.")
+                    raw = self.read_json()
                 except (ValueError, TypeError) as error:
                     self.json_response(400, {"error": str(error)})
                     return
-                path = urlsplit(self.path).path
+                path = self.route
                 if path == "/api/close":
                     self.close(raw)
                     return

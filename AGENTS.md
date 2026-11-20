@@ -68,7 +68,8 @@ Do not add unnecessary dependencies without a clear reason.
 ```text
 src/
   shared/             helpers every feature uses: storage.py (local data folder),
-                      local_model.py (Ollama client), run_log.py (per-run logs)
+                      local_model.py (Ollama client), run_log.py (per-run logs),
+                      local_panel.py (security checks every local web panel inherits)
   mail_invoices/      Hotmail invoices
   monthly_close/      monthly close through Microsoft Graph (Outlook) and the Gmail API
 tests/
