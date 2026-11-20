@@ -588,6 +588,11 @@
       const dateFormatter = new Intl.DateTimeFormat("es", { day: "numeric", month: "short", year: "numeric" });
       const nonExpenseKinds = new Set(["card_payment", "rejected", "promotion", "verification"]);
       const incomeKinds = new Set(["income", "transfer", "unknown"]);
+      // Expense categories a person can choose, plus the special cash withdrawal.
+      function expenseCategories() {
+        const categories = safeArray(state.data.categories).filter(category => typeof category === "string");
+        return categories.includes("Retiro en efectivo") ? categories : [...categories, "Retiro en efectivo"];
+      }
       function incomeCategories() {
         return safeArray(state.data && state.data.income_categories).filter(category => typeof category === "string");
       }
@@ -1070,6 +1075,21 @@
         await postJson("/api/config", { ...config, confidential_confirmed: form.elements.confidential_confirmed.checked }, "Configuración guardada.");
       }
 
+      // POST with this run's CSRF token: the JSON answer, or an error that keeps the server's reason.
+      async function sendJson(url, payload) {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json", "X-CSRF-Token": state.data.csrf },
+          body: JSON.stringify(payload)
+        });
+        const body = await response.json().catch(() => null);
+        if (!response.ok) {
+          const reason = body && typeof body.detail === "string" ? body.detail : body && typeof body.error === "string" ? body.error : "";
+          throw new Error(`El servidor respondió ${response.status} ${response.statusText || ""}${reason ? `: ${reason}` : ""}`.trim());
+        }
+        return body || {};
+      }
+
       async function postJson(url, payload, successText) {
         if (state.busy) return false;
         if (!state.data || typeof state.data.csrf !== "string" || !state.data.csrf) {
@@ -1079,20 +1099,7 @@
         showMessage("Guardando…", "success");
         setBusy(true);
         try {
-          const response = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json", "X-CSRF-Token": state.data.csrf },
-            body: JSON.stringify(payload)
-          });
-          if (!response.ok) {
-            let detail = "";
-            try {
-              const body = await response.json();
-              if (body && typeof body.detail === "string") detail = `: ${body.detail}`;
-              else if (body && typeof body.error === "string") detail = `: ${body.error}`;
-            } catch { /* el servidor puede responder texto o no devolver cuerpo */ }
-            throw new Error(`El servidor respondió ${response.status} ${response.statusText || ""}${detail}`.trim());
-          }
+          await sendJson(url, payload);
           await loadState(true);
           if (state.data) {
             showMessage(successText);
@@ -2339,9 +2346,7 @@
           const suggested = !isPrevious && suggestedSet.size === 1 ? [...suggestedSet][0] : undefined;
           const currentSet = new Set(entry.rows.map(tx => tx.category));
           const current = currentSet.size === 1 ? [...currentSet][0] : undefined;
-          const categories = safeArray(state.data.categories).filter(category => typeof category === "string");
-          // Same special choice as a single movement: cash taken out counts as Personal or Familiar.
-          if (!categories.includes("Retiro en efectivo")) categories.push("Retiro en efectivo");
+          const categories = expenseCategories();
           const selected = typeof suggested === "string" ? suggested : categories.includes(current) ? current : "";
           const field = el("div", "field decision-category");
           const label = el("label", "", `Categoría para los ${entry.rows.length} movimientos (Gasto personal o Familiar)`);
@@ -2511,14 +2516,7 @@
         showMessage("Pidiendo sugerencias a Ollama… puede tardar un minuto.", "success");
         setBusy(true);
         try {
-          const response = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json", "X-CSRF-Token": state.data.csrf },
-            body: "{}"
-          });
-          const body = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `El servidor respondió ${response.status}`);
-          showMessage(await onAnswer(body));
+          showMessage(await onAnswer(await sendJson(url, {})));
         } catch (error) {
           showMessage(`No se pudieron pedir sugerencias: ${error.message}`, "error");
         } finally {
@@ -2583,8 +2581,7 @@
         categorySelect.name = "category";
         categorySelect.setAttribute("aria-label", `Categoría para ${itemText(tx.merchant)}`);
         const isIncome = tx.kind === "income" || tx.decision === "income";
-        const categories = isIncome ? incomeCategories() : safeArray(state.data.categories).filter(category => typeof category === "string");
-        if (!isIncome && !categories.includes("Retiro en efectivo")) categories.push("Retiro en efectivo");
+        const categories = isIncome ? incomeCategories() : expenseCategories();
         if (typeof tx.category === "string" && tx.category && !categories.includes(tx.category)) categories.unshift(tx.category);
         categories.forEach(category => {
           const option = el("option", "", category);

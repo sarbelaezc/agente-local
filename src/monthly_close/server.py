@@ -23,6 +23,11 @@ def create_server(store: Store, port: int = 8766, model: CategoryModel | None = 
     """
     csrf = secrets.token_urlsafe(32)
 
+    def configured_model() -> CategoryModel:
+        if model is None:
+            raise ValueError("Ollama no esta configurado: revisa runtime.json.")
+        return model
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: object) -> None:
             pass
@@ -150,15 +155,13 @@ def create_server(store: Store, port: int = 8766, model: CategoryModel | None = 
                     if not all(isinstance(value, str) for value in (pattern, category, decision)):
                         raise ValueError("Regla invalida.")
                     store.add_rule(pattern, category, decision)
-                elif self.path in {"/api/rules/suggest", "/api/category-suggestions"}:
-                    if model is None:
-                        raise ValueError("Ollama no esta configurado: revisa runtime.json.")
-                    if self.path == "/api/rules/suggest":
-                        self.json_response(200, {"suggestions": suggest_rules(store, model)})
-                    else:
-                        suggestions = suggest_pending_categories(store, model)
-                        store.save_category_suggestions(suggestions, replace=True)
-                        self.json_response(200, {"by_id": suggestions})
+                elif self.path == "/api/rules/suggest":
+                    self.json_response(200, {"suggestions": suggest_rules(store, configured_model())})
+                    return
+                elif self.path == "/api/category-suggestions":
+                    suggestions = suggest_pending_categories(store, configured_model())
+                    store.save_category_suggestions(suggestions, replace=True)
+                    self.json_response(200, {"by_id": suggestions})
                     return
                 elif self.path == "/api/rules/delete":
                     if type(raw.get("id")) is not int:
