@@ -15,7 +15,7 @@ humana, privacidad, ramas y commits) están en [AGENTS.md](../AGENTS.md).
 | Facturas | `openpyxl` (Excel), `defusedxml` (XML), `pypdf` (PDF con texto), `pypdfium2` y `Pillow` (renderizar PDF escaneados), Tesseract (OCR, instalación aparte) |
 | Persistencia | SQLite de la biblioteca estándar |
 | Zonas horarias | `zoneinfo` con `tzdata`, necesario en Windows para las zonas IANA y el horario de verano |
-| Paneles | Servidores web locales en `127.0.0.1`, HTML y JS en línea sin recursos externos |
+| Paneles | Servidores web locales en `127.0.0.1`, HTML y JS en línea sin recursos externos. Los dos heredan sus validaciones de `shared/local_panel.py`; un panel nuevo debe heredar de `LocalPanelHandler` y no redefinirlas |
 | Pruebas | pytest, `pytest-cov` y Playwright para Python (solo pruebas del panel; ninguna funcionalidad controla un navegador) |
 | Lanzador | Windows PowerShell 5.1 (`scripts\agente-local.ps1`) |
 
@@ -27,6 +27,8 @@ src/
     storage.py       carpeta de datos (.local o AGENTE_LOCAL_DATA)
     local_model.py   cliente de Ollama: solo direcciones locales, sin proxy ni herramientas
     run_log.py       registro por ejecución, conserva los 10 más recientes
+    local_panel.py   seguridad común de los paneles: Host y Origin exactos, token
+                     CSRF, cuerpo JSON con límite, encabezados y respuesta 403
   monthly_close/   cierre mensual (Graph, Gmail, extractos, panel)
   mail_invoices/   facturas (Graph, extracción, panel de revisión, Excel)
 tests/
