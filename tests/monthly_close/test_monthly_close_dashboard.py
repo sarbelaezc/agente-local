@@ -13,6 +13,7 @@ import httpx
 from playwright.sync_api import expect
 
 from builders import movement
+from page_checks import assert_readable, in_both_themes
 from monthly_close.store import Store
 
 
@@ -393,21 +394,8 @@ def test_category_chart_uses_unique_consistent_colors_for_every_category(dashboa
 
 def test_primary_buttons_have_readable_contrast_in_both_themes(dashboard):
     page, _, _, _ = dashboard
-    for theme in ["light", "dark"]:
-        if theme == "dark":
-            page.locator("#theme-toggle").click()
-        contrast = page.locator("#coverage-form button").evaluate("""button => {
-            const luminance = color => {
-                const channels = color.match(/[\\d.]+/g).slice(0, 3).map(Number)
-                    .map(value => value / 255)
-                    .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
-                return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
-            };
-            const style = getComputedStyle(button);
-            const values = [luminance(style.color), luminance(style.backgroundColor)];
-            return (Math.max(...values) + .05) / (Math.min(...values) + .05);
-        }""")
-        assert contrast >= 4.5, (theme, contrast)
+    for theme in in_both_themes(page):
+        assert_readable(page.locator("#coverage-form button"), theme)
 
 
 def test_closing_configuration_returns_keyboard_focus(dashboard):
@@ -468,7 +456,7 @@ def test_withdrawal_buttons_persist_and_apply_correct_expense_totals(
     ).locator('button[aria-pressed="true"]').filter(has_text=label).count() == 1
     page.locator("#decision-history > summary").click()
     # The three movements share a merchant, so they form one destination card.
-    page.locator("#history-list .group-card > details > summary").click()
+    page.locator("#history-list .group-card").get_by_text(re.compile(r"^Ver \d+ movimientos$")).click()
     with page.expect_response(
         lambda response: response.url.endswith("/api/decision") and response.request.method == "POST"
     ) as excluded:
@@ -637,28 +625,9 @@ def test_rule_panel_buttons_and_fields_are_readable_in_both_themes(dashboard):
     page.get_by_role("button", name="Sugerir reglas").click()
     expect(page.get_by_role("button", name="Aprobar regla")).to_be_visible()
     expect(page.get_by_label("El comercio contiene").last).to_have_value("FLYPASS PEAJE")
-    for theme in ["light", "dark"]:
-        if theme == "dark":
-            page.locator("#theme-toggle").click()
-        ratios = page.locator(
-            "#rules-detail button:visible, #rules-detail input:visible, #rules-detail select:visible",
-        ).evaluate_all(r"""controls => controls.map(control => {
-            const luminance = color => {
-                const channels = color.match(/[\d.]+/g).slice(0, 3).map(Number)
-                    .map(value => value / 255)
-                    .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
-                return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
-            };
-            let host = control, background = "rgba(0, 0, 0, 0)";
-            while (host && /rgba\(.*, 0\)$/.test(background)) {
-                background = getComputedStyle(host).backgroundColor;
-                host = host.parentElement;
-            }
-            const values = [luminance(getComputedStyle(control).color), luminance(background)];
-            return [control.textContent.trim() || control.value, (Math.max(...values) + .05) / (Math.min(...values) + .05)];
-        })""")
-        assert len(ratios) >= 7
-        assert all(ratio >= 4.5 for _, ratio in ratios), (theme, ratios)
+    controls = page.locator("#rules-detail button:visible, #rules-detail input:visible, #rules-detail select:visible")
+    for theme in in_both_themes(page):
+        assert_readable(controls, theme, at_least=7)
 
 
 def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(dashboard):
@@ -687,7 +656,7 @@ def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(da
         re.compile("Categoría para los 2 movimientos"),
     )
     expect(group_select).to_have_value("Transporte")
-    expect(page.get_by_text("Sugerida por tus decisiones anteriores").first).to_be_visible()
+    expect(page.locator('#pending-list [data-suggestion-source="history"]').first).to_be_visible()
     assert all(row["decision"] is None for row in store.state()["transactions"] if row["id"].startswith("stmt:"))
     page.get_by_role("button", name=re.compile("^Familiar: 2 movimientos")).click()
     expect(page.get_by_role("status").filter(has_text="2 movimientos")).to_be_visible()
@@ -759,7 +728,7 @@ def test_saved_suggestions_survive_a_reload_and_owner_counts_filter_the_view(das
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     card = page.locator("#pending-list .decision-card").filter(has_text="PEAJE NORTE")
     expect(card.get_by_label(re.compile("Categoría para PEAJE NORTE"))).to_have_value("Transporte")
-    expect(card.get_by_text("Sugerida por tus decisiones anteriores")).to_be_visible()
+    expect(card.locator('[data-suggestion-source="history"]')).to_be_visible()
 
     counts = page.get_by_role("group", name="Pendientes por titular")
     expect(counts.get_by_role("button", name=re.compile("^Manuela: 1 movimiento"))).to_be_visible()
@@ -791,23 +760,10 @@ def test_owner_count_buttons_are_readable_and_large_enough_in_both_themes(dashbo
     page, _, _, _ = dashboard
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     page.locator("#owner-switch button[data-owner='santiago']").click()
-    for theme in ["light", "dark"]:
-        if theme == "dark":
-            page.locator("#theme-toggle").click()
-        found = page.locator(".owner-progress .chip").evaluate_all(r"""chips => chips.map(chip => {
-            const luminance = color => color.match(/[\d.]+/g).slice(0, 3).map(Number).map(v => v / 255)
-                .map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4)
-                .reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0);
-            let host = chip, background = "rgba(0, 0, 0, 0)";
-            while (host && /rgba\(.*, 0\)$/.test(background)) {
-                background = getComputedStyle(host).backgroundColor;
-                host = host.parentElement;
-            }
-            const values = [luminance(getComputedStyle(chip).color), luminance(background)];
-            return [(Math.max(...values) + .05) / (Math.min(...values) + .05), chip.getBoundingClientRect().height];
-        })""")
-        assert len(found) == 2
-        assert all(ratio >= 4.5 and height >= 38 for ratio, height in found), (theme, found)
+    chips = page.locator(".owner-progress .chip")
+    expect(chips).to_have_count(2)
+    for theme in in_both_themes(page):
+        assert_readable(chips, theme, at_least=2, min_height=38)
 
 
 def test_pending_destinations_are_ordered_oldest_first(dashboard):
