@@ -18,6 +18,8 @@ dependencies = [
   "pypdfium2>=4.30",
   "pillow>=10.4",
   "tzdata>=2024.1",
+  # Certificates for the opt-in network access to the panels (also required by msal).
+  "cryptography>=42",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +36,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 monthly_close = ["dashboard.html"]
 mail_invoices = ["review.html"]
+shared = ["pairing.html"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
