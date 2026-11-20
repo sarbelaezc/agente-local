@@ -924,6 +924,7 @@ tablas. No cambia importes, decisiones ni auditoría.
   firewall creada, red marcada como privada, entrada al panel con `serve -Red` y
   una decisión guardada desde el celular, con su nombre en la columna `device` de
   la auditoría.
+  Revocado con `devices -Revoke`, el celular volvió a pedir un código al recargar.
 
 **Pendiente**
 
@@ -935,8 +936,6 @@ tablas. No cambia importes, decisiones ni auditoría.
   dos tienen extractos de septiembre y octubre). Probado solo sobre una copia de la
   base y con datos sintéticos.
 
-- Revocar un dispositivo real con `devices -Revoke` (probado con datos
-  sintéticos).
 - La primera ejecución real de la tarea programada.
 - Cuánto dura en la práctica la sesión de Gmail en Testing, y si pasar la app a
   producción lo evita.
