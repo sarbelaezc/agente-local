@@ -7,10 +7,12 @@ from pathlib import Path
 
 import yaml
 
-from mail_invoices.local_model import validate_local_url
-from mail_invoices.storage import REPO_ROOT
+from shared.local_model import validate_local_url
+from shared.storage import REPO_ROOT
 
 DEFAULT_TESSERACT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+CLIENT_ID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+AUTHORITIES = {"consumers", "common"}
 
 
 def _path(value: str) -> Path:
@@ -24,18 +26,24 @@ def _path(value: str) -> Path:
 
 @dataclass(frozen=True)
 class MailSettings:
-    executable: Path
-    profile_dir: Path
+    """Invoice settings. graph_client_id is the Azure app shared with the monthly close,
+    with Mail.ReadWrite added; each feature keeps its own session and allow-list."""
+
+    graph_client_id: str
     workbook: Path
     backup_dir: Path
     sheet: str
     batch_limit: int
+    graph_authority: str = "consumers"
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:7b"
     tesseract_executable: Path = Path(DEFAULT_TESSERACT)
     tessdata_dir: Path | None = None
     ocr_languages: str = "spa+eng"
     folder_rules: dict[str, str] = field(default_factory=dict)
+    # Exact addresses or "@domain" whose mail is never an invoice to register, such as
+    # foreign receipts in another currency; they are filed by hand.
+    excluded_senders: tuple[str, ...] = ()
     attachments_dir: Path = Path("tmp")
     approver: str = ""
 
@@ -51,6 +59,23 @@ def _ollama_settings(
         raise ValueError("ollama, ocr and folder_rules must be mappings")
     url = validate_local_url(str(ollama.get("url", "http://127.0.0.1:11434")))
     return ollama, url
+
+
+SENDER_RULE = re.compile(r"(?:[^@\s]+)?@[^@\s]+\.[^@\s]+")
+
+
+def _excluded_senders(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(isinstance(item, str) and SENDER_RULE.fullmatch(item.strip()) for item in value):
+        raise ValueError("invoices.excluded_senders must be a list of exact addresses or @domain entries")
+    return tuple(dict.fromkeys(item.strip().lower() for item in value))
+
+
+def is_excluded_sender(sender: str, rules: tuple[str, ...]) -> bool:
+    """Exact address, or "@domain" for the sender's domain (not its subdomains)."""
+    address = sender.strip().lower()
+    return address in rules or ("@" + address.rpartition("@")[2]) in rules
 
 
 def load_settings(path: Path) -> MailSettings:
@@ -72,10 +97,18 @@ def load_settings(path: Path) -> MailSettings:
     if not isinstance(ocr, dict) or not isinstance(rules, dict):
         raise ValueError("ollama, ocr and folder_rules must be mappings")
     tessdata = ocr.get("tessdata_dir")
+    client_id = str(raw.get("graph_client_id") or "").strip()
+    if not CLIENT_ID.fullmatch(client_id):
+        raise ValueError(
+            "Configure invoices.graph_client_id with the Application (client) ID of the Azure app"
+        )
+    authority = str(raw.get("graph_authority", "consumers"))
+    if authority not in AUTHORITIES:
+        raise ValueError("invoices.graph_authority must be consumers or common")
     return MailSettings(
-        _path(raw["opera_executable"]), _path(raw["profile_dir"]),
-        _path(raw["workbook"]), _path(raw["backup_dir"]),
+        client_id, _path(raw["workbook"]), _path(raw["backup_dir"]),
         str(raw.get("sheet", "Hoja1")), limit,
+        graph_authority=authority,
         ollama_url=ollama_url,
         ollama_model=str(ollama.get("model", "qwen2.5:7b")),
         tesseract_executable=_path(str(ocr.get("tesseract_executable", DEFAULT_TESSERACT))),
@@ -84,4 +117,5 @@ def load_settings(path: Path) -> MailSettings:
         folder_rules={str(key): str(value) for key, value in rules.items()},
         attachments_dir=_path(str(raw.get("attachments_dir", "tmp"))),
         approver=" ".join(str(raw.get("approver") or "").split())[:100],
+        excluded_senders=_excluded_senders(raw.get("excluded_senders")),
     )

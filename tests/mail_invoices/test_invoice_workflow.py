@@ -6,7 +6,7 @@ import pytest
 
 from mail_invoices import classification, main, workflow
 from mail_invoices.documents import DocumentError, InvoiceCandidate
-from mail_invoices.local_model import LocalModelError
+from shared.local_model import LocalModelError
 from mail_invoices.ocr import TesseractOcr
 from mail_invoices.settings import MailSettings
 
@@ -14,8 +14,7 @@ from mail_invoices.settings import MailSettings
 @pytest.fixture
 def settings(tmp_path):
     return MailSettings(
-        tmp_path / "opera.exe", tmp_path / "profile", tmp_path / "book.xlsx",
-        tmp_path / "backups", "Hoja1", 1,
+        "11111111-2222-3333-4444-555555555555", tmp_path / "book.xlsx", tmp_path / "backups", "Hoja1", 1,
     )
 
 
@@ -74,8 +73,7 @@ def test_failed_extraction_keeps_readonly_json_shape(monkeypatch, tmp_path):
 def test_classification_cleans_run_attachments(tmp_path, monkeypatch):
     attachments = tmp_path / "attachments"
     settings = MailSettings(
-        tmp_path / "opera.exe", tmp_path, tmp_path / "book.xlsx", tmp_path,
-        "Hoja1", 1, attachments_dir=attachments,
+        "11111111-2222-3333-4444-555555555555", tmp_path / "book.xlsx", tmp_path, "Hoja1", 1, attachments_dir=attachments,
     )
     created = []
 
@@ -127,9 +125,3 @@ def test_extract_file_keeps_valid_zip_invoices_and_reports_failed_member(monkeyp
         {"source": "invoice.zip:other.pdf", "error": "Scanned PDF", "requires_review": True},
     ]
 
-
-@pytest.mark.parametrize("flag", ["--process-one-invoice", "--review-invoices", "--download-attachments"])
-def test_removed_legacy_modes_are_rejected(monkeypatch, flag):
-    monkeypatch.setattr("sys.argv", ["mail-invoices", flag])
-    with pytest.raises(SystemExit):
-        main.main()

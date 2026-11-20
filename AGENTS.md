@@ -37,23 +37,29 @@ The local agent groups several features (for example, Hotmail invoices and the m
 - Do not read code in detail, edit files, install dependencies, or run automations until the user answers.
 - Limit the work to the chosen feature. If a task requires touching another feature, warn the user and ask for confirmation first.
 
-### Declaring in the README
+### Declaring in the README and docs/
 
-- Every new feature or change requested by the user must be declared in the `README.md` in the same change in which it is implemented.
-- Each feature must appear in the feature table with its name, status, module, and run command, and have its own section covering scope, configuration, usage, and security restrictions.
-- If a change alters a feature's behavior, commands, configuration, dependencies, or status, update the `README.md` to reflect it.
-- In the `README.md`, distinguish what is implemented and verified from what is pending or not validated.
-- If the `README.md` describes something different from what the user is requesting now, the user's request prevails: implement it and update the `README.md`. If the request contradicts a security rule in these instructions, report the conflict before continuing.
+The documentation has two levels: `README.md` is the entry point and `docs/` holds the detail.
+
+- `README.md`: what the project is, the feature table (name, short status, main command, link to its guide), quick start, the launcher command table, local data and privacy, and one short section per feature covering scope, configuration, usage and security restrictions, linking to its guide.
+- `docs/<feature>.md` (today `docs/cierre-mensual.md` and `docs/facturas.md`): how it works, task guides, reference, and a single **Estado** section that separates what is verified with real data from what is pending or not validated.
+- `docs/configuracion.md` holds installation and configuration; `docs/desarrollo.md` holds architecture, tests and assistant tooling.
+- Every new feature or change requested by the user must be documented in the same change in which it is implemented: in its README section when scope, commands, configuration or status change, and always in its guide in `docs/`. A new feature gets its row in the feature table, its README section and its own guide.
+- Write the documentation in Spanish, for the user and for someone reproducing the project on another Windows machine. Keep history out of it: document what the project does now.
+- If the documentation describes something different from what the user is requesting now, the user's request prevails: implement it and update the documentation. If the request contradicts a security rule in these instructions, report the conflict before continuing.
 
 ## Preferred technologies
 
 - Python 3.12.
-- Playwright for Python, for the invoices browser (Opera) and the dashboard tests. The monthly close does not drive a browser.
+- Playwright for Python, only for the dashboard tests. No feature drives a browser.
 - Ollama for the local model.
-- Microsoft Graph with MSAL for the monthly close mailbox, using only the read-only Mail.Read permission.
+- Microsoft Graph with MSAL for the monthly close Outlook mailbox, using only the read-only Mail.Read permission.
+- Microsoft Graph with MSAL for the invoice mailbox, through the same Azure app registration as the monthly close with Mail.ReadWrite added, restricted in code to reading messages and moving approved ones.
+- The Gmail API with `google-auth-oauthlib` (sign-in and token refresh only) for a monthly close Gmail mailbox, using only the read-only `gmail.readonly` scope.
 - Tesseract (local) and `pypdfium2` for scanned PDF OCR.
 - SQLite for local state, configuration, and auditing.
-- Tkinter for a minimal desktop interface.
+- A local web panel on 127.0.0.1 for review and approval (exact Host and Origin, per-run CSRF token, no external resources), in the style of the monthly close dashboard. No Tkinter.
+- Only when the user starts a panel with `-Red`, the same panel is also served over HTTPS on this computer's private (RFC 1918) address, to paired devices only (`shared/lan_access.py`): a one-time code shown only in the terminal, an expiring `HttpOnly`/`Secure`/`SameSite=Strict` session, a certificate from a local authority name-constrained to private addresses, the same Host, Origin and CSRF checks for that address, and the paired device recorded with every change. Never listen on all interfaces or on a non-private address, and never serve anything to an unpaired device beyond the pairing page.
 - Pytest for tests.
 
 Do not add unnecessary dependencies without a clear reason.
@@ -62,21 +68,29 @@ Do not add unnecessary dependencies without a clear reason.
 
 ```text
 src/
-  mail_invoices/      Hotmail invoices; also hosts shared helpers (storage.py, local_model.py)
-  monthly_close/      Outlook monthly close through Microsoft Graph
+  shared/             helpers every feature uses: storage.py (local data folder),
+                      local_model.py (Ollama client), run_log.py (per-run logs),
+                      local_panel.py (security checks every local web panel inherits),
+                      lan_access.py (opt-in HTTPS access for paired devices of the home network)
+  mail_invoices/      Hotmail invoices
+  monthly_close/      monthly close through Microsoft Graph (Outlook) and the Gmail API
 tests/
   conftest.py         points every test at a temporary data folder
+  shared/
   mail_invoices/
   monthly_close/
 scripts/
   agente-local.ps1    single launcher for both features
+docs/                 configuration, one guide per feature, and development
 config/               templates only; personal files are ignored by Git
 .local/               all local data and configuration, ignored by Git
 ```
 
-Each feature keeps its own data, state and Ollama usage; keep these separated within a feature:
+Code used by more than one feature lives in `src/shared/`, never inside one feature's
+package; it must not depend on any feature. Each feature keeps its own data, state and
+Ollama usage; keep these separated within a feature:
 
-- Mailbox access (browser for invoices, Microsoft Graph for the monthly close).
+- Mailbox access (Microsoft Graph for invoices; Microsoft Graph and the Gmail API for the monthly close).
 - Ollama integration.
 - Approval interface.
 - Persistence and auditing.
@@ -87,18 +101,18 @@ Each feature keeps its own data, state and Ollama usage; keep these separated wi
 - Never perform a destructive or irreversible action (write to a workbook, move a message) without explicit human approval.
 - Do not store passwords, tokens, or cookies in source code.
 - Do not ask the user for credentials through the agent.
-- Request only the Microsoft Graph permissions a feature needs; keep the token cache out of Git (it lives in `.local/`) and send tokens only to graph.microsoft.com.
+- Request only the mailbox API permissions a feature needs (monthly close: Microsoft Graph `Mail.Read` and Gmail `gmail.readonly`; invoices: Microsoft Graph `Mail.ReadWrite`). Both features use one Azure app, by the user's decision, so its tokens may carry `Mail.ReadWrite` for either feature: each client must therefore enforce its own allow-list of operations in code (monthly close: GET only; invoices: reads and the move action only; never delete, send, flag or mark as read), and each feature keeps its own token cache. Keep token caches and OAuth client files out of Git (they live in `.local/`). Send Graph tokens only to graph.microsoft.com and Gmail tokens only to gmail.googleapis.com, apart from the provider's own sign-in and token-refresh endpoints.
 - Stop on MFA, captcha, unexpected authentication, or unrecognized screens.
 - Do not allow the model direct access to the terminal, disk, or network.
 - Do not execute code generated by the model.
 - Do not store unnecessary message content.
 - Stop all activity on a failure or an ambiguous selector.
-- Exception for monthly close: after the single local correction fails literal-evidence validation, persist the notice metadata as a visible extraction-review item and continue scanning. Never import the invalid proposal or mark that notice processed; keep coverage partial and retry on the next scan. A notice that states money left the account but yields no movement is queued the same way, never dropped. Session, Microsoft Graph and other validation failures still stop all activity.
+- Exception for monthly close: after the single local correction fails literal-evidence validation (including a correction that changes other fields or drops movements), persist the notice metadata as a visible extraction-review item and continue scanning. Never import the invalid proposal or mark that notice processed; keep coverage partial and retry on the next scan. A notice that states money left the account but yields no movement is queued the same way, never dropped. Session, Microsoft Graph and other validation failures still stop all activity.
 - Record who approved a change and when.
 
 ## Browser automation rules
 
-These apply to the invoices feature, the only one that drives a browser.
+No feature drives a browser today: invoices moved to Microsoft Graph. These rules apply if a future feature does.
 
 - Prefer Playwright over a visual agent.
 - Use a persistent browser profile separate from the user's usual one.
@@ -127,17 +141,17 @@ These apply to the invoices feature, the only one that drives a browser.
 ## Local data
 
 - All local data and configuration lives in `.local/` inside the project (`.local/MonthlyCloseAgent`, `.local/MailInvoiceAgent`) and in `config/settings.yaml`. Git ignores them; never stage, commit, or copy them into tracked files.
-- `mail_invoices.storage.data_root()` resolves that folder; `AGENTE_LOCAL_DATA` overrides it. Do not hardcode other locations.
-- `.local/` holds real financial records, a Microsoft session token and a browser profile. Read it only when the task requires it, never print message bodies, tokens or cookies, and back up a database before changing it outside the normal commands.
+- `shared.storage.data_root()` resolves that folder; `AGENTE_LOCAL_DATA` overrides it. Do not hardcode other locations.
+- `.local/` holds real financial records and Microsoft and Google session tokens. Read it only when the task requires it, never print message bodies, tokens or cookies, and back up a database before changing it outside the normal commands.
 - Tests must never read or write `.local/`: `tests/conftest.py` redirects them to a temporary folder.
 
 ## Commands and structure
 
 - Keep configuration files out of the source code.
 - Provide clear scripts for setup, execution, and testing.
-- Keep the README Windows installation instructions up to date.
+- Keep the Windows installation instructions in `docs/configuracion.md` up to date.
 - Setup: `.\scripts\bootstrap.ps1`. Tests: `.\.venv\Scripts\python.exe -m pytest` (a feature: `... -m pytest tests\monthly_close`).
-- Run: `.\scripts\agente-local.ps1 <command>`; the README table lists the commands and which ones use Ollama.
+- Run: `.\scripts\agente-local.ps1 <command>`; the launcher table in the README lists the commands and which ones use Ollama.
 - The shell is Windows PowerShell 5.1: no `&&`, and `$PSScriptRoot` is empty while parameter defaults are evaluated under `-File`.
 
 ## Assistant tooling
@@ -153,11 +167,13 @@ none fits.
 
 | Skill | Use for |
 |---|---|
-| [agent-browser](.claude/skills/agent-browser/SKILL.md) | Browser or Electron automation, site testing, and browser-based QA. Follow the feature's browser rules; invoices automation prefers Playwright. |
+| [agent-browser](.claude/skills/agent-browser/SKILL.md) | Browser or Electron automation, site testing, and browser-based QA. Follow the browser automation rules; no feature automates a mailbox through a browser. |
+| [documentation-writer](.claude/skills/documentation-writer/SKILL.md) | Writing or restructuring the README and `docs/` with the Diátaxis types (tutorial, how-to, reference, explanation). Its "do not copy" rule does not apply when moving this project's own documentation; propose the outline before rewriting. |
 | [find-skills](.claude/skills/find-skills/SKILL.md) | Finding skills when the user asks to discover or extend agent capabilities. Do not install or replace skills without the user's request; keep project skills in the canonical directory. |
 | [frontend-design](.claude/skills/frontend-design/SKILL.md) | Building or substantially redesigning a user interface. |
 | [pdf](.claude/skills/pdf/SKILL.md) | Explicitly requested PDF reading, extraction, creation, conversion, or form work. Follow approval, privacy, and no-generated-code rules; a skill does not authorize file writes or external sharing. |
 | [ponytail](.claude/skills/ponytail/SKILL.md) | Coding tasks where the smallest complete change is preferred, without cutting security, validation, or tests. |
+| [pytest-coverage](.claude/skills/pytest-coverage/SKILL.md) | Measuring test coverage of a change with `pytest-cov` (dev extra) and adding tests for uncovered lines. Write annotated reports outside the repository; tests still never read `.local/`. |
 | [ui-ux-pro-max](.claude/skills/ui-ux-pro-max/SKILL.md) | UI/UX decisions, accessibility, design systems, and targeted design-quality work. |
 | [web-design-guidelines](.claude/skills/web-design-guidelines/SKILL.md) | Explicit reviews of web interface quality, accessibility, and UX guidelines. |
 

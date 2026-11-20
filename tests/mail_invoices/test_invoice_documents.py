@@ -173,3 +173,56 @@ def test_pdf_text_is_extracted_and_missing_supplier_requires_review():
     assert candidate.amount == Decimal("1234.56")
     assert candidate.currency == "COP"
     assert "legal_name" in candidate.missing_fields
+
+
+# ---------------------------------------------------------------- DIAN container without an invoice
+
+CONTAINER_ONLY = b"""<?xml version="1.0" encoding="UTF-8"?>
+<AttachedDocument xmlns="urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2"
+  xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+  xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cbc:DocumentType>Contenedor de Factura Electronica</cbc:DocumentType>
+  <cac:Attachment><cac:ExternalReference><cbc:Description>Factura</cbc:Description></cac:ExternalReference></cac:Attachment>
+  <cac:ParentDocumentLineReference><cac:DocumentReference><cbc:DocumentType>ApplicationResponse</cbc:DocumentType>
+  <cac:Attachment><cac:ExternalReference><cbc:Description>Validacion</cbc:Description></cac:ExternalReference></cac:Attachment>
+  </cac:DocumentReference></cac:ParentDocumentLineReference>
+</AttachedDocument>"""
+
+
+def _container_zip(*members):
+    import io as _io
+    from zipfile import ZipFile as _Zip
+
+    buffer = _io.BytesIO()
+    with _Zip(buffer, "w") as archive:
+        for name, data in members:
+            archive.writestr(name, data)
+    return buffer.getvalue()
+
+
+def test_a_dian_container_without_invoice_lets_its_pdf_be_read(monkeypatch):
+    from mail_invoices import documents
+
+    read = []
+
+    def pdf(data, source, ocr):
+        read.append(source)
+        return documents.InvoiceCandidate(source, "d", method="pdf_text")
+
+    monkeypatch.setattr(documents, "_pdf_invoice", pdf)
+    errors = []
+    found = documents.parse_document(
+        _container_zip(("ad123.xml", CONTAINER_ONLY), ("ad123.pdf", b"%PDF")), "ad123.zip", None, errors,
+    )
+    # The PDF has the container's name but the container yielded no invoice: it is read.
+    assert [c.source for c in found] == ["ad123.zip:ad123.pdf"] and read == ["ad123.zip:ad123.pdf"]
+    assert errors == []  # the container is not an invoice, so it does not block the message
+
+
+def test_a_dian_container_alone_is_reported():
+    from mail_invoices import documents
+
+    with pytest.raises(documents.ContainerWithoutInvoice, match="DIAN validation"):
+        documents.parse_document(_container_zip(("ad123.xml", CONTAINER_ONLY)), "ad123.zip", None, [])
+    with pytest.raises(documents.ContainerWithoutInvoice):
+        documents.parse_document(CONTAINER_ONLY, "ad123.xml")

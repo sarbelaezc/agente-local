@@ -8,9 +8,9 @@ import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 from mail_invoices.documents import DocumentError, parse_document
-from mail_invoices.local_model import validate_local_url
+from shared.local_model import validate_local_url
 from mail_invoices.ocr import TesseractOcr
-from mail_invoices.storage import data_root
+from shared.storage import data_root
 
 TESSERACT = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
 TESSDATA = data_root() / "MailInvoiceAgent" / "tessdata"

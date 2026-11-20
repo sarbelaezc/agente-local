@@ -12,7 +12,6 @@ import pytest
 
 from monthly_close import main as app
 from monthly_close import graph_client
-from monthly_close.domain import Preferences
 from monthly_close.graph_client import GraphClient, GraphError, validate_graph_url
 from monthly_close.graph_reader import GraphSourceReader
 from monthly_close.outlook import Candidate, OutlookError
@@ -22,17 +21,6 @@ from monthly_close.store import Store
 SENDER = "avisos@example.test"
 CLIENT_ID = "11111111-2222-3333-4444-555555555555"
 ROOT = "https://graph.microsoft.com/v1.0"
-
-
-@pytest.fixture
-def preferences(categories) -> Preferences:
-    return Preferences.parse({
-        "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
-        "accounts": ["Tarjeta A"], "excluded_accounts": ["Cuenta B"],
-        "transfer_label": "Familiar", "ask_savings": True, "ask_people": True,
-        "approved_senders": [SENDER], "categories": categories,
-        "confidential_confirmed": True,
-    })
 
 
 def msg(identifier: str, received: str, sender: str = SENDER, subject: str = "Compra Tienda") -> dict:
@@ -660,3 +648,12 @@ def test_full_scan_through_graph_imports_notices_stops_before_the_start_date_and
     box.reads.clear()
     app.scan(*args)
     assert model.calls == 2 and len(store.state()["transactions"]) == 2
+
+
+def test_the_monthly_close_client_can_only_read():
+    """The Azure app is shared with invoices (Mail.ReadWrite): reading-only lives in this code."""
+    writes = ("post", "put", "patch", "delete", "post_json", "request", "send")
+    assert not any(hasattr(GraphClient, name) for name in writes)
+    http = Http(Response(payload={"value": []}))
+    GraphClient(lambda: "token", http=http, sleep=lambda seconds: None).get_json(f"{ROOT}/me/mailFolders")
+    assert len(http.requests) == 1  # Http only implements get: any other verb would fail

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -18,6 +19,16 @@ from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 FILE_NAME = re.compile(r"Extracto_\d+_(?P<period>\d{6})_(?P<product>[A-Z_]+?)_\w{4}\.pdf")
+# Protección names its attachments "<id>_PensionVoluntaria_202610.pdf".
+PROTECCION_FILE = re.compile(r"[0-9A-Za-z]+_(?P<kind>PensionVoluntaria|PensionesCesantias)_(?P<period>\d{6})\.pdf")
+# Any statement attachment the reader may download: Bancolombia's or Protección's.
+STATEMENT_NAME = re.compile(
+    r"(?:Extracto_\d+_\d{6}_[A-Z_]+?_\w{4}|[0-9A-Za-z]+_(?:PensionVoluntaria|PensionesCesantias)_\d{6})\.pdf"
+)
+PROTECCION_PRODUCTS = {"PensionVoluntaria": "PROTECCION_VOLUNTARIA", "PensionesCesantias": "PROTECCION_CESANTIAS"}
+# Protección's statement e-mails: their PDF is read here, so the mail itself is no notice.
+PROTECCION_SENDER = "afp_proteccion@proteccion.com"
+PROTECCION_SUBJECT = re.compile(r"^Extracto (?:Pensiones Voluntarias|de Cesantias) Protecci[oó]n", re.I)
 PRODUCTS = {
     "CTA_AHORROS": "Cuenta de ahorros",
     "TARJETA_MASTERCARD": "Tarjeta de crédito Master",
@@ -26,8 +37,13 @@ PRODUCTS = {
     "FIDUCUENTA": "Fiducuenta",
     "CREDITO": "Crédito de consumo",
     "HIPOTECARIO": "Crédito hipotecario",
+    "PROTECCION_VOLUNTARIA": "Pensión voluntaria Protección",
+    "PROTECCION_CESANTIAS": "Cesantías Protección",
 }
 MAX_PDF_BYTES = 10 * 1024 * 1024
+# Protección's PDFs make pypdf warn about every embedded font (fontTools is not
+# installed). The text is read correctly; those warnings only flood the terminal.
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 
 class StatementError(ValueError):
@@ -53,10 +69,21 @@ class Statement:
     balance_minor: int | None = None  # investment value or outstanding credit
     due_minor: int | None = None  # credit instalment due for the next period
     paid_minor: int | None = None  # payments a credit statement lists, kept even if its lines are not imported
+    # Investment figures of the period (Protección): money put in, taken out (including
+    # transfers to other funds) and everything else that changed the balance (net returns).
+    opening_minor: int | None = None
+    contributions_minor: int | None = None
+    withdrawals_minor: int | None = None
+    returns_minor: int | None = None
+    owner: str = "santiago"  # the owner of the mailbox the statement arrived in
 
     @property
     def identity(self) -> str:
-        return f"{self.product}:{self.suffix}:{self.period_end.isoformat()}"
+        identity = f"{self.product}:{self.suffix}:{self.period_end.isoformat()}"
+        # Santiago's statements keep the identity they had before every mailbox was read,
+        # because the movements they imported derive their ids from it. Protección
+        # statements have no product number, so the owner tells two people's apart.
+        return identity if self.owner == "santiago" else f"{identity}:{self.owner}"
 
 
 def _us_amount(text: str) -> int:
@@ -79,15 +106,20 @@ def _co_amount(text: str) -> int:
     return int(Decimal(clean) * 100)
 
 
-def decrypt_text(content: bytes, password: str) -> str:
-    """Text of a PDF decrypted in memory; the PDF is never written to disk."""
+def decrypt_text(content: bytes, password: str, layout: bool = False) -> str:
+    """Text of a PDF decrypted in memory; the PDF is never written to disk.
+
+    layout keeps each printed row on one line. The savings statement needs it: from
+    its second page on, the plain text lists dates, descriptions and amounts apart.
+    """
     if len(content) > MAX_PDF_BYTES:
         raise StatementError("Extracto demasiado grande.")
     try:
         reader = PdfReader(io.BytesIO(content))
         if reader.is_encrypted and not reader.decrypt(password):
             raise StatementError("La contraseña configurada no abre el extracto.")
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
+        mode = "layout" if layout else "plain"
+        return "\n".join(page.extract_text(extraction_mode=mode) or "" for page in reader.pages)
     except PdfReadError as exc:
         raise StatementError("PDF de extracto ilegible.") from exc
 
@@ -106,6 +138,9 @@ def _hint(description: str, outflow: bool) -> str:
         return "investment" if outflow else "investment_withdrawal"
     if re.search(r"traslado de fondo", text):
         return "investment_withdrawal"
+    # "RECARGA DE TARJETA CIVICA": topping up a prepaid card, such as the metro pass.
+    if outflow and re.search(r"recarga\s+(?:de\s+)?tarjeta|tarjeta\s+civica", text):
+        return "purchase"
     # "PAGO SUC VIRT TC MASTER DOLAR": paying a card's dollar balance from savings.
     if re.search(r"tarjeta|abono sucursal|pago tc|pago tarj|\btc\b", text):
         return "card_payment"
@@ -128,35 +163,57 @@ def _year_for(month: int, start: date, end: date) -> int:
     return start.year if month >= start.month and start.year != end.year else end.year
 
 
+def _summary(lines: list[str], label: str) -> int:
+    """An amount of the savings statement summary, such as 'SALDO ANTERIOR $ 1,234.56'."""
+    found = _first(lines, label + r" \$ ?(-?[\d,]*\.\s?\d{2})(?: |$)")
+    if not found:
+        raise StatementError("Extracto de ahorros sin resumen de saldos.")
+    return _us_amount(found[1])
+
+
 def parse_savings(text: str) -> Statement:
+    """Savings statement, checked line by line and against its summary.
+
+    The running balance ties each line to the one before, and the summary (opening
+    balance, credits, debits and closing balance) proves that no line was left out.
+    """
     lines = _lines(text)
     period = next((SAVINGS_PERIOD.search(line) for line in lines if SAVINGS_PERIOD.search(line)), None)
-    number = next((re.search(r"^numero (\d{6,})$", line, re.I) for line in lines if re.search(r"^numero \d{6,}$", line, re.I)), None)
+    # In the layout text the account number shares its line with the address.
+    number = _first(lines, r"\bnumero (\d{6,})$")
     if not period or not number:
         raise StatementError("Extracto de ahorros sin periodo o número de cuenta.")
     start = date(int(period[1]), int(period[2]), int(period[3]))
     end = date(int(period[4]), int(period[5]), int(period[6]))
     statement = Statement("CTA_AHORROS", number[1][-4:], start, end)
-    previous: int | None = None
+    opening, closing = _summary(lines, "saldo anterior"), _summary(lines, "saldo actual")
+    credits, debits = _summary(lines, "total abonos"), _summary(lines, "total cargos")
+    previous = opening
+    amounts: list[int] = []
     for line in lines:
         match = SAVINGS_LINE.match(line)
         if not match:
             continue
         amount, balance = _us_amount(match["amount"]), _us_amount(match["balance"])
         # The running balance proves each line was read whole: previous + amount = balance.
-        if previous is not None and previous + amount != balance:
+        if previous + amount != balance:
             raise StatementError("El saldo corrido del extracto de ahorros no cuadra.")
         previous = balance
+        amounts.append(amount)
         month = int(match["month"])
         day = date(_year_for(month, start, end), month, int(match["day"]))
         description = match["desc"]
         statement.movements.append(Movement(
             day, description, -amount, "COP", _hint(description, amount < 0),
         ))
+    if (
+        previous != closing or sum(a for a in amounts if a > 0) != credits
+        or -sum(a for a in amounts if a < 0) != debits
+    ):
+        raise StatementError("Las lineas leidas del extracto de ahorros no cuadran con su resumen; falta alguna.")
     return statement
 
 
-CARD_PERIOD = re.compile(r"(\d{2}) (\w{3}) - (\d{2}) (\w{3})\s*\.?\s*(\d{4})", re.I)
 CARD_LINE = re.compile(r"^(?P<desc>.+?) (?P<day>\d{2}/\d{2}/\d{4}) \$ (?P<amount>-?[\d.]+,\d{2})\b")
 CARD_CURRENCY = re.compile(r"cuenta en\s*:\s*(pesos|d[oó]lares)", re.I)
 INTERNAL_CARD = re.compile(r"saldo a diferir|traslado saldo", re.I)
@@ -289,6 +346,182 @@ def parse_mortgage(text: str) -> Statement:
     return statement
 
 
+def identify(name: str) -> tuple[str, str] | None:
+    """Product and period (YYYYMM) of a statement attachment name, or None."""
+    match = FILE_NAME.fullmatch(name)
+    if match:
+        return match["product"], match["period"]
+    match = PROTECCION_FILE.fullmatch(name)
+    if match:
+        return PROTECCION_PRODUCTS[match["kind"]], match["period"]
+    return None
+
+
+def is_statement_notice(sender: str, subject: str) -> bool:
+    """A Protección statement e-mail: its PDF is the source, the mail has no movement."""
+    return sender.lower() == PROTECCION_SENDER and bool(PROTECCION_SUBJECT.match(subject.strip()))
+
+
+SPANISH_MONTHS = {
+    "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7,
+    "agosto": 8, "septiembre": 9, "setiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12,
+}
+# "$ 12,345,678", "-$ 1,234", "+$ 0" or "$ -99.999": whole pesos with grouped thousands.
+PESOS = r"[+-]?\s?\$\s?-?\d{1,3}(?:[.,]\d{3})*"
+AMOUNT_ONLY = re.compile(rf"^(?P<amount>{PESOS})$")
+# Protección prints every figure rounded to whole pesos, so their sum may differ from
+# the printed final balance by a few pesos. A larger gap means a misread statement.
+ROUNDING_MINOR = 10 * 100
+
+
+def _adds_up(total: int, final: int) -> bool:
+    return abs(total - final) <= ROUNDING_MINOR
+
+
+def _pesos(text: str) -> int:
+    """Whole pesos as Protección writes them, in minor units; anything else is refused."""
+    clean = re.sub(r"\s", "", text)
+    match = re.fullmatch(r"([+-]?)\$(-?)(\d{1,3}(?:[.,]\d{3})*)", clean)
+    if not match or len(set(re.findall(r"[.,]", match[3]))) > 1:
+        raise StatementError("Importe no reconocido en el extracto de Protección.")
+    value = int(re.sub(r"[.,]", "", match[3])) * 100
+    return -value if "-" in (match[1], match[2]) else value
+
+
+def _spanish_day(text: str) -> date:
+    """'30 de Octubre 2026' or 'Octubre 30 de 2026'."""
+    found = re.fullmatch(r"(\d{1,2}) de ([a-z]+) (\d{4})", text.strip().lower()) or re.fullmatch(
+        r"([a-z]+) (\d{1,2}) de (\d{4})", text.strip().lower(),
+    )
+    if not found:
+        raise StatementError("Fecha del extracto de Protección no reconocida.")
+    if found[1].isdigit():
+        day, month, year = found[1], found[2], found[3]
+    else:
+        month, day, year = found[1], found[2], found[3]
+    if month not in SPANISH_MONTHS:
+        raise StatementError("Mes del extracto de Protección no reconocido.")
+    return date(int(year), SPANISH_MONTHS[month], int(day))
+
+
+def _labelled(lines: list[str], pattern: str, last: bool = False) -> int | None:
+    """Amount written on the same line as a label."""
+    found = [re.search(pattern + rf"\s*(?P<amount>{PESOS})\s*$", line, re.I) for line in lines]
+    found = [match for match in found if match]
+    if not found:
+        return None
+    return _pesos((found[-1] if last else found[0])["amount"])
+
+
+def _amount_after(lines: list[str], index: int, limit: int = 4) -> int:
+    """First line holding only an amount within a few lines after index."""
+    for line in lines[index + 1:index + 1 + limit]:
+        match = AMOUNT_ONLY.match(line)
+        if match:
+            return _pesos(match["amount"])
+    raise StatementError("Saldo del extracto de Protección no encontrado.")
+
+
+def _index(lines: list[str], pattern: str, start: int = 0) -> int:
+    for index in range(start, len(lines)):
+        if re.search(pattern, lines[index], re.I):
+            return index
+    raise StatementError("Sección del extracto de Protección no encontrada.")
+
+
+def _figures(statement: Statement, opening: int, contributions: int, withdrawals: int, final: int) -> Statement:
+    statement.opening_minor = opening
+    statement.contributions_minor = contributions
+    statement.withdrawals_minor = withdrawals
+    statement.balance_minor = final
+    statement.returns_minor = final - opening - contributions + withdrawals
+    return statement
+
+
+def _voluntary_period(lines: list[str]) -> tuple[date, date]:
+    index = _index(lines, r"^Periodo:")
+    text = lines[index].split(":", 1)[1].strip()
+    if text.endswith(" a") and index + 1 < len(lines):  # the period ends on the next line
+        text += " " + lines[index + 1]
+    parts = re.split(r"\s+a\s+", text)
+    if len(parts) != 2:
+        raise StatementError("Periodo del extracto de Protección no reconocido.")
+    return _spanish_day(parts[0]), _spanish_day(parts[1])
+
+
+def _parse_voluntary_current(lines: list[str], statement: Statement) -> Statement:
+    """Format since mid-2026: every figure of the summary sits next to its label."""
+    opening = _labelled(lines, r"Saldo inicial del periodo:")
+    contributions = _labelled(lines, r"El dinero que ingreso a tu cuenta\.")
+    withdrawals = _labelled(lines, r"Dinero que sacaste de tu cuenta\.")
+    transfers = _labelled(lines, r"Movimientos que realizaste hacia otras entidades\.")
+    refund = _labelled(lines, r"Tu beneficio por mantener una inversion constante con Proteccion\.")
+    net = _amount_after(lines, _index(lines, r"costo de administracion del mes"), 2)
+    final = _amount_after(lines, _index(lines, r"^Saldo final del periodo$"), 2)
+    figures = (opening, contributions, withdrawals, transfers, refund)
+    if any(value is None for value in figures):
+        raise StatementError("Resumen del extracto de Protección incompleto.")
+    out = abs(withdrawals) + abs(transfers)
+    if not _adds_up(opening + abs(contributions) - out + net + abs(refund), final):
+        raise StatementError("El resumen del extracto de Protección no cuadra con su saldo final.")
+    return _figures(statement, opening, abs(contributions), out, final)
+
+
+def _parse_voluntary_previous(lines: list[str], statement: Statement) -> Statement:
+    """Format until mid-2026: the summary prints out of order, so figures come from the
+    labelled detail section and must add up exactly to the final balance."""
+    start = _index(lines, r"^Saldo inicial$")
+    opening = _amount_after(lines, start + 1, 2)
+    final = _amount_after(lines, _index(lines, r"^Saldo final$", start), 2)
+    # The detail section is printed after an empty template with the same labels, so
+    # the last labelled line is the real one.
+    contributions = _labelled(lines, r"^Aportes", last=True) or 0
+    withdrawals = _labelled(lines, r"^Retiros", last=True) or 0
+    net = _labelled(lines, r"^Rendimiento neto")  # after fees, as the first page states it
+    refund = _labelled(lines, r"^Devolucion de comision", last=True) or 0
+    transfers = _labelled(lines, r"^Traslados de recursos de/hacia fondos de pensiones", last=True) or 0
+    if net is None:
+        raise StatementError("Extracto de Protección sin rendimiento neto.")
+    if not _adds_up(opening + abs(contributions) - abs(withdrawals) + net + abs(refund) + transfers, final):
+        raise StatementError("El detalle del extracto de Protección no cuadra con su saldo final.")
+    out = abs(withdrawals) + max(-transfers, 0)
+    return _figures(statement, opening, abs(contributions) + max(transfers, 0), out, final)
+
+
+def parse_voluntary(text: str) -> Statement:
+    """Protección voluntary pension: balance, contributions, withdrawals and returns."""
+    lines = _lines(text)
+    start, end = _voluntary_period(lines)
+    statement = Statement("PROTECCION_VOLUNTARIA", "", start, end)
+    if any(re.search(r"Saldo inicial del periodo:", line, re.I) for line in lines):
+        return _parse_voluntary_current(lines, statement)
+    return _parse_voluntary_previous(lines, statement)
+
+
+def parse_severance(text: str) -> Statement:
+    """Protección severance fund (cesantías): one summary line for the half year."""
+    lines = _lines(text)
+    period = _first(lines, r"comprendido entre:\s*(\d{4})/(\d{2})/(\d{2}) a (\d{4})/(\d{2})/(\d{2})")
+    if not period:
+        raise StatementError("Periodo del extracto de cesantías no reconocido.")
+    values = None
+    for index in range(_index(lines, r"^Saldo Final$"), min(len(lines), _index(lines, r"^Saldo Final$") + 4)):
+        found = re.findall(PESOS, lines[index])
+        if len(found) == 5 and re.fullmatch(rf"(?:{PESOS}\s*){{5}}", lines[index]):
+            values = [_pesos(item) for item in found]
+            break
+    if values is None:
+        raise StatementError("Resumen del extracto de cesantías no encontrado.")
+    opening, contributions, withdrawals, valuation, final = values
+    if not _adds_up(opening + abs(contributions) - abs(withdrawals) + valuation, final):
+        raise StatementError("El resumen del extracto de cesantías no cuadra con su saldo final.")
+    statement = Statement(
+        "PROTECCION_CESANTIAS", "",
+        date(int(period[1]), int(period[2]), int(period[3])), date(int(period[4]), int(period[5]), int(period[6])),
+    )
+    return _figures(statement, opening, abs(contributions), abs(withdrawals), final)
+
+
 def parse(product: str, period: str, text: str) -> Statement:
     if product == "CTA_AHORROS":
         return parse_savings(text)
@@ -300,6 +533,10 @@ def parse(product: str, period: str, text: str) -> Statement:
         return parse_consumer_credit(text)
     if product == "HIPOTECARIO":
         return parse_mortgage(text)
+    if product == "PROTECCION_VOLUNTARIA":
+        return parse_voluntary(text)
+    if product == "PROTECCION_CESANTIAS":
+        return parse_severance(text)
     raise StatementError("Producto de extracto no soportado.")
 
 
@@ -353,11 +590,13 @@ def _same_money(saving: Movement, other: Movement) -> bool:
     return saving.amount_minor == expected
 
 
-def match_existing(candidates: list[Candidate], rows: list[dict]) -> tuple[list[tuple[Candidate, str]], list[Candidate]]:
-    """Pair each statement movement with one existing movement of the same amount and nearby date."""
+def match_existing(
+    candidates: list[Candidate], rows: list[dict], owner: str = "santiago",
+) -> tuple[list[tuple[Candidate, str]], list[Candidate]]:
+    """Pair each statement movement with one existing movement of the same owner, amount and nearby date."""
     free = [
         row for row in rows
-        if row["owner"] == "santiago" and row["currency"] in {"COP", "USD"}
+        if row["owner"] == owner and row["currency"] in {"COP", "USD"}
     ]
     used: set[str] = set()
     matched, missing = [], []
@@ -397,7 +636,7 @@ def missing_event(candidate: Candidate, category: str, income_category: str) -> 
         "account": PRODUCTS.get(statement.product, "Desconocida"),
         "amount_minor": abs(movement.amount_minor), "currency": movement.currency,
         "category": income_category if kind == "income" else category, "kind": kind,
-        "decision": None,
+        "decision": None, "owner": statement.owner,
         "reason": f"Leído del extracto {PRODUCTS.get(statement.product, statement.product)} "
         f"*{statement.suffix}; no llegó por aviso. Confirma qué es.",
     }
@@ -417,17 +656,30 @@ class Reconciliation:
             matched = sum(c.statement is statement for c, _ in self.matched)
             missing = sum(c.statement is statement for c in self.missing)
             rows.append({
-                "identity": statement.identity, "product": statement.product,
+                "identity": statement.identity, "owner": statement.owner, "product": statement.product,
                 "suffix": statement.suffix, "period_start": statement.period_start.isoformat(),
                 "period_end": statement.period_end.isoformat(), "movements": len(statement.movements),
                 "matched": matched, "missing": missing, "balance_minor": statement.balance_minor,
                 "due_minor": statement.due_minor, "paid_minor": statement.paid_minor,
+                "opening_minor": statement.opening_minor,
+                "contributions_minor": statement.contributions_minor,
+                "withdrawals_minor": statement.withdrawals_minor,
+                "returns_minor": statement.returns_minor,
             })
         return rows
 
 
 def reconcile(statements: list[Statement], rows: list[dict], start: date) -> Reconciliation:
-    """Compare statements with known movements from start on; nothing is decided here."""
-    candidates = [c for c in pair_internal(statements) if c.movement.day >= start]
-    matched, missing = match_existing(candidates, rows)
+    """Compare statements with known movements from start on; nothing is decided here.
+
+    Each owner's statements pair with each other and match only that owner's movements.
+    """
+    matched: list[tuple[Candidate, str]] = []
+    missing: list[Candidate] = []
+    for owner in dict.fromkeys(statement.owner for statement in statements):
+        own = [statement for statement in statements if statement.owner == owner]
+        candidates = [c for c in pair_internal(own) if c.movement.day >= start]
+        found, absent = match_existing(candidates, rows, owner)
+        matched += found
+        missing += absent
     return Reconciliation(statements, matched, missing)

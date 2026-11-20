@@ -1,4 +1,4 @@
-from mail_invoices.folders import FiledMessage, IncomingMessage, suggest_folder
+from mail_invoices.folders import ConfirmedExample, FiledMessage, IncomingMessage, suggest_folder
 
 FOLDERS = ["Facturas/Energía", "Facturas/Internet", "Personal"]
 HISTORY = [
@@ -89,5 +89,41 @@ def test_content_without_model_does_not_fall_back_to_sender():
     result = suggest_folder(
         IncomingMessage("facturas@energia.example", "Factura", body="Consulta medica"),
         FOLDERS, HISTORY, {"@energia.example": "Facturas/Energía"},
+    )
+    assert result.folder is None
+
+
+def confirmed(supplier: str, folder: str) -> ConfirmedExample:
+    return ConfirmedExample(IncomingMessage("ventas@tienda.example", "Factura", invoices=({"supplier": supplier},)), folder)
+
+
+def test_a_supplier_always_confirmed_in_one_folder_is_suggested_without_the_model():
+    model = FakeModel({"folder": "Personal", "reason": "otra"})
+    examples = [confirmed("Almacenes Éxito S.A.", "Facturas/Internet"), confirmed("ALMACENES EXITO  S.A.", "Facturas/Internet")]
+    result = suggest_folder(
+        IncomingMessage("otro@remitente.example", "Compra", body="Mercado", invoices=({"supplier": "almacenes exito s.a."},)),
+        FOLDERS, (), None, model, examples,
+    )
+    assert (result.folder, result.source) == ("Facturas/Internet", "confirmed")
+    assert "tus decisiones anteriores con" in result.reason
+    assert model.calls == 0
+
+
+def test_a_supplier_confirmed_in_different_folders_or_a_new_one_goes_to_the_model():
+    model = FakeModel({"folder": "Personal", "reason": "por contenido"})
+    examples = [confirmed("Tienda Uno", "Facturas/Internet"), confirmed("Tienda Uno", "Personal")]
+    for supplier in ("Tienda Uno", "Tienda Nueva"):
+        result = suggest_folder(
+            IncomingMessage("x@y.example", "Compra", body="Compra", invoices=({"supplier": supplier},)),
+            FOLDERS, (), None, model, examples,
+        )
+        assert result.source == "model"
+    assert model.calls == 2
+
+
+def test_a_confirmed_folder_that_no_longer_exists_is_never_suggested():
+    result = suggest_folder(
+        IncomingMessage("x@y.example", "Compra", body="Compra", invoices=({"supplier": "Tienda Uno"},)),
+        FOLDERS, (), None, None, [confirmed("Tienda Uno", "Carpeta borrada")],
     )
     assert result.folder is None

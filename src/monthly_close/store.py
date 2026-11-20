@@ -4,11 +4,13 @@ import json
 import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Iterator
 
+from shared.local_panel import remote_device
 from monthly_close.domain import (
     COUNTERPART_KINDS, DECISIONS, HOUSEHOLD, INCOME_CATEGORIES, INCOME_KINDS, LOAN_DECISIONS, NON_EXPENSES,
     OWNERS, Preferences, clean_text, owner_id,
@@ -32,6 +34,11 @@ CREATE TABLE IF NOT EXISTS scan_progress (
     scope TEXT NOT NULL, item TEXT NOT NULL, status TEXT NOT NULL,
     PRIMARY KEY (scope, item)
 );
+CREATE TABLE IF NOT EXISTS mailbox_sync (
+    mailbox TEXT NOT NULL, folder TEXT NOT NULL, token TEXT NOT NULL,
+    PRIMARY KEY (mailbox, folder)
+);
+CREATE TABLE IF NOT EXISTS closes (month TEXT PRIMARY KEY, closed_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS coverage (
     month TEXT PRIMARY KEY, status TEXT NOT NULL, note TEXT NOT NULL
 );
@@ -48,6 +55,9 @@ CREATE TABLE IF NOT EXISTS group_rules (
     between_owners INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (owner, group_key)
 );
 CREATE TABLE IF NOT EXISTS owner_accounts (suffix TEXT PRIMARY KEY, owner TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS category_suggestions (
+    event_id TEXT PRIMARY KEY, category TEXT NOT NULL, source TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS payroll_deductions (
     owner TEXT NOT NULL, suffix TEXT NOT NULL, PRIMARY KEY (owner, suffix)
 );
@@ -57,7 +67,19 @@ CREATE TABLE IF NOT EXISTS statement_checks (
     matched INTEGER NOT NULL, missing INTEGER NOT NULL, balance_minor INTEGER,
     checked_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS card_series (
+    owner TEXT NOT NULL, product TEXT NOT NULL, suffix TEXT NOT NULL,
+    replaces TEXT, decided_at TEXT, PRIMARY KEY (owner, product, suffix)
+);
 """
+# card_series.replaces: NULL while a person has not answered, '' for a card of its own,
+# 'PRODUCT:SUFFIX' when it is that earlier card with a new number.
+
+MONTH = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
+# Statements that list every movement of a product. Credits only bring balances (their
+# payments leave the savings account) and Protección only figures, so they do not count.
+CARD_PRODUCTS = {"TARJETA_MASTERCARD", "TARJETA_AMEX", "TARJETA_VISA"}
+COVERAGE_PRODUCTS = {"CTA_AHORROS", "FIDUCUENTA", *CARD_PRODUCTS}
 
 # Household columns added to databases created before owners existed. The defaults keep
 # every existing movement as Santiago's, with its amount and decision untouched.
@@ -75,6 +97,7 @@ STATE_COLUMNS = (
     "exchange_rate,cop_amount_minor,owner,group_key,time,note,account_label,"
     "category_uncertain,between_owners"
 )
+INVESTMENT_FIGURES = ("opening_minor", "contributions_minor", "withdrawals_minor", "returns_minor")
 SPECIAL_CATEGORIES = {
     "investment": "Inversiones",
     "investment_withdrawal": "Retiros de inversión",
@@ -82,11 +105,45 @@ SPECIAL_CATEGORIES = {
 }
 
 
+# A mailbox movement that may repeat one the same member already brought by file import.
+# It stays pending, and no rule decides it: a person compares both.
+DUPLICATE_NOTE = "Posible duplicado"
+NOT_DUPLICATE = f"(note IS NULL OR note NOT LIKE '{DUPLICATE_NOTE}%')"
+
 # Movements of a notice that a reprocessing run must leave alone: everything except
 # card payments the model guessed before they were read from the bank's fixed sentence.
 KEPT = (
     "SELECT 1 FROM transactions WHERE message_id=? "
     "AND NOT (kind='card_payment' AND category<>'Pago de tarjeta')"
+)
+
+
+@dataclass(frozen=True)
+class FixedStatementLine:
+    """A statement wording that both owners confirmed always means the same decision."""
+
+    wording: str  # regular expression over the line's words (see merchant_words)
+    account: str  # SQL LIKE pattern for the account it appears in
+    kind: str
+    decision: str
+    category: str | None
+    reason: str
+
+
+FIXED_STATEMENT_LINES = (
+    FixedStatementLine(
+        r"ABONO SUCURSAL VIRTUAL", "Tarjeta de cr%", "card_payment", "exclude", None,
+        "en el extracto de la tarjeta es un pago propio desde la cuenta de ahorros: no cuenta.",
+    ),
+    FixedStatementLine(
+        r"PAGO SUC VIRT TC (?:MASTER|AMEX|VISA)(?: DOLAR)?", "Cuenta de ahorros", "card_payment",
+        "exclude", None,
+        "es la salida de ahorros con la que pagaste tu propia tarjeta: no cuenta, el gasto son las compras.",
+    ),
+    FixedStatementLine(
+        r"ABONO INTERESES AHORROS", "Cuenta de ahorros", "income", "income", "Otros ingresos",
+        "son intereses de la cuenta de ahorros: ingreso.",
+    ),
 )
 
 
@@ -141,6 +198,19 @@ class Store:
                 db.execute("ALTER TABLE statement_checks ADD COLUMN due_minor INTEGER")
             if "paid_minor" not in checks:
                 db.execute("ALTER TABLE statement_checks ADD COLUMN paid_minor INTEGER")
+            # Statements read before every mailbox was searched came from Santiago's Outlook.
+            if "owner" not in checks:
+                db.execute("ALTER TABLE statement_checks ADD COLUMN owner TEXT NOT NULL DEFAULT 'santiago'")
+            # Investment figures of a period (Protección); NULL for other statements.
+            for column in INVESTMENT_FIGURES:
+                if column not in checks:
+                    db.execute(f"ALTER TABLE statement_checks ADD COLUMN {column} INTEGER")
+            # A destination rule may also remember the category chosen with it.
+            if "category" not in {row["name"] for row in db.execute("PRAGMA table_info(group_rules)")}:
+                db.execute("ALTER TABLE group_rules ADD COLUMN category TEXT")
+            # The paired device a change came from (-Red); NULL when made on this computer.
+            if "device" not in {row["name"] for row in db.execute("PRAGMA table_info(audit)")}:
+                db.execute("ALTER TABLE audit ADD COLUMN device TEXT")
             if backup is not None:
                 self._audit(db, "migrate-household", self.path.name, backup.name)
 
@@ -186,8 +256,8 @@ class Store:
     @staticmethod
     def _audit(db: sqlite3.Connection, action: str, target: str, value: str) -> None:
         db.execute(
-            "INSERT INTO audit(at,action,target,value) VALUES (?,?,?,?)",
-            (datetime.now(timezone.utc).isoformat(), action, target, value),
+            "INSERT INTO audit(at,action,target,value,device) VALUES (?,?,?,?,?)",
+            (datetime.now(timezone.utc).isoformat(), action, target, value, remote_device.get()),
         )
 
     def seen(self, message_id: str) -> bool:
@@ -237,6 +307,15 @@ class Store:
             )
             self._audit(db, "extraction-pending", message_id, field)
 
+    def queued_failures(self) -> list[dict]:
+        """Notices waiting in the review queue, with the metadata needed to find them again."""
+        with self.connect() as db:
+            return [
+                dict(row) for row in db.execute(
+                    "SELECT message_id,sender,subject,received,folder FROM extraction_failures ORDER BY received",
+                )
+            ]
+
     def dismiss_failure(self, message_id: str) -> None:
         """A person reviewed a queued notice and decided it has nothing to import.
 
@@ -263,8 +342,80 @@ class Store:
                 (message_id, message_id),
             ).fetchone() is not None
 
-    def import_message(self, message_id: str, events: list[dict], reprocess: bool = False) -> None:
+    def last_close(self) -> str | None:
+        """Most recent month the scheduled close completed (YYYY-MM), if any."""
+        with self.connect() as db:
+            return db.execute("SELECT max(month) AS month FROM closes").fetchone()["month"]
+
+    def record_close(self, month: str) -> None:
+        if not MONTH.fullmatch(month):
+            raise ValueError("Mes de cierre invalido.")
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO closes VALUES (?,?) ON CONFLICT(month) DO UPDATE SET closed_at=excluded.closed_at",
+                (month, datetime.now(timezone.utc).isoformat()),
+            )
+            self._audit(db, "scheduled-close", month, "completed")
+
+    def sync_state(self, mailbox: str) -> dict[str, str]:
+        """Saved incremental position of a mailbox, per folder (or Gmail history)."""
+        with self.connect() as db:
+            return {
+                row["folder"]: row["token"]
+                for row in db.execute("SELECT folder,token FROM mailbox_sync WHERE mailbox=?", (mailbox,))
+            }
+
+    def save_sync(self, mailbox: str, folder: str, token: str) -> None:
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO mailbox_sync VALUES (?,?,?)
+                ON CONFLICT(mailbox,folder) DO UPDATE SET token=excluded.token""",
+                (mailbox, folder, token),
+            )
+
+    def prune_sync(self, mailbox: str, keep: set[str]) -> None:
+        """Forget the position of folders that no longer exist."""
+        with self.connect() as db:
+            for row in db.execute("SELECT folder FROM mailbox_sync WHERE mailbox=?", (mailbox,)).fetchall():
+                if row["folder"] not in keep:
+                    db.execute("DELETE FROM mailbox_sync WHERE mailbox=? AND folder=?", (mailbox, row["folder"]))
+
+    def last_import_day(self, owner: str) -> str | None:
+        """Last day covered by the member's file import (import-manuela), if any."""
+        owner = owner_id(owner)
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT max(day) AS day FROM transactions WHERE owner=? AND message_id LIKE ?",
+                (owner, f"{owner}-import:%"),
+            ).fetchone()
+        return row["day"]
+
+    @staticmethod
+    def _mark_possible_duplicates(db: sqlite3.Connection, owner: str, events: list[dict]) -> list[dict]:
+        """Leave pending, with a note, movements matching a file-imported one of that member."""
+        marked = []
+        for event in events:
+            twin = db.execute(
+                """SELECT id FROM transactions WHERE owner=? AND day=? AND amount_minor=?
+                AND currency=? AND message_id LIKE ? LIMIT 1""",
+                (owner, event["day"], event["amount_minor"], event["currency"], f"{owner}-import:%"),
+            ).fetchone()
+            if twin is None:
+                marked.append(event)
+                continue
+            marked.append({
+                **event, "decision": None,
+                "note": f"{DUPLICATE_NOTE} del movimiento importado del {event['day']} con el mismo valor: "
+                        "si es el mismo dinero, elige No cuenta",
+            })
+            Store._audit(db, "mailbox-possible-duplicate", event["id"], twin["id"])
+        return marked
+
+    def import_message(
+        self, message_id: str, events: list[dict], reprocess: bool = False, owner: str = "santiago",
+    ) -> None:
         """Import once per notice; reprocess only adds to a notice that left no movement."""
+        owner = owner_id(owner)
         with self.connect() as db:
             if db.execute("SELECT 1 FROM processed WHERE message_id=?", (message_id,)).fetchone() and (
                 not reprocess or db.execute(KEPT, (message_id,)).fetchone()
@@ -275,19 +426,19 @@ class Store:
             ).rowcount
             if replaced:
                 self._audit(db, "reprocess-replace-card-payments", message_id, str(replaced))
-            for event in events:
+            for event in self._mark_possible_duplicates(db, owner, events):
                 db.execute(
                     """INSERT INTO transactions (
                     id,message_id,day,merchant,account,amount_minor,currency,
-                    category,kind,decision,reason,group_key,time,note) VALUES (
+                    category,kind,decision,reason,group_key,time,note,owner) VALUES (
                     :id,:message_id,:day,:merchant,:account,:amount_minor,:currency,
-                    :category,:kind,:decision,:reason,:group_key,:time,:note)""",
-                    {"group_key": None, "time": None, "note": None, **event},
+                    :category,:kind,:decision,:reason,:group_key,:time,:note,:owner)""",
+                    {"group_key": None, "time": None, "note": None, **event, "owner": owner},
                 )
                 db.execute(
                     """UPDATE coverage SET status='partial',
-                    note='Hay movimientos nuevos despues de la ultima revision manual.'
-                    WHERE month=? AND status='reviewed'""", (event["day"][:7],),
+                    note='Hay movimientos nuevos despues de la ultima revision o conciliacion.'
+                    WHERE month=? AND status IN ('reviewed','reconciled')""", (event["day"][:7],),
                 )
             db.execute("INSERT OR IGNORE INTO processed VALUES (?)", (message_id,))
             db.execute("DELETE FROM extraction_failures WHERE message_id=?", (message_id,))
@@ -338,7 +489,7 @@ class Store:
         with self.connect() as db:
             pending = db.execute(
                 """SELECT id,merchant,kind FROM transactions
-                WHERE decision IS NULL AND kind IN ('purchase','income') AND id NOT LIKE 'stmt:%'""",
+                WHERE decision IS NULL AND kind IN ('purchase','income') AND """ + NOT_DUPLICATE,
             ).fetchall()
         decided = 0
         for row in pending:
@@ -359,28 +510,90 @@ class Store:
             decided += 1
         return decided
 
+    def save_category_suggestions(self, suggestions: dict[str, dict], *, replace: bool) -> int:
+        """Keep proposed categories so the panel shows them after a reload; nothing is decided.
+
+        replace drops every earlier proposal first (a full recalculation); otherwise new
+        proposals are added or updated. Only sources and categories that a proposal can
+        carry are stored, and only for movements that exist.
+        """
+        allowed = set(self.preferences().categories) | {"Retiro en efectivo"}
+        with self.connect() as db:
+            if replace:
+                db.execute("DELETE FROM category_suggestions")
+            saved = 0
+            for event_id, item in suggestions.items():
+                if item.get("source") not in {"rule", "history", "ollama"} or item.get("category") not in allowed:
+                    raise ValueError("Sugerencia de categoria invalida.")
+                if db.execute("SELECT 1 FROM transactions WHERE id=?", (event_id,)).fetchone() is None:
+                    continue
+                db.execute(
+                    """INSERT INTO category_suggestions VALUES (?,?,?) ON CONFLICT(event_id)
+                    DO UPDATE SET category=excluded.category, source=excluded.source""",
+                    (event_id, item["category"], item["source"]),
+                )
+                saved += 1
+            self._audit(db, "category-suggestions", "pending", f"{saved} {'recalculadas' if replace else 'nuevas'}")
+        return saved
+
+    def pending_purchases(self) -> list[dict]:
+        """Id and merchant of every pending purchase, from notices and statements."""
+        with self.connect() as db:
+            return [dict(row) for row in db.execute(
+                "SELECT id,merchant FROM transactions WHERE decision IS NULL AND kind='purchase'",
+            )]
+
+    def confirmed_purchase_categories(self) -> list[dict]:
+        """Merchant and category of purchases a person (or their rule) decided as expense."""
+        with self.connect() as db:
+            return [dict(row) for row in db.execute(
+                """SELECT merchant,category FROM transactions
+                WHERE kind='purchase' AND decision IN ('personal','family') AND category IS NOT NULL""",
+            )]
+
+    def unruled_merchants(self, limit: int = 25) -> list[dict]:
+        """Merchants of pending purchases that no rule covers, most frequent first."""
+        with self.connect() as db:
+            pending = db.execute(
+                """SELECT merchant FROM transactions
+                WHERE decision IS NULL AND kind='purchase' AND """ + NOT_DUPLICATE,
+            ).fetchall()
+        patterns = [rule["pattern"] for rule in self.rules() if rule["decision"] != "income"]
+        counts: dict[str, int] = {}
+        for row in pending:
+            words = merchant_words(row["merchant"])
+            if len(words.strip()) >= 3 and not any(f" {pattern} " in words for pattern in patterns):
+                counts[words.strip()] = counts.get(words.strip(), 0) + 1
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
+        return [{"merchant": merchant, "count": count} for merchant, count in ranked]
+
     def _apply_group_rules(self) -> int:
-        """Decide pending movements whose destination has a remembered decision."""
+        """Decide pending movements, from notices or statements, whose destination has a remembered decision.
+
+        Possible duplicates are never decided, and a movement that fails validation (for
+        example USD without a rate) stays pending for a person.
+        """
         with self.connect() as db:
             rules = {
-                (row["owner"], row["group_key"]): row["decision"]
+                (row["owner"], row["group_key"]): (row["decision"], row["category"])
                 for row in db.execute("SELECT * FROM group_rules WHERE decision IS NOT NULL")
             }
             if not rules:
                 return 0
             pending = db.execute(
-                "SELECT * FROM transactions WHERE decision IS NULL AND id NOT LIKE 'stmt:%'",
+                "SELECT * FROM transactions WHERE decision IS NULL AND " + NOT_DUPLICATE,
             ).fetchall()
         decided = 0
         for row in pending:
             group = group_of(row)
-            decision = rules.get((row["owner"], group))
-            if decision is None:
+            rule = rules.get((row["owner"], group))
+            if rule is None:
                 continue
+            decision, category = rule
             try:
                 with self.connect() as db:
                     self._decide(
-                        db, row["id"], decision, None,
+                        db, row["id"], decision, category,
                         audit=("decision-group-rule", f"{decision}: {group}"),
                     )
             except ValueError:
@@ -533,13 +746,16 @@ class Store:
 
     def decide_group(
         self, owner: str, group: str, decision: str, *,
-        pending_only: bool = True, remember: bool = False,
+        pending_only: bool = True, remember: bool = False, category: str | None = None,
     ) -> int:
         """Apply one person's decision to every movement to a destination, all or nothing.
 
         Each movement passes the same validation as a single decision and gets its own
         audit row. remember also decides later movements to the same destination.
+        category, chosen by the person, applies only to Personal or Familiar decisions.
         """
+        if category is not None and decision not in {"personal", "family"}:
+            raise ValueError("Solo Gasto personal o Familiar admiten una categoria para todo el destino.")
         owner = owner_id(owner)
         group = clean_text(group, 200)
         with self.connect() as db:
@@ -548,16 +764,17 @@ class Store:
                 raise ValueError("Destino sin movimientos por decidir.")
             for row in rows:
                 self._decide(
-                    db, row["id"], decision, None,
+                    db, row["id"], decision, category,
                     audit=("decision-group-local-user", f"{decision}: {group}"),
                 )
             if remember:
                 db.execute(
-                    """INSERT INTO group_rules(owner,group_key,decision) VALUES (?,?,?)
-                    ON CONFLICT(owner,group_key) DO UPDATE SET decision=excluded.decision""",
-                    (owner, group, decision),
+                    """INSERT INTO group_rules(owner,group_key,decision,category) VALUES (?,?,?,?)
+                    ON CONFLICT(owner,group_key) DO UPDATE SET decision=excluded.decision,
+                    category=excluded.category""",
+                    (owner, group, decision, category),
                 )
-                self._audit(db, "group-rule-local-user", f"{owner}/{group}", decision)
+                self._audit(db, "group-rule-local-user", f"{owner}/{group}", f"{decision}/{category}" if category else decision)
             self._sync_payroll_income(db)
         return len(rows)
 
@@ -604,24 +821,6 @@ class Store:
                 raise ValueError("Regla de destino inexistente.")
             self._audit(db, "group-rule-delete-local-user", f"{owner}/{group}", "deleted")
 
-    def suggest_exchange_rate(self, event_id: str, rate: str, origin: str) -> None:
-        """Prefill the COP-per-USD rate of a pending USD movement without deciding it.
-
-        The panel shows the suggested rate; the decision still belongs to a person.
-        """
-        if not isinstance(rate, str) or not re.fullmatch(r"\d{1,8}(?:\.\d{1,6})?", rate) or Decimal(rate) <= 0:
-            raise ValueError("Tasa sugerida invalida.")
-        with self.connect() as db:
-            row = db.execute("SELECT * FROM transactions WHERE id=?", (event_id,)).fetchone()
-            if row is None or row["currency"] != "USD" or row["decision"] is not None:
-                raise ValueError("Solo se sugiere tasa a movimientos USD pendientes.")
-            converted = int((Decimal(row["amount_minor"]) * Decimal(rate)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-            db.execute(
-                "UPDATE transactions SET exchange_rate=?, cop_amount_minor=? WHERE id=?",
-                (rate, converted, event_id),
-            )
-            self._audit(db, "exchange-suggested", event_id, f"{rate}: {clean_text(origin, 120)}")
-
     def merge_category(self, source: str, target: str) -> dict[str, int]:
         """Fold one spending category into another, in one audited transaction.
 
@@ -639,6 +838,7 @@ class Store:
             for event_id in moved:
                 self._audit(db, "category-merge-local-user", event_id, f"{source} -> {target}")
             rules = db.execute("UPDATE merchant_rules SET category=? WHERE category=?", (target, source)).rowcount
+            rules += db.execute("UPDATE group_rules SET category=? WHERE category=?", (target, source)).rowcount
             db.execute("UPDATE settings SET value=? WHERE id=1", (json.dumps(settings, ensure_ascii=False),))
             self._audit(db, "category-merge-local-user", source, f"-> {target}: {len(moved)} movimientos, {rules} reglas")
         return {"movements": len(moved), "rules": rules}
@@ -826,6 +1026,40 @@ class Store:
                         changes += 1
         return changes
 
+    def set_card_accounts(self, changes: dict[str, str]) -> tuple[int, Path | None]:
+        """Correct the card of movements whose notice names its digits; returns (count, backup).
+
+        Only the account changes: amounts, categories and decisions stay. A copy of the
+        database is made first, and every change is audited with the previous account.
+        Accounts outside the configuration, or excluded ones, are refused.
+        """
+        preferences = self.preferences()
+        if any(account not in preferences.accounts for account in changes.values()):
+            raise ValueError("Solo se asigna una tarjeta configurada y no excluida.")
+        if not changes:
+            return 0, None
+        changed = 0
+        with self.connect() as db:
+            backup = self._backup(db)
+            for event_id, account in changes.items():
+                row = db.execute("SELECT account FROM transactions WHERE id=?", (event_id,)).fetchone()
+                if row is None or row["account"] == account:
+                    continue
+                db.execute("UPDATE transactions SET account=? WHERE id=?", (account, event_id))
+                self._audit(db, "card-account-backfill", event_id, f"{row['account']} -> {account}")
+                changed += 1
+            self._audit(db, "card-account-backfill-local-user", self.path.name, f"{changed} / {backup.name}")
+        return changed, backup
+
+    def card_statement_suffixes(self, owner: str) -> list[tuple[str, str]]:
+        """(product, last four digits) of every credit card a member's statements showed."""
+        with self.connect() as db:
+            return [(row["product"], row["suffix"]) for row in db.execute(
+                """SELECT DISTINCT product, suffix FROM statement_checks
+                WHERE owner=? AND product LIKE 'TARJETA%' AND suffix IS NOT NULL AND suffix <> ''""",
+                (owner_id(owner),),
+            )]
+
     def own_account_suffixes(self, owner: str) -> list[str]:
         """Last four digits of the accounts registered as a member's own."""
         with self.connect() as db:
@@ -849,24 +1083,38 @@ class Store:
     def record_statements(self, checks: list[dict], events: list[dict]) -> int:
         """Store each statement's reconciliation and import the movements it alone shows.
 
-        Imported movements stay pending: a person decides each one. Repeating the
-        reconciliation changes nothing, because every imported id is derived from the
+        Imported movements stay pending unless a fixed wording the owners confirmed or one
+        of the person's own rules decides them (never possible duplicates). Repeating the
+        reconciliation imports nothing twice, because every imported id is derived from the
         statement line and existing ids are skipped.
         """
         now = datetime.now(timezone.utc).isoformat()
         inserted: list[str] = []
         with self.connect() as db:
             for check in checks:
+                check = {"owner": "santiago", **check}
+                known = db.execute(
+                    "SELECT owner FROM statement_checks WHERE identity=?", (check["identity"],),
+                ).fetchone()
+                if known is not None and known["owner"] != check["owner"]:
+                    raise ValueError("Un extracto ya registrado de otro titular no cambia de titular.")
                 db.execute(
-                    """INSERT INTO statement_checks (identity,product,suffix,period_start,period_end,
-                    movements,matched,missing,balance_minor,checked_at,due_minor,paid_minor) VALUES (
-                    :identity,:product,:suffix,:period_start,:period_end,:movements,:matched,
-                    :missing,:balance_minor,:checked_at,:due_minor,:paid_minor) ON CONFLICT(identity) DO UPDATE SET
+                    """INSERT INTO statement_checks (identity,owner,product,suffix,period_start,period_end,
+                    movements,matched,missing,balance_minor,checked_at,due_minor,paid_minor,
+                    opening_minor,contributions_minor,withdrawals_minor,returns_minor) VALUES (
+                    :identity,:owner,:product,:suffix,:period_start,:period_end,:movements,:matched,
+                    :missing,:balance_minor,:checked_at,:due_minor,:paid_minor,
+                    :opening_minor,:contributions_minor,:withdrawals_minor,:returns_minor) ON CONFLICT(identity) DO UPDATE SET
                     movements=excluded.movements,matched=excluded.matched,missing=excluded.missing,
                     balance_minor=excluded.balance_minor,checked_at=excluded.checked_at,
                     due_minor=excluded.due_minor,
-                    paid_minor=COALESCE(excluded.paid_minor, statement_checks.paid_minor)""",
-                    {"due_minor": None, "paid_minor": None, **check, "checked_at": now},
+                    paid_minor=COALESCE(excluded.paid_minor, statement_checks.paid_minor),
+                    opening_minor=excluded.opening_minor,contributions_minor=excluded.contributions_minor,
+                    withdrawals_minor=excluded.withdrawals_minor,returns_minor=excluded.returns_minor""",
+                    {
+                        "due_minor": None, "paid_minor": None, **dict.fromkeys(INVESTMENT_FIGURES),
+                        **check, "checked_at": now,
+                    },
                 )
                 self._audit(db, "statement-check", check["identity"], f"{check['matched']}/{check['movements']}")
             for event in events:
@@ -875,14 +1123,65 @@ class Store:
                 if db.execute(
                     """INSERT OR IGNORE INTO transactions (
                     id,message_id,day,merchant,account,amount_minor,currency,category,kind,
-                    decision,reason) VALUES (:id,:message_id,:day,:merchant,:account,
-                    :amount_minor,:currency,:category,:kind,NULL,:reason)""", event,
+                    decision,reason,owner) VALUES (:id,:message_id,:day,:merchant,:account,
+                    :amount_minor,:currency,:category,:kind,NULL,:reason,:owner)""",
+                    {"owner": "santiago", **event},
                 ).rowcount:
                     inserted.append(event["id"])
                     self._audit(db, "statement-import", event["id"], event["message_id"])
             self._flag_between_owners(db, inserted)
-        # No rule decides them: what only a statement shows is always confirmed by a person.
+            # Fixed wordings the owners confirmed first; then the person's own rules, with the
+            # same safeguards as for notices. Ollama never decides.
+            self._decide_fixed_statement_lines(db)
+        self.apply_rules()
         return len(inserted)
+
+    def _decide_fixed_statement_lines(self, db: sqlite3.Connection) -> int:
+        """Decide pending statement lines whose exact wording has one meaning for both owners.
+
+        Only the wordings in FIXED_STATEMENT_LINES, in their account and kind, are decided;
+        a decision already taken is never changed. Each one is audited and can be corrected.
+        """
+        decided = 0
+        for line in FIXED_STATEMENT_LINES:
+            rows = db.execute(
+                """SELECT id,merchant FROM transactions WHERE decision IS NULL AND id LIKE 'stmt:%'
+                AND kind=? AND account LIKE ?""", (line.kind, line.account),
+            ).fetchall()
+            for row in rows:
+                words = merchant_words(row["merchant"]).strip()
+                if not re.fullmatch(line.wording, words):
+                    continue
+                self._decide(
+                    db, row["id"], line.decision, line.category,
+                    audit=("decision-statement-phrase", f"{line.decision}: {words}"),
+                )
+                db.execute(
+                    "UPDATE transactions SET reason=? WHERE id=?",
+                    (f"«{words}» {line.reason} Puedes cambiarlo aqui.", row["id"]),
+                )
+                decided += 1
+        return decided
+
+    def reclassify_statement_movements(self, kinds: dict[str, str]) -> int:
+        """Correct the kind of statement movements still pending, after the reader improved.
+
+        Decided movements are never touched: a person's decision stands. Each change is
+        audited with its previous kind.
+        """
+        changed = 0
+        with self.connect() as db:
+            for event_id, kind in kinds.items():
+                row = db.execute(
+                    "SELECT kind FROM transactions WHERE id=? AND id LIKE 'stmt:%' AND decision IS NULL",
+                    (event_id,),
+                ).fetchone()
+                if row is None or row["kind"] == kind:
+                    continue
+                db.execute("UPDATE transactions SET kind=? WHERE id=?", (kind, event_id))
+                self._audit(db, "statement-reclassify", event_id, f"{row['kind']} -> {kind}")
+                changed += 1
+        return changed
 
     def set_destinations(self, destinations: dict[str, str]) -> int:
         """Record destinations read again from the original notices.
@@ -1042,8 +1341,244 @@ class Store:
             month["net"] = month["personal"] + month["family"] - month["third_party"]
         return totals
 
+    def update_reconciled_coverage(self, today: date) -> dict[str, list[str]]:
+        """Mark each closed month that the statements fully reconcile; undo it when that stops.
+
+        A month is reconciled when every product with movements (savings, cards and
+        Fiducuenta) of any owner that had started by then has statements covering each of its days,
+        none of them left a movement unmatched, and the month has neither pending
+        decisions nor notices in the review queue, for any owner. A person's review is
+        never replaced. Only closed months (before today's) are considered.
+        """
+        current = today.strftime("%Y-%m")
+        with self.connect() as db:
+            self._register_card_series(db)
+            periods: dict[tuple[str, str, str], list[tuple[date, date, int]]] = {}
+            for row in db.execute(
+                "SELECT owner,product,suffix,period_start,period_end,missing FROM statement_checks",
+            ):
+                if row["product"] in COVERAGE_PRODUCTS:
+                    periods.setdefault((row["owner"], row["product"], row["suffix"]), []).append((
+                        date.fromisoformat(row["period_start"]), date.fromisoformat(row["period_end"]),
+                        row["missing"],
+                    ))
+            periods, names, unanswered = self._join_card_series(db, periods)
+            status = {row["month"]: row["status"] for row in db.execute("SELECT month,status FROM coverage")}
+            months = set(status) | {
+                row[0] for row in db.execute("SELECT DISTINCT substr(day,1,7) FROM transactions")
+            }
+            # A month the statements cover may have no movement at all and still be complete.
+            for rows in periods.values():
+                for start, end, _ in rows:
+                    day = start.replace(day=1)
+                    while day <= end:
+                        months.add(day.strftime("%Y-%m"))
+                        day = (day + timedelta(days=32)).replace(day=1)
+            changed: dict[str, list[str]] = {"reconciled": [], "revoked": []}
+            for month in sorted(m for m in months if MONTH.fullmatch(m) and m < current):
+                reason, used, owners = self._reconcile_month(db, month, periods, names, unanswered)
+                if reason is None and status.get(month) not in {"reviewed", "reconciled"}:
+                    note = (
+                        f"Conciliado automaticamente con {used} extractos de {owners}: todos sus "
+                        "movimientos coinciden, sin pendientes ni avisos en cola de ningun titular."
+                    )
+                    db.execute(
+                        """INSERT INTO coverage VALUES (?,'reconciled',?) ON CONFLICT(month)
+                        DO UPDATE SET status='reconciled',note=excluded.note""", (month, note),
+                    )
+                    self._audit(db, "coverage-reconciled", month, f"{used} extractos")
+                    changed["reconciled"].append(month)
+                elif reason is not None and status.get(month) in {"partial", "unverified"}:
+                    # The note tells why the month is not reconciled yet; the status stays.
+                    db.execute(
+                        "UPDATE coverage SET note=? WHERE month=?",
+                        (f"Sin conciliar con los extractos: {reason}.", month),
+                    )
+                elif reason is not None and status.get(month) == "reconciled":
+                    db.execute(
+                        "UPDATE coverage SET status='partial',note=? WHERE month=?",
+                        (f"La conciliacion automatica dejo de cumplirse: {reason}.", month),
+                    )
+                    self._audit(db, "coverage-reconcile-revoked", month, reason)
+                    changed["revoked"].append(month)
+        return changed
+
+    @staticmethod
+    def _card_firsts(db: sqlite3.Connection) -> dict[tuple[str, str, str], str]:
+        """First statement start of each card number, per owner."""
+        return {
+            (row["owner"], row["product"], row["suffix"]): row["first"] for row in db.execute(
+                f"""SELECT owner,product,suffix,MIN(period_start) AS first FROM statement_checks
+                WHERE product IN ({",".join("?" * len(CARD_PRODUCTS))}) GROUP BY owner,product,suffix""",
+                sorted(CARD_PRODUCTS),
+            )
+        }
+
+    def _register_card_series(self, db: sqlite3.Connection) -> None:
+        """Ask about a card number whose statements start after another card of the same owner.
+
+        It may be that card reissued with a new number, or a new card: only a person
+        knows. Cards seen from the first statements are recorded as cards of their own.
+        """
+        known = {
+            (row["owner"], row["product"], row["suffix"])
+            for row in db.execute("SELECT owner,product,suffix FROM card_series")
+        }
+        firsts = self._card_firsts(db)
+        for key, first in sorted(firsts.items(), key=lambda item: item[1]):
+            if key in known:
+                continue
+            later = any(other[0] == key[0] and other != key and start < first for other, start in firsts.items())
+            db.execute(
+                "INSERT INTO card_series VALUES (?,?,?,?,?)",
+                (*key, None, None) if later else (*key, "", datetime.now(timezone.utc).isoformat()),
+            )
+            if later:
+                self._audit(db, "card-series-question", f"{key[0]}:{key[1]}:*{key[2]}", first)
+
+    def _card_options(self, db: sqlite3.Connection, owner: str, product: str, suffix: str) -> list[dict]:
+        """Earlier cards of the owner that a new card number may continue."""
+        firsts = self._card_firsts(db)
+        first = firsts.get((owner, product, suffix))
+        taken = {
+            row["replaces"] for row in db.execute(
+                "SELECT replaces FROM card_series WHERE owner=? AND replaces<>''", (owner,),
+            )
+        }
+        options = [
+            {"product": key[1], "suffix": key[2], "first": start, "last": db.execute(
+                "SELECT MAX(period_start) FROM statement_checks WHERE owner=? AND product=? AND suffix=?", key,
+            ).fetchone()[0]}
+            for key, start in firsts.items()
+            if key[0] == owner and first is not None and start < first and f"{key[1]}:{key[2]}" not in taken
+        ]
+        # Most likely first: the same brand, then the card whose statements stopped last.
+        options.sort(key=lambda option: option["last"], reverse=True)
+        options.sort(key=lambda option: option["product"] != product)
+        return options
+
+    def card_questions(self) -> list[dict]:
+        """Card numbers waiting for a person to say whether they replace an earlier card."""
+        with self.connect() as db:
+            firsts = self._card_firsts(db)
+            return [
+                {
+                    "owner": row["owner"], "product": row["product"], "suffix": row["suffix"],
+                    "first": firsts.get((row["owner"], row["product"], row["suffix"])),
+                    "options": self._card_options(db, row["owner"], row["product"], row["suffix"]),
+                }
+                for row in db.execute(
+                    "SELECT * FROM card_series WHERE decided_at IS NULL ORDER BY owner,product,suffix",
+                )
+            ]
+
+    def decide_card_series(self, owner: str, product: str, suffix: str, replaces: str | None) -> None:
+        """Record a person's answer: the card replaces an earlier one ('PRODUCT:SUFFIX') or is new (None)."""
+        owner = owner_id(owner)
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT decided_at FROM card_series WHERE owner=? AND product=? AND suffix=?",
+                (owner, product, suffix),
+            ).fetchone()
+            if row is None or row["decided_at"] is not None:
+                raise ValueError("No hay una pregunta pendiente para esa tarjeta.")
+            options = {f"{option['product']}:{option['suffix']}" for option in self._card_options(db, owner, product, suffix)}
+            if replaces is not None and replaces not in options:
+                raise ValueError("La tarjeta elegida no es una tarjeta anterior de ese titular.")
+            db.execute(
+                "UPDATE card_series SET replaces=?,decided_at=? WHERE owner=? AND product=? AND suffix=?",
+                (replaces or "", datetime.now(timezone.utc).isoformat(), owner, product, suffix),
+            )
+            self._audit(
+                db, "card-series-local-user", f"{owner}:{product}:*{suffix}",
+                f"reemplaza {replaces}" if replaces else "tarjeta nueva",
+            )
+
+    @staticmethod
+    def _join_card_series(
+        db: sqlite3.Connection, periods: dict[tuple[str, str, str], list[tuple[date, date, int]]],
+    ) -> tuple[dict, dict[tuple[str, str, str], str], set[tuple[str, str, str]]]:
+        """One series per card across its number changes, its display name, and unanswered numbers."""
+        links, unanswered = {}, set()
+        for row in db.execute("SELECT * FROM card_series"):
+            key = (row["owner"], row["product"], row["suffix"])
+            if row["decided_at"] is None:
+                unanswered.add(key)
+            elif row["replaces"]:
+                links[key] = (row["owner"], *row["replaces"].split(":", 1))
+
+        def root(key: tuple[str, str, str]) -> tuple[str, str, str]:
+            seen = {key}
+            while key in links and links[key] not in seen:
+                key = links[key]
+                seen.add(key)
+            return key
+
+        joined: dict[tuple[str, str, str], list[tuple[date, date, int]]] = {}
+        members: dict[tuple[str, str, str], list[tuple[str, str, str]]] = {}
+        for key in sorted(periods, key=lambda k: min(start for start, _, _ in periods[k])):
+            joined.setdefault(root(key), []).extend(periods[key])
+            members.setdefault(root(key), []).append(key)
+        names = {
+            key: " / ".join(f"{product} *{suffix}" for _, product, suffix in parts)
+            + f" de {OWNERS.get(key[0], key[0])}"
+            for key, parts in members.items()
+        }
+        return joined, names, unanswered
+
+    @staticmethod
+    def _reconcile_month(
+        db: sqlite3.Connection, month: str, periods: dict[tuple[str, str, str], list[tuple[date, date, int]]],
+        names: dict[tuple[str, str, str], str] | None = None, unanswered: set[tuple[str, str, str]] = frozenset(),
+    ) -> tuple[str | None, int, str]:
+        """Why the month is not reconciled (None when it is), how many statements back it and whose."""
+        first = date.fromisoformat(month + "-01")
+        last = date(first.year + first.month // 12, first.month % 12 + 1, 1) - timedelta(days=1)
+        required = {key: rows for key, rows in periods.items() if min(start for start, _, _ in rows) <= last}
+        if not required:
+            return "no hay extractos para el mes", 0, ""
+        used = 0
+        next_first = last + timedelta(days=1)
+        asked = sorted(unanswered & set(required))
+        if asked:
+            owner, product, suffix = asked[0]
+            return (
+                f"falta decidir en Decisiones si la tarjeta {product} *{suffix} de "
+                f"{OWNERS.get(owner, owner)} es nueva o reemplaza a otra"
+            ), 0, ""
+        for (owner, product, suffix), rows in required.items():
+            name = (names or {}).get((owner, product, suffix)) or f"{product} *{suffix} de {OWNERS.get(owner, owner)}"
+            if product in CARD_PRODUCTS:
+                # A card statement carries the month of its cut-off date but lists the
+                # movements since the previous cut-off, in the middle of the month before.
+                # The statements of this month and the next one hold every day of it.
+                overlapping = [row for row in rows if row[0] in (first, next_first)]
+                for needed in (first, next_first):
+                    if not any(row[0] == needed for row in overlapping):
+                        return f"falta el extracto {needed:%Y-%m} de {name}", 0, ""
+            else:
+                overlapping = [row for row in rows if row[0] <= last and row[1] >= first]
+                day = first
+                while day <= last:
+                    if not any(start <= day <= end for start, end, _ in overlapping):
+                        return f"falta el extracto de {name} que cubre el {day.isoformat()}", 0, ""
+                    day += timedelta(days=1)
+            if any(missing for _, _, missing in overlapping):
+                return f"el extracto de {name} tiene movimientos sin coincidir", 0, ""
+            used += len(overlapping)
+        if db.execute(
+            "SELECT 1 FROM transactions WHERE day LIKE ? AND decision IS NULL LIMIT 1", (month + "-%",),
+        ).fetchone():
+            return "hay movimientos pendientes de decision", 0, ""
+        if db.execute(
+            "SELECT 1 FROM extraction_failures WHERE day LIKE ? LIMIT 1", (month + "-%",),
+        ).fetchone():
+            return "hay avisos en la cola de revision", 0, ""
+        owners = sorted({OWNERS.get(owner, owner) for owner, _, _ in required})
+        return None, used, " y ".join(owners)
+
     def coverage(self, month: str, status: str, note: str) -> None:
-        if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        if not MONTH.fullmatch(month):
             raise ValueError("Mes invalido.")
         if status not in {"partial", "unverified", "reviewed"}:
             raise ValueError("Estado de cobertura invalido.")
@@ -1089,6 +1624,14 @@ class Store:
                     )
                 ],
                 "coverage": [dict(row) for row in db.execute("SELECT * FROM coverage ORDER BY month")],
+                # Proposals only for movements still pending; a decision makes them irrelevant.
+                "category_suggestions": {
+                    row["event_id"]: {"category": row["category"], "source": row["source"]}
+                    for row in db.execute(
+                        """SELECT s.* FROM category_suggestions s JOIN transactions t
+                        ON t.id=s.event_id WHERE t.decision IS NULL""",
+                    )
+                },
                 "rules": [
                     dict(row) for row in db.execute("SELECT * FROM merchant_rules ORDER BY pattern")
                 ],
@@ -1097,6 +1640,7 @@ class Store:
                         "SELECT * FROM extraction_failures ORDER BY day,received,message_id",
                     )
                 ],
+                "card_questions": self.card_questions(),
             }
 
     def summary(self, month: str, owner: str = "santiago") -> str:

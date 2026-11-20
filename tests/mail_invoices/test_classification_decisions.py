@@ -111,7 +111,7 @@ def test_corrupt_store_is_reported_not_ignored(tmp_path):
 
 
 def test_default_path_is_the_project_local_folder_unless_overridden(monkeypatch, tmp_path):
-    from mail_invoices.storage import REPO_ROOT
+    from shared.storage import REPO_ROOT
 
     monkeypatch.setenv("AGENTE_LOCAL_DATA", str(tmp_path))
     assert decisions_path() == tmp_path / "MailInvoiceAgent" / "classification-decisions.sqlite3"
@@ -153,31 +153,23 @@ def test_simulation_automatically_loads_local_decisions(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTE_LOCAL_DATA", str(tmp_path))
     store = ClassificationDecisionStore(decisions_path())
     store.save([example()], "Santi", ["Salud"])
-    executable = tmp_path / "synthetic.exe"
-    executable.touch()
-    page = SimpleNamespace(wait_for_selector=lambda *a, **kw: None)
     closed = []
-    context = SimpleNamespace(close=lambda: closed.append(True))
-    playwright = SimpleNamespace(
-        chromium=SimpleNamespace(launch_persistent_context=lambda *a, **kw: context),
-    )
 
     class Session:
         def __enter__(self):
-            return playwright
+            return SimpleNamespace()
 
         def __exit__(self, *args):
+            closed.append(True)
             return False
 
-    monkeypatch.setattr(classification, "sync_playwright", Session)
-    monkeypatch.setattr(classification, "outlook_page", lambda context: page)
-    monkeypatch.setattr(classification, "discover_folders", lambda page: [SimpleNamespace(path="Salud")])
+    monkeypatch.setattr(classification, "open_mailbox", lambda settings: Session())
+    monkeypatch.setattr(classification, "discover_folders", lambda mailbox: [SimpleNamespace(path="Salud")])
     monkeypatch.setattr(classification, "read_history", lambda *a: [])
-    monkeypatch.setattr(classification, "reopen_outlook", lambda *a: None)
-    monkeypatch.setattr(classification, "scan_inbox", lambda *a: [])
+    monkeypatch.setattr(classification, "scan_candidates", lambda *a: [])
     settings = MailSettings(
-        executable=executable, workbook=tmp_path / "unused.xlsx", backup_dir=tmp_path,
-        sheet="Hoja1", profile_dir=tmp_path, batch_limit=1,
+        graph_client_id="11111111-2222-3333-4444-555555555555", workbook=tmp_path / "unused.xlsx",
+        backup_dir=tmp_path, sheet="Hoja1", batch_limit=1,
         tesseract_executable=tmp_path / "missing.exe",
     )
     report = classification.simulate_classification(settings, 30, [], False)

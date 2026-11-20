@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from mail_invoices.local_model import JsonModel
+from shared.local_model import JsonModel
 
 MAX_EXAMPLES = 40
 MIN_HISTORY_MATCHES = 2
@@ -160,6 +161,40 @@ def _from_history(
     return None
 
 
+def _supplier_key(name: str) -> str:
+    """Supplier name without accents, case or extra spaces, to compare confirmed decisions."""
+    decomposed = unicodedata.normalize("NFKD", name)
+    plain = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return " ".join(plain.upper().split())
+
+
+def _suppliers(message: IncomingMessage) -> dict[str, str]:
+    """Supplier key -> name as written, for the message and each of its invoices."""
+    names = [message.supplier, *(invoice.get("supplier", "") for invoice in message.invoices)]
+    return {_supplier_key(name): _clean(name, 80) for name in names if _supplier_key(name)}
+
+
+def _from_confirmed_suppliers(
+    message: IncomingMessage, folders: set[str], examples: Sequence[ConfirmedExample]
+) -> FolderSuggestion | None:
+    """The folder the person always chose for these suppliers, without asking the model.
+
+    Only confirmed decisions count, and only into folders that still exist. If the
+    message has no known supplier, or its suppliers went to different folders, the
+    model decides as before.
+    """
+    suppliers = _suppliers(message)
+    chosen = {
+        example.folder for example in examples
+        if example.folder in folders and suppliers.keys() & _suppliers(example.message).keys()
+    }
+    if len(chosen) != 1:
+        return None
+    folder = chosen.pop()
+    names = ", ".join(sorted(suppliers.values())[:2])
+    return FolderSuggestion(folder, "confirmed", f"tus decisiones anteriores con {names}")
+
+
 def _examples(message: IncomingMessage, history: Sequence[FiledMessage]) -> list[dict[str, str]]:
     domain = _domain(message.sender)
     related = [m for m in history if domain and _domain(m.sender) == domain]
@@ -196,6 +231,9 @@ def suggest_folder(
         learned = _from_history(message, available, history)
         if learned is not None:
             return learned
+    confirmed = _from_confirmed_suppliers(message, available, confirmed_examples)
+    if confirmed is not None:
+        return confirmed
     if model is None:
         reason = (
             "Clasificación por contenido requiere revisión o modelo local"

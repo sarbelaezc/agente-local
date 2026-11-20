@@ -9,7 +9,7 @@ from openpyxl import Workbook, load_workbook
 
 from mail_invoices import batch_workflow
 from mail_invoices.batch_state import BatchMessage, BatchStateStore, batch_lock, batch_scope
-from mail_invoices.batch_review_ui import prepare_pdf_preview
+from mail_invoices.batch_review import prepare_pdf_preview
 from mail_invoices.classification_decisions import ClassificationDecisionStore
 from mail_invoices.documents import InvoiceCandidate
 from mail_invoices.folders import IncomingMessage
@@ -82,9 +82,9 @@ def test_invalid_approval_batch_is_atomic(stores):
 
 
 def test_scope_changes_when_workbook_or_profile_changes(tmp_path):
-    settings = MailSettings(tmp_path / "opera", tmp_path / "profile", tmp_path / "book", tmp_path, "Hoja1", 3)
+    settings = MailSettings("11111111-2222-3333-4444-555555555555", tmp_path / "book", tmp_path, "Hoja1", 3)
     assert batch_scope(settings) != batch_scope(replace(settings, workbook=tmp_path / "other"))
-    assert batch_scope(settings) != batch_scope(replace(settings, profile_dir=tmp_path / "other"))
+    assert batch_scope(settings) != batch_scope(replace(settings, graph_client_id="99999999-2222-3333-4444-555555555555"))
 
 
 def test_lock_prevents_concurrent_execution_and_releases_after_exception(tmp_path):
@@ -396,44 +396,41 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
     stores, monkeypatch, tmp_path, resume,
 ):
     journal, workbook, _ = stores
-    settings = MailSettings(tmp_path / "opera", tmp_path, workbook.path, tmp_path / "backups", "Hoja1", 20)
-    settings.executable.write_bytes(b"")
+    settings = MailSettings("11111111-2222-3333-4444-555555555555", workbook.path, tmp_path / "backups", "Hoja1", 20)
     journal = BatchStateStore(journal.path, batch_scope(settings))
     journal.save([approved(f"TEST-{index}") for index in range(1, 5)])
     monkeypatch.setattr(batch_workflow, "batch_state_path", lambda: journal.path)
     monkeypatch.setattr(batch_workflow, "decisions_path", lambda: tmp_path / "decisions.sqlite3")
     scanned = []
-    page = SimpleNamespace(wait_for_selector=lambda *a, **kw: None)
+    mailbox = SimpleNamespace()
 
-    def simulate(config, days, history, use_model, *, include_review_items, attachment_dir, page):
+    def simulate(config, days, history, use_model, *, include_review_items, attachment_dir, mailbox):
         assert config.batch_limit == 2 and include_review_items
         assert attachment_dir.is_dir()
-        assert page is shared_page
+        assert mailbox is shared_mailbox
         scanned.append(True)
         return {"folders": ["Salud"], "messages": []}
 
-    shared_page = page
+    shared_mailbox = mailbox
     monkeypatch.setattr(batch_workflow, "simulate_classification", simulate)
     mock_folders(monkeypatch)
     closed, launched = [], []
-    context = SimpleNamespace(close=lambda: closed.append(True))
 
     class Session:
         def __enter__(self):
-            return SimpleNamespace(chromium=SimpleNamespace(
-                launch_persistent_context=lambda *a, **kw: launched.append(True) or context,
-            ))
+            launched.append(True)
+            return mailbox
 
         def __exit__(self, *args):
+            closed.append(True)
             return False
 
-    monkeypatch.setattr(batch_workflow, "sync_playwright", Session)
-    monkeypatch.setattr(batch_workflow, "outlook_page", lambda ctx: page)
+    monkeypatch.setattr(batch_workflow, "open_mailbox", lambda config: Session())
 
     review_dirs = []
 
     class Review:
-        def __init__(self, messages, folders, config, journal, attachment_dir):
+        def __init__(self, messages, folders, config, journal, attachment_dir, lan=None):
             assert len(messages) == 2
             assert attachment_dir.is_dir()
             review_dirs.append(attachment_dir)
@@ -441,10 +438,18 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
         def run(self):
             return True
 
-    monkeypatch.setattr(batch_workflow, "BatchReviewWindow", Review)
+        def executing(self):
+            phases.append("executing")
+
+        def finish(self, result):
+            phases.append(("finish", result["summary"]))
+
+    phases = []
+    monkeypatch.setattr(batch_workflow, "BatchReviewPanel", Review)
     executed = []
 
-    def execute(message, journal, store, decisions, page):
+    def execute(message, journal, store, decisions, session):
+        assert session is mailbox
         executed.append(message.conversation)
         message.state = "moved"
         journal.save([message])
@@ -456,6 +461,8 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
     assert closed == [True] and launched == [True]
     assert not review_dirs[0].exists()
     assert len([m for m in journal.load() if m.state == "approved"]) == 2
+    # The panel shows progress and then the outcome of the executed messages.
+    assert phases == ["executing", ("finish", "2 archivados y verificados")]
 
 
 @pytest.mark.parametrize("cancel", [True, False])
@@ -463,8 +470,7 @@ def test_batch_cancellation_or_failure_stops_other_durable_approvals(
     stores, monkeypatch, tmp_path, cancel,
 ):
     journal, workbook, _ = stores
-    settings = MailSettings(tmp_path / "opera", tmp_path, workbook.path, tmp_path, "Hoja1", 3)
-    settings.executable.write_bytes(b"")
+    settings = MailSettings("11111111-2222-3333-4444-555555555555", workbook.path, tmp_path, "Hoja1", 3)
     journal = BatchStateStore(journal.path, batch_scope(settings))
     journal.save([approved("TEST-1"), approved("TEST-2")])
     original = workbook.path.read_bytes()
@@ -472,30 +478,33 @@ def test_batch_cancellation_or_failure_stops_other_durable_approvals(
     monkeypatch.setattr(batch_workflow, "decisions_path", lambda: tmp_path / "decisions.sqlite3")
     mock_folders(monkeypatch)
     closed, attempted = [], []
-    page = SimpleNamespace(wait_for_selector=lambda *a, **kw: None)
-    context = SimpleNamespace(close=lambda: closed.append(True))
 
     class Session:
         def __enter__(self):
-            return SimpleNamespace(chromium=SimpleNamespace(
-                launch_persistent_context=lambda *a, **kw: context,
-            ))
+            return SimpleNamespace()
 
         def __exit__(self, *args):
+            closed.append(True)
             return False
 
     class Review:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             pass
 
         def run(self):
             return not cancel
 
-    monkeypatch.setattr(batch_workflow, "sync_playwright", Session)
-    monkeypatch.setattr(batch_workflow, "outlook_page", lambda ctx: page)
-    monkeypatch.setattr(batch_workflow, "BatchReviewWindow", Review)
+        def executing(self):
+            pass
 
-    def execute(message, journal, store, decisions, page):
+        def finish(self, result):
+            finished.append(result)
+
+    finished = []
+    monkeypatch.setattr(batch_workflow, "open_mailbox", lambda config: Session())
+    monkeypatch.setattr(batch_workflow, "BatchReviewPanel", Review)
+
+    def execute(message, journal, store, decisions, session):
         attempted.append(message.conversation)
         message.last_error = "Synthetic failure"
         journal.save([message])
@@ -504,6 +513,7 @@ def test_batch_cancellation_or_failure_stops_other_durable_approvals(
     monkeypatch.setattr(batch_workflow, "execute_message", execute)
     assert batch_workflow.process_invoice_batch(settings, 30, False, 3, resume=True) == 1
     assert attempted == ([] if cancel else ["TEST-1"])
+    assert [result["failed"] for result in finished] == ([] if cancel else [True])
     assert journal.load()[1].state == "approved"
     assert workbook.path.read_bytes() == original
     assert closed == [True]
@@ -513,7 +523,7 @@ def test_batch_cancellation_or_failure_stops_other_durable_approvals(
 def test_cli_routes_batch_modes(monkeypatch, tmp_path, flag):
     from mail_invoices import main
 
-    settings = MailSettings(tmp_path / "opera", tmp_path, tmp_path / "book", tmp_path, "Hoja1", 20)
+    settings = MailSettings("11111111-2222-3333-4444-555555555555", tmp_path / "book", tmp_path, "Hoja1", 20)
     monkeypatch.setattr(main, "load_settings", lambda path: settings)
     monkeypatch.setattr("sys.argv", ["mail-invoices", flag, "--batch-size", "2", "--days", "7", "--no-model"])
     calls = []
@@ -522,10 +532,22 @@ def test_cli_routes_batch_modes(monkeypatch, tmp_path, flag):
         lambda *args, **kw: calls.append((args, kw)) or 0,
     )
     assert main.main() == 0
-    assert calls == [((settings, 7, False, 2), {"resume": flag == "--resume-invoice-batch"})]
+    assert calls == [((settings, 7, False, 2), {"resume": flag == "--resume-invoice-batch", "lan": False})]
+    monkeypatch.setattr("sys.argv", ["mail-invoices", flag, "--lan"])
+    assert main.main() == 0
+    assert calls[-1][1]["lan"] is True
 
 
-@pytest.mark.parametrize("size", [0, 6])
+def test_cli_opens_only_batches_to_the_network(monkeypatch):
+    from mail_invoices import main
+
+    monkeypatch.setattr("sys.argv", ["mail-invoices", "--classify-invoices", "--lan"])
+    with pytest.raises(SystemExit) as error:
+        main.main()
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("size", [0, 21])
 def test_cli_rejects_unsafe_batch_sizes(monkeypatch, size):
     from mail_invoices import main
 
@@ -533,3 +555,13 @@ def test_cli_rejects_unsafe_batch_sizes(monkeypatch, size):
     with pytest.raises(SystemExit) as error:
         main.main()
     assert error.value.code == 2
+
+
+def test_an_excluded_sender_is_no_longer_shown_unless_already_approved():
+    from dataclasses import replace as copy
+
+    stale = copy(pending("RECIBO"), sender="invoice+statements@mail.anthropic.com", errors=["PDF is not identifiable as an invoice"])
+    running = copy(approved("APROBADO"), sender="invoice+statements@mail.anthropic.com")
+    ready = pending("READY")
+    active = batch_workflow._active_messages([stale, running, ready], 5, ("invoice+statements@mail.anthropic.com",))
+    assert active == [running, ready]

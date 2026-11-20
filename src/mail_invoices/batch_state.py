@@ -27,7 +27,8 @@ def batch_state_path() -> Path:
 
 
 def batch_scope(settings: MailSettings) -> str:
-    identity = f"{settings.profile_dir.resolve()}\n{settings.workbook.resolve()}\n{settings.sheet}"
+    """Batches of one mailbox app, workbook and sheet; records of another scope are never acted on."""
+    identity = f"graph\n{settings.graph_client_id}\n{settings.workbook.resolve()}\n{settings.sheet}"
     return sha256(identity.casefold().encode("utf-8")).hexdigest()
 
 
