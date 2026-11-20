@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile
 
+from shared.local_panel import remote_device
 from mail_invoices.batch_state import BatchMessage, BatchStateStore
 from mail_invoices.classification_decisions import ClassificationDecisionStore
 from mail_invoices.documents import MAX_FILE_BYTES
@@ -288,6 +289,9 @@ def approve_batch(
     if not isinstance(submission, dict):
         raise ValueError("Aprobacion invalida")
     approver = " ".join(_text(submission.get("approver", ""), "Aprobador", 100).split())
+    # An approval from a paired device of the home network records which one.
+    if approver and remote_device.get():
+        approver = f"{approver} (desde {remote_device.get()})"
     chosen = submission.get("messages", [])
     choices = submission.get("legacy", {})
     if not isinstance(chosen, list) or not isinstance(choices, dict):

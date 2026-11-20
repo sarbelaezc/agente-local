@@ -14,6 +14,7 @@ raíz del proyecto en PowerShell.
 - [8. OCR para PDF escaneados (opcional)](#8-ocr-para-pdf-escaneados-opcional)
 - [9. Tarea programada del cierre (opcional)](#9-tarea-programada-del-cierre-opcional)
 - [10. Carpeta de datos](#10-carpeta-de-datos)
+- [11. Paneles desde otros dispositivos (opcional)](#11-paneles-desde-otros-dispositivos-opcional)
 
 ## 1. Instalar el proyecto
 
@@ -331,3 +332,87 @@ escriben `.local`.
 Los estados de lotes de facturas dependen de la app (`graph_client_id`), el libro
 y la hoja. Si cambias alguno, los lotes guardados dejan de reconocerse; la
 [limpieza de lotes](facturas.md#limpiar-lotes) los borra.
+
+## 11. Paneles desde otros dispositivos (opcional)
+
+Los paneles escuchan solo en tu equipo. Con `-Red` también puedes usarlos desde
+otro computador o un celular de la misma red de casa: consultar y decidir, igual
+que en el equipo. Solo entran los dispositivos que emparejas tú.
+
+**Una vez**
+
+1. Comprueba que la red de tu casa está marcada como **privada** en Windows
+   (Configuración → Red e Internet → la conexión → Tipo de perfil de red). No lo
+   hagas en redes públicas, como las de un café.
+2. Crea la regla del firewall desde una PowerShell abierta **como administrador**:
+
+   ```powershell
+   .\scripts\agente-local.ps1 lan-firewall
+   ```
+
+   Permite la entrada solo a los puertos 8767 (cierre) y 8768 (facturas), solo
+   en redes privadas y solo desde tu subred. Mientras ningún panel se abre con
+   `-Red`, nada escucha en esos puertos. Para quitarla: `lan-firewall -Remove`.
+
+**Cada vez**
+
+1. Abre el panel con `-Red`:
+
+   ```powershell
+   .\scripts\agente-local.ps1 serve -Red      # cierre mensual
+   .\scripts\agente-local.ps1 invoices -Red   # lote de facturas
+   ```
+
+   La terminal muestra la dirección para los otros dispositivos (por ejemplo
+   `https://192.168.1.20:8767/`) y la huella del certificado de la red de casa. Si
+   el equipo no tiene una dirección de red privada, el comando se detiene sin
+   abrir nada.
+2. En el otro dispositivo abre esa dirección. La primera vez, el navegador avisa
+   que no conoce el certificado (ver abajo).
+3. Escribe un nombre para el dispositivo y pulsa **Pedir código**. El código
+   aparece **solo en la terminal del computador**, junto con el nombre y la
+   dirección del dispositivo que lo pidió. Escríbelo en el dispositivo y pulsa
+   **Entrar**.
+
+El código sirve una vez, vence a los 5 minutos y solo vale para el dispositivo
+que lo pidió. Tras 5 códigos fallidos el emparejamiento se bloquea hasta reiniciar
+el panel. Si aparece en la terminal una solicitud que no hiciste, no escribas el
+código y cierra el panel.
+
+La sesión del dispositivo dura 12 horas; después vuelve a pedir un código. Cada
+panel tiene sus propios dispositivos: emparejarse con el cierre no da acceso a
+facturas.
+
+**Certificado de la red de casa**
+
+La conexión va cifrada con un certificado que el agente crea en tu equipo la
+primera vez (`.local\red-local\ca.crt`) y que solo puede respaldar direcciones de
+redes privadas, nunca un sitio de Internet. Instálalo una vez en cada dispositivo
+para que el navegador deje de avisar:
+
+1. En la página de emparejamiento, pulsa **Descargar el certificado**.
+2. Comprueba que la huella que muestra el dispositivo al instalarlo coincide con
+   la de la terminal.
+3. Instálalo como certificado de autoridad (CA). Los menús cambian según la
+   versión: en Android suele estar en Seguridad → Cifrado y credenciales →
+   Instalar un certificado → Certificado de CA; en iPhone se instala como perfil y
+   luego se activa en General → Información → Ajustes de confianza de
+   certificados; en Windows, en «Entidades de certificación raíz de confianza» del
+   usuario.
+
+Sin instalarlo también puedes aceptar el aviso del navegador, pero entonces no hay
+forma de saber si otro equipo de la red se interpone; compara siempre la huella.
+No compartas `ca.key`: es la clave que firma ese certificado.
+
+**Dispositivos emparejados**
+
+```powershell
+.\scripts\agente-local.ps1 devices                     # lista los de cada panel
+.\scripts\agente-local.ps1 devices -Revoke "Celular"   # revoca uno en los dos paneles
+.\scripts\agente-local.ps1 devices -RevokeAll          # revoca todos
+```
+
+La revocación aplica de inmediato, aunque el panel esté abierto. Los cambios
+hechos desde otro dispositivo quedan auditados con su nombre (ver la
+[auditoría del cierre](cierre-mensual.md#auditoría) y el aprobador en
+[facturas](facturas.md#el-panel-de-revisión)).

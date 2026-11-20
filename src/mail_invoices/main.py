@@ -88,6 +88,10 @@ def main() -> int:
         "--no-model", action="store_true", help="Skip the local Ollama field completion"
     )
     parser.add_argument(
+        "--lan", action="store_true",
+        help="With a batch, also open the review panel to paired devices of the home network (HTTPS)",
+    )
+    parser.add_argument(
         "--log-file", type=Path,
         help="This run's log inside the logs folder of the invoice data (the launcher sets it)",
     )
@@ -96,6 +100,8 @@ def main() -> int:
         parser.error("--days must be between 1 and 365")
     if not 1 <= args.batch_size <= 20:
         parser.error("--batch-size must be between 1 and 20")
+    if args.lan and not (args.process_invoice_batch or args.resume_invoice_batch):
+        parser.error("--lan only applies to --process-invoice-batch and --resume-invoice-batch")
     if args.history_folder and not args.classify_invoices:
         parser.error("--history-folder requires --classify-invoices")
     if args.candidate_text is not None and not args.classify_invoices:
@@ -145,6 +151,7 @@ def _run(args: argparse.Namespace) -> int:
 
         return process_invoice_batch(
             settings, args.days, not args.no_model, args.batch_size, resume=args.resume_invoice_batch,
+            lan=args.lan,
         )
     if args.classify_invoices:
         return workflow.classify_invoices(

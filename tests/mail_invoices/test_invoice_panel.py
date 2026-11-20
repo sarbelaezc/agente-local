@@ -24,6 +24,7 @@ from mail_invoices.review import ReviewItem
 from mail_invoices.review_server import ReviewPanel
 from mail_invoices.settings import MailSettings
 from mail_invoices.workbook import InvoiceWorkbook, ReviewedInvoice
+from shared.local_panel import remote_device
 from tests.page_checks import assert_readable
 
 CLIENT_ID = "11111111-2222-3333-4444-555555555555"
@@ -94,6 +95,17 @@ def test_an_approval_saves_the_whole_message_before_any_side_effect(book, journa
     assert [invoice.company for invoice in saved.invoices] == ["Proveedor", "Otra"]
     assert saved.approved_at.endswith("+00:00")
     assert book.path.read_bytes() == original and not book.backup_dir.exists()  # Excel untouched
+
+
+def test_an_approval_from_a_paired_device_records_the_device(book, journal):
+    token = remote_device.set("Celular")
+    try:
+        br.approve_batch([message()], FOLDERS, journal, book, submission(
+            {"id": "m1", "folder": "Salud", "invoices": [fields("FE-1"), fields("FE-2")]},
+        ))
+    finally:
+        remote_device.reset(token)
+    assert journal.load()[0].approver == "Santi (desde Celular)"
 
 
 @pytest.mark.parametrize("chosen,approver,error", [

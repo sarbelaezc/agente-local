@@ -20,6 +20,7 @@ from mail_invoices.graph_mailbox import (
     MailboxError, discover_folders, move_registered_message, open_mailbox, verify_destination,
 )
 from mail_invoices.review_server import ReviewPanel
+from shared.lan_access import LanAccess
 from mail_invoices.settings import MailSettings, is_excluded_sender
 from mail_invoices.workbook import InvoiceWorkbook, WorkbookError
 
@@ -43,7 +44,7 @@ class BatchReviewPanel:
 
     def __init__(
         self, messages: list[BatchMessage], folders: list[str], settings: MailSettings,
-        journal: BatchStateStore, attachment_dir: Path | None,
+        journal: BatchStateStore, attachment_dir: Path | None, lan: LanAccess | None = None,
     ) -> None:
         workbook = InvoiceWorkbook(settings.workbook, settings.backup_dir, settings.sheet)
         view, pdfs = batch_view(messages, folders, settings, attachment_dir, workbook)
@@ -58,7 +59,7 @@ class BatchReviewPanel:
                 raise ValueError(f"No se guardó la aprobación: {error}") from error
             return {"finish": True}
 
-        self.panel = ReviewPanel(lambda: refresh_view(view, messages), {"/api/approve": approve}, pdfs)
+        self.panel = ReviewPanel(lambda: refresh_view(view, messages), {"/api/approve": approve}, pdfs, lan=lan)
 
     def run(self) -> bool:
         approved = self.panel.run()
@@ -166,20 +167,23 @@ def execute_message(
 
 def process_invoice_batch(
     settings: MailSettings, days: int, use_model: bool, batch_size: int, *, resume: bool = False,
+    lan: bool = False,
 ) -> int:
     if not 1 <= batch_size <= MAX_BATCH:
         raise ValueError(f"Los lotes controlados admiten entre 1 y {MAX_BATCH} correos")
+    # Checked before the mailbox opens: a network that is not private stops the run here.
+    network = LanAccess("facturas", announce=progress) if lan else None
     settings.attachments_dir.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix="invoice-batch-", dir=settings.attachments_dir) as run_dir:
         return _process_invoice_batch(
             settings, days, use_model, batch_size, resume=resume,
-            attachment_dir=Path(run_dir),
+            attachment_dir=Path(run_dir), network=network,
         )
 
 
 def _process_invoice_batch(
     settings: MailSettings, days: int, use_model: bool, batch_size: int,
-    *, resume: bool, attachment_dir: Path,
+    *, resume: bool, attachment_dir: Path, network: LanAccess | None = None,
 ) -> int:
     path = batch_state_path()
     with batch_lock(path.with_suffix(".lock")):
@@ -220,7 +224,7 @@ def _process_invoice_batch(
                 print(to_json({"messages": [], "message": "No hay correos pendientes"}))
                 return 1 if missing_identity else 0
             folders = [folder.path for folder in discover_folders(mailbox)]
-            window = BatchReviewPanel(active, folders, settings, journal, attachment_dir)
+            window = BatchReviewPanel(active, folders, settings, journal, attachment_dir, lan=network)
             progress(f"Panel de revisión abierto con {_plural(len(active), 'correo', 'correos')}.")
             if not window.run():
                 progress("Panel cerrado sin ejecutar: no se escribió Excel ni se movió ningún correo.")

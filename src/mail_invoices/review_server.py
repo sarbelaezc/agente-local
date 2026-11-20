@@ -1,8 +1,8 @@
 """Local web panel where a person reviews and approves the invoices of a batch.
 
-It listens on 127.0.0.1 only, on a free port, with the checks every local panel
+It listens on 127.0.0.1, on a free port, with the checks every local panel
 shares (shared.local_panel): exact Host and Origin, a per-run CSRF token and small
-JSON bodies. PDFs are served by a token of this batch, never by path. If the page
+JSON bodies. With `lan`, paired devices of the home network reach it over HTTPS. PDFs are served by a token of this batch, never by path. If the page
 stops checking in (the tab was closed), the review ends without approving.
 """
 from __future__ import annotations
@@ -16,6 +16,7 @@ from http.server import ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
 
+from shared.lan_access import LanAccess, start_in_background
 from shared.local_panel import LocalPanelHandler
 
 PAGE = "review.html"
@@ -40,7 +41,7 @@ class ReviewPanel:
     def __init__(
         self, view: Callable[[], dict], actions: dict[str, Callable[[dict], dict]],
         pdfs: dict[str, Path] | None = None, *, open_browser: Callable[[str], object] | None = None,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = time.monotonic, lan: LanAccess | None = None,
     ) -> None:
         self._view, self._actions = view, actions
         self._pdfs = dict(pdfs or {})
@@ -54,8 +55,10 @@ class ReviewPanel:
         self.approved = False
         self.result: dict = {}
         self._last_seen: float | None = None
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
+        handler = self._handler()
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._network = lan.serve(handler) if lan else None
 
     @property
     def url(self) -> str:
@@ -65,6 +68,8 @@ class ReviewPanel:
 
     def start(self) -> None:
         self._thread.start()
+        if self._network is not None:
+            start_in_background(self._network)
         self._open_browser(self.url)
 
     def wait_for_decision(self, poll: float = 1.0) -> bool:
@@ -102,8 +107,10 @@ class ReviewPanel:
         self.stop()
 
     def stop(self) -> None:
-        self._server.shutdown()
-        self._server.server_close()
+        for server in (self._server, self._network):
+            if server is not None:
+                server.shutdown()
+                server.server_close()
 
     def _decide(self, approved: bool, message: str = "") -> None:
         with self._lock:

@@ -161,6 +161,12 @@ Estos modos no escriben el Excel ni mueven correos. Se ejecutan con Python:
 
 Se abre en el navegador en `http://127.0.0.1:<puerto libre>/` y se cierra al
 terminar, con el mismo estilo del panel del cierre mensual y tema claro u oscuro.
+Con `invoices -Red` también se puede revisar y aprobar desde tus dispositivos
+emparejados de la red de casa, en `https://<dirección del equipo>:8768/` (ver
+[Paneles desde otros dispositivos](configuracion.md#11-paneles-desde-otros-dispositivos-opcional)).
+Una aprobación desde otro dispositivo guarda el aprobador con el dispositivo, por
+ejemplo «Santi (desde Celular)». El lote sigue terminando si ningún dispositivo
+consulta el panel durante 90 segundos.
 
 - **Cada correo es una tarjeta** con sus avisos, la carpeta destino y sus facturas
   editables: empresa, razón social, fecha, valor, número y moneda. El estado solo
@@ -335,3 +341,5 @@ Excel con libros sintéticos.
   panel.
 - Los cambios de presentación del panel (vista previa del valor, carpeta sugerida,
   barra compacta en el móvil) no se han usado todavía con un lote real.
+- Aprobar un lote real desde un celular con `invoices -Red` (probado con
+  pruebas HTTPS sobre una segunda dirección local).

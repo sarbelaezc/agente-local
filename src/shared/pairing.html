@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Emparejar dispositivo</title>
+  <style>
+    :root { --bg: #f6f5f1; --card: #ffffff; --ink: #1f1e1b; --mut: #5f5e57; --line: #d8d6ce; --accent: #1f5f8b; --on-accent: #ffffff; --bad: #a3271f; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #161614; --card: #22221f; --ink: #ecebe6; --mut: #b4b2a9; --line: #3c3b36; --accent: #7fb6dd; --on-accent: #10202c; --bad: #ff9c92; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 26rem; margin: 0 auto; padding: 2rem 1rem; }
+    h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+    p { margin: .5rem 0; }
+    .muted { color: var(--mut); font-size: .9rem; }
+    form { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 1rem; margin: 1rem 0; display: grid; gap: .6rem; }
+    label { font-weight: 600; }
+    input { font: inherit; padding: .65rem .75rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); width: 100%; }
+    input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    button { font: inherit; font-weight: 600; min-height: 44px; border: 0; border-radius: 8px; background: var(--accent); color: var(--on-accent); cursor: pointer; }
+    button[disabled] { opacity: .6; cursor: progress; }
+    [hidden] { display: none !important; }
+    #message { min-height: 1.5rem; }
+    #message.error { color: var(--bad); }
+    code { font-size: .8rem; word-break: break-all; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Emparejar este dispositivo</h1>
+    <p class="muted" id="panel-name">Para entrar al panel desde la red de casa, autoriza este dispositivo con un código que aparece solo en la terminal del computador.</p>
+
+    <form id="request">
+      <label for="name">Nombre de este dispositivo</label>
+      <input id="name" name="name" maxlength="40" autocomplete="off" required placeholder="Ej.: Celular">
+      <button type="submit">Pedir código</button>
+    </form>
+
+    <form id="confirm" hidden>
+      <label for="code">Código de la terminal</label>
+      <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="9" required placeholder="1234 5678">
+      <button type="submit">Entrar</button>
+      <p class="muted">Vence en 5 minutos. Tras 5 códigos fallidos, hay que reiniciar el panel.</p>
+    </form>
+
+    <p id="message" role="status" aria-live="polite"></p>
+
+    <p class="muted">Huella del certificado: <code id="fingerprint">…</code>. Debe coincidir con la que muestra la terminal.
+      <a href="/certificado-red-de-casa.crt">Descargar el certificado</a> para instalarlo una vez en este dispositivo.</p>
+  </main>
+  <script>
+    const message = document.getElementById("message");
+    function say(text, isError) {
+      message.textContent = text;
+      message.className = isError ? "error" : "";
+    }
+    async function post(path, body) {
+      const response = await fetch(path, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "No se pudo completar la solicitud.");
+      return data;
+    }
+    async function submit(form, action) {
+      const button = form.querySelector("button");
+      button.disabled = true;
+      try { await action(); } catch (error) { say(error.message, true); } finally { button.disabled = false; }
+    }
+    document.getElementById("request").addEventListener("submit", (event) => {
+      event.preventDefault();
+      submit(event.target, async () => {
+        await post("/api/pairing/request", { name: document.getElementById("name").value });
+        document.getElementById("confirm").hidden = false;
+        document.getElementById("code").focus();
+        say("Escribe el código que apareció en la terminal del computador.", false);
+      });
+    });
+    document.getElementById("confirm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      submit(event.target, async () => {
+        await post("/api/pairing/confirm", { code: document.getElementById("code").value });
+        say("Dispositivo emparejado. Abriendo el panel…", false);
+        location.replace("/");
+      });
+    });
+    fetch("/api/pairing/info", { cache: "no-store" }).then((r) => r.json()).then((info) => {
+      document.getElementById("fingerprint").textContent = info.fingerprint;
+      const panel = info.panel === "cierre" ? "cierre mensual" : "facturas";
+      document.title = `Emparejar · ${panel}`;
+    }).catch(() => {});
+  </script>
+</body>
+</html>

@@ -430,7 +430,7 @@ def test_batch_orchestrator_limits_execution_and_resumes_without_scan(
     review_dirs = []
 
     class Review:
-        def __init__(self, messages, folders, config, journal, attachment_dir):
+        def __init__(self, messages, folders, config, journal, attachment_dir, lan=None):
             assert len(messages) == 2
             assert attachment_dir.is_dir()
             review_dirs.append(attachment_dir)
@@ -488,7 +488,7 @@ def test_batch_cancellation_or_failure_stops_other_durable_approvals(
             return False
 
     class Review:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             pass
 
         def run(self):
@@ -532,7 +532,19 @@ def test_cli_routes_batch_modes(monkeypatch, tmp_path, flag):
         lambda *args, **kw: calls.append((args, kw)) or 0,
     )
     assert main.main() == 0
-    assert calls == [((settings, 7, False, 2), {"resume": flag == "--resume-invoice-batch"})]
+    assert calls == [((settings, 7, False, 2), {"resume": flag == "--resume-invoice-batch", "lan": False})]
+    monkeypatch.setattr("sys.argv", ["mail-invoices", flag, "--lan"])
+    assert main.main() == 0
+    assert calls[-1][1]["lan"] is True
+
+
+def test_cli_opens_only_batches_to_the_network(monkeypatch):
+    from mail_invoices import main
+
+    monkeypatch.setattr("sys.argv", ["mail-invoices", "--classify-invoices", "--lan"])
+    with pytest.raises(SystemExit) as error:
+        main.main()
+    assert error.value.code == 2
 
 
 @pytest.mark.parametrize("size", [0, 21])

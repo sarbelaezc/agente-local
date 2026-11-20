@@ -10,6 +10,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Iterator
 
+from shared.local_panel import remote_device
 from monthly_close.domain import (
     COUNTERPART_KINDS, DECISIONS, HOUSEHOLD, INCOME_CATEGORIES, INCOME_KINDS, LOAN_DECISIONS, NON_EXPENSES,
     OWNERS, Preferences, clean_text, owner_id,
@@ -207,6 +208,9 @@ class Store:
             # A destination rule may also remember the category chosen with it.
             if "category" not in {row["name"] for row in db.execute("PRAGMA table_info(group_rules)")}:
                 db.execute("ALTER TABLE group_rules ADD COLUMN category TEXT")
+            # The paired device a change came from (-Red); NULL when made on this computer.
+            if "device" not in {row["name"] for row in db.execute("PRAGMA table_info(audit)")}:
+                db.execute("ALTER TABLE audit ADD COLUMN device TEXT")
             if backup is not None:
                 self._audit(db, "migrate-household", self.path.name, backup.name)
 
@@ -252,8 +256,8 @@ class Store:
     @staticmethod
     def _audit(db: sqlite3.Connection, action: str, target: str, value: str) -> None:
         db.execute(
-            "INSERT INTO audit(at,action,target,value) VALUES (?,?,?,?)",
-            (datetime.now(timezone.utc).isoformat(), action, target, value),
+            "INSERT INTO audit(at,action,target,value,device) VALUES (?,?,?,?,?)",
+            (datetime.now(timezone.utc).isoformat(), action, target, value, remote_device.get()),
         )
 
     def seen(self, message_id: str) -> bool:

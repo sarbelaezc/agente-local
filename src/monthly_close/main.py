@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
+from shared.lan_access import LanAccess, start_in_background
 from shared.local_model import LocalModelError, validate_local_url
 from shared.storage import data_root
 from monthly_close.model import OllamaJsonModel
@@ -892,10 +893,19 @@ def run(args: argparse.Namespace) -> None:
             model = None  # Without a valid runtime.json the panel works, minus rule suggestions.
         server = create_server(store, args.port, model)
         print(f"Panel local: http://127.0.0.1:{server.server_port}", flush=True)
+        # The same handler, with its checks, on the private address for paired devices.
+        network = LanAccess("cierre", announce=lambda text: print(text, flush=True)).serve(
+            server.RequestHandlerClass,
+        ) if args.lan else None
+        if network is not None:
+            start_in_background(network)
         try:
             server.serve_forever()
         finally:
             server.server_close()
+            if network is not None:
+                network.shutdown()
+                network.server_close()
         return
     if args.command == "summary":
         month = args.month or datetime.now().strftime("%Y-%m")
@@ -1048,6 +1058,10 @@ def main() -> None:
     parser.add_argument("--from", dest="source_category", help="Con merge-category, categoria que desaparece.")
     parser.add_argument("--to", dest="target_category", help="Con merge-category, categoria que la recibe.")
     parser.add_argument("--port", type=int, default=8766)
+    parser.add_argument(
+        "--lan", action="store_true",
+        help="Con serve, abre tambien el panel a dispositivos emparejados de la red de casa (HTTPS).",
+    )
     parser.add_argument("--start", help="YYYY-MM-DD")
     parser.add_argument("--end", help="YYYY-MM-DD, exclusivo")
     parser.add_argument("--month", help="YYYY-MM")
@@ -1066,6 +1080,8 @@ def main() -> None:
         parser.error("--mailbox solo se permite con login.")
     if args.read_only and args.command not in {"pilot", "scan", "reconcile-statements", "backfill-card-accounts"}:
         parser.error("--read-only solo se permite con pilot, scan, reconcile-statements o backfill-card-accounts.")
+    if args.lan and args.command != "serve":
+        parser.error("--lan solo se permite con serve.")
     data_dir = args.data_dir.expanduser().resolve()
     try:
         with run_log(data_dir, args.command, args.log_file):
