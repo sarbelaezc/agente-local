@@ -2255,10 +2255,11 @@
         const remember = document.createElement("input");
         remember.type = "checkbox";
         remember.id = `group-remember-${decisionCardSequence++}`;
-        // One category for every purchase of the destination: a suggestion shared by all of them,
-        // else the category they already share, else "keep each one's" (sends no category).
+        // One category for every movement when the destination can be decided as an expense:
+        // a suggestion shared by all of them, else the category they already share, else
+        // "keep each one's" (sends no category). Investment-only choices set their own category.
         let groupCategory = null;
-        if (entry.rows.every(tx => tx.kind === "purchase")) {
+        if (options.some(([decision]) => decision === "personal" || decision === "family")) {
           const groupSuggestions = entry.rows.map(tx => categorySuggestions[tx.id]);
           const suggestedSet = new Set(groupSuggestions.map(item => item && item.category));
           const suggested = !isPrevious && suggestedSet.size === 1 ? [...suggestedSet][0] : undefined;

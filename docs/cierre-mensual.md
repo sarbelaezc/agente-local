@@ -130,8 +130,11 @@ pista, con botones que deciden todos sus movimientos a la vez.
 - **Pagos futuros.** «Aplicar también a pagos futuros a este destino» crea una
   regla de destino, que se puede borrar en «Reglas por destino». Sin esa casilla
   no se crea ninguna regla.
-- **Categoría del destino.** Una tarjeta con varias compras tiene el selector
-  «Categoría para los N movimientos (Gasto personal o Familiar)». Al decidir
+- **Categoría del destino.** Una tarjeta con varios movimientos que admiten Gasto
+  personal o Familiar (compras, transferencias como un traslado a Nequi, cuotas
+  de crédito o movimientos sin tipo) tiene el selector «Categoría para los N
+  movimientos (Gasto personal o Familiar)». Los traslados a inversiones no lo
+  tienen: Inversión y Retiro de inversión asignan su propia categoría. Al decidir
   Gasto personal o Familiar, todos toman esa categoría, con la misma validación
   todo o nada y una auditoría por movimiento; las demás decisiones no la usan.
   Muestra la sugerencia común si la pediste, si no la categoría que ya comparten,

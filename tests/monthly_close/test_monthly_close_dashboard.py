@@ -767,3 +767,31 @@ def test_group_category_can_be_set_without_suggestions_or_kept_per_movement(dash
     # "Keep each one's" sends no category, so each movement keeps its own.
     assert saved["mixed:1"] == ("family", "Compras") and saved["mixed:2"] == ("family", "Transporte")
     assert not errors
+
+
+def test_group_category_shows_for_transfers_but_not_for_investments(dashboard):
+    page, store, month, errors = dashboard
+    def movement(event_id, merchant, kind, day):
+        return {
+            "id": event_id, "message_id": "k", "day": f"{month}-0{day}", "merchant": merchant,
+            "account": "Tarjeta A", "amount_minor": 1000000, "currency": "COP", "category": "Compras",
+            "kind": kind, "decision": None, "reason": "Aviso.",
+        }
+    store.import_message("k", [
+        movement("tr:1", "TRASLADO A NEQUI", "transfer", 6), movement("tr:2", "TRASLADO A NEQUI", "transfer", 7),
+        movement("inv:1", "TRASLADO A FONDO", "investment", 6), movement("inv:2", "TRASLADO A FONDO", "investment", 7),
+    ])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    label = re.compile("Categoría para los 2 movimientos")
+    transfer = page.locator("#pending-list .group-card").filter(has_text="TRASLADO A NEQUI")
+    investment = page.locator("#pending-list .group-card").filter(has_text="TRASLADO A FONDO")
+    expect(investment.get_by_label(label)).to_have_count(0)
+    transfer.get_by_label(label).select_option("Transporte")
+    transfer.get_by_role("button", name=re.compile("^Familiar: 2 movimientos")).click()
+    expect(page.locator("#pending-list .group-card").filter(has_text="TRASLADO A NEQUI")).to_have_count(0)
+
+    saved = {row["id"]: (row["decision"], row["category"]) for row in store.state()["transactions"]}
+    assert saved["tr:1"] == saved["tr:2"] == ("family", "Transporte")
+    assert not errors
