@@ -121,9 +121,12 @@ abrir el panel.
 ## Decidir movimientos
 
 La pestaña **Decisión** agrupa los pendientes por **destino**: titular más
-destino del pago (o las palabras del comercio, si el aviso no trae destino). Cada
-tarjeta muestra el número de movimientos, el rango de fechas, el total y una
-pista, con botones que deciden todos sus movimientos a la vez.
+destino del pago (o las palabras del comercio, si el aviso no trae destino), con
+los más antiguos primero: va primero el destino cuyo movimiento más antiguo es más
+viejo, y a igual fecha el de mayor total, para cerrar antes los meses que bloquean
+la conciliación. Cada tarjeta muestra el número de movimientos, el rango de fechas,
+el total y una pista, con botones que deciden todos sus movimientos a la vez.
+«Decisiones anteriores» va del más reciente al más antiguo.
 
 - **Progreso.** Arriba, «Por decidir» muestra los destinos, los movimientos y el
   importe pendientes de la vista, y un botón por titular con sus movimientos por

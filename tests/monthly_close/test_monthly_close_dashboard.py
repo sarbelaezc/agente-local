@@ -834,7 +834,7 @@ def test_focus_moves_to_the_next_pending_card_after_a_decision(dashboard):
         "id": f"f{index}", "message_id": "f", "day": f"{month}-0{index}", "merchant": f"COMERCIO {name}",
         "account": "Tarjeta A", "amount_minor": amount, "currency": "COP", "category": "Compras",
         "kind": "purchase", "decision": None, "reason": "Aviso.",
-    } for index, name, amount in ((6, "UNO", 9000000), (7, "DOS", 8000000))])
+    } for index, name, amount in ((2, "UNO", 9000000), (3, "DOS", 8000000))])
     page.reload()
     page.wait_for_load_state("networkidle")
     page.get_by_role("tab", name=re.compile("Decisi")).click()
@@ -868,4 +868,20 @@ def test_owner_count_buttons_are_readable_and_large_enough_in_both_themes(dashbo
         })""")
         assert len(found) == 2
         assert all(ratio >= 4.5 and height >= 38 for ratio, height in found), (theme, found)
+    assert not errors
+
+
+def test_pending_destinations_are_ordered_oldest_first(dashboard):
+    page, store, month, errors = dashboard
+    store.import_message("o", [{
+        "id": f"o{day}", "message_id": "o", "day": f"{month}-0{day}", "merchant": name,
+        "account": "Tarjeta A", "amount_minor": amount, "currency": "COP", "category": "Compras",
+        "kind": "purchase", "decision": None, "reason": "Aviso.",
+    } for day, name, amount in ((8, "RECIENTE GRANDE", 90000000), (2, "ANTIGUO PEQUENO", 100), (4, "MEDIO", 500))])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    titles = page.locator("#pending-list > article h3").all_inner_texts()
+    order = [title for title in titles if title in {"RECIENTE GRANDE", "ANTIGUO PEQUENO", "MEDIO"}]
+    assert order == ["ANTIGUO PEQUENO", "MEDIO", "RECIENTE GRANDE"]
     assert not errors

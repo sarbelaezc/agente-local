@@ -2221,7 +2221,7 @@
       const decidedValues = new Set(["income", "personal", "family", "investment", "investment_withdrawal", "cash_withdrawal", "exclude", "third_party_payment"]);
       const counterpartKinds = new Set(["transfer", "own_transfer", "income", "unknown", "card_payment", "pse"]);
 
-      // Movements to the same destination of the same member, largest first (or newest first in history).
+      // Movements to the same destination of the same member: pending oldest first, history newest first.
       function groupsOf(rows, newestFirst = false) {
         const groups = new Map();
         rows.forEach(tx => {
@@ -2236,7 +2236,10 @@
         const entries = Array.from(groups.values());
         entries.forEach(entry => entry.rows.sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))));
         const last = entry => String(entry.rows[entry.rows.length - 1].day || "");
-        return entries.sort(newestFirst ? (a, b) => last(b).localeCompare(last(a)) : (a, b) => b.total - a.total);
+        const first = entry => String(entry.rows[0].day || "");
+        // Pending: oldest first, so old months (which block reconciliation) close first; then the largest.
+        return entries.sort(newestFirst ? (a, b) => last(b).localeCompare(last(a))
+          : (a, b) => first(a).localeCompare(first(b)) || b.total - a.total);
       }
 
       // A destination's amount in each movement's own currency; dollar purchases without an
