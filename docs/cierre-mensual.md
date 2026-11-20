@@ -764,6 +764,12 @@ el comercio es el destinatario nombrado, no el banco.
 
 ## Validación de lo que propone Ollama
 
+- **Tarjeta por sus dígitos.** Si el aviso nombra los últimos 4 dígitos de una
+  sola tarjeta de crédito que ya conoces por tus extractos, esa es la cuenta del
+  movimiento, diga lo que diga el modelo (no se aplica a ingresos). Si nombra dos
+  tarjetas conocidas, ninguna, o los dígitos forman parte de un número más largo,
+  queda la cuenta que propone el modelo. Solo cuentan tarjetas de tu configuración
+  y dígitos que no se repiten entre dos tarjetas.
 - **Comercio literal.** El comercio guardado es siempre texto del aviso. Si el
   modelo solo cambia mayúsculas, espacios o signos, se recupera la forma del
   aviso. En avisos sin comercio (por ejemplo, un retiro del fondo), se conserva el
@@ -876,6 +882,14 @@ tablas. No cambia importes, decisiones ni auditoría.
 - Las pruebas (`pytest tests\monthly_close`) cubren reglas, importes, zona
   horaria, decisiones, lectores simulados de Graph y Gmail, el lanzador y el panel
   en Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas).
+- Lectura de avisos (2026-11-20), en solo lectura con 60 avisos recientes de
+  Santiago ya importados y decididos: 16 leídos con frase fija y 44 con Ollama
+  (unos 49 s en total), ninguno detenido; importe, fecha y moneda iguales a lo
+  guardado en los 60, y tipo en 58. La cuenta era el punto débil: Ollama nombraba
+  otra tarjeta en unos 17 de 44 avisos (por ejemplo «Visa» para la Mastercard).
+  Con la tarjeta por sus dígitos, la cuenta coincide con los dígitos del aviso en
+  todos los que nombran una tarjeta conocida; 7 movimientos importados antes
+  quedaron con la tarjeta equivocada y no se han corregido.
 
 **Pendiente**
 

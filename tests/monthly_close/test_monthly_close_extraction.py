@@ -364,3 +364,29 @@ def test_duplicate_events_in_thread_stop(preferences, mail):
 
     with pytest.raises(ValueError, match="indistinguibles"):
         extract(mail, preferences, DuplicateModel())
+
+
+CARD_PURCHASE = "Compraste en Tienda con tu tarjeta *0002 $ 1.234,56."
+
+
+def card_mail(body: str) -> Mail:
+    return Mail("message-card", "avisos@example.test", "Compra Tienda", "2026-03-01T02:15:00Z", body)
+
+
+def test_the_card_named_by_its_digits_is_the_account_whatever_the_model_says(preferences):
+    accounts = {**preferences.to_dict(), "accounts": ["Tarjeta A", "Tarjeta B"]}
+    prefs = type(preferences).parse(accounts)
+    known = {"0002": "Tarjeta B", "0009": "Tarjeta A"}
+    event = extract(card_mail(CARD_PURCHASE), prefs, FakeExtractionModel(account="Tarjeta A"), card_accounts=known)[0]
+    assert event["account"] == "Tarjeta B"
+
+
+def test_without_exactly_one_known_card_the_model_account_stays(preferences):
+    prefs = type(preferences).parse({**preferences.to_dict(), "accounts": ["Tarjeta A", "Tarjeta B"]})
+    for body, known in (
+        (CARD_PURCHASE, {"0007": "Tarjeta B"}),  # the notice names no known card
+        ("Compraste en Tienda con tu tarjeta *0002 y *0009 $ 1.234,56.", {"0002": "Tarjeta B", "0009": "Tarjeta A"}),
+        ("Compraste en Tienda con tu tarjeta *10002 $ 1.234,56.", {"0002": "Tarjeta B"}),  # digits of a longer number
+    ):
+        event = extract(card_mail(body), prefs, FakeExtractionModel(account="Tarjeta A"), card_accounts=known)[0]
+        assert event["account"] == "Tarjeta A", body

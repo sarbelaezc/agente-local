@@ -383,6 +383,7 @@ def _walk(
                         {"suffix": c.suffix, "name": c.name}
                         for c in credit_ledger.load_configs(data_dir) if c.owner == box.owner
                     ],
+                    card_accounts=card_accounts(store, box.owner, preferences),
                 )
             except EvidenceError as exc:
                 folder = " / ".join(reader.active_folder or ())
@@ -494,6 +495,21 @@ def require_model(settings: dict) -> None:
         raise LocalModelError("El modelo configurado no esta instalado en el endpoint de Ollama.")
 
 
+def card_accounts(store: Store, owner: str, preferences: Preferences) -> dict[str, str]:
+    """Last four digits -> configured card account, from the member's own statements.
+
+    Only accounts in the configuration count, and digits seen on two different cards
+    are left out, so the notice reading never guesses between them.
+    """
+    labels: dict[str, set[str]] = {}
+    allowed = set(preferences.accounts + preferences.excluded_accounts)
+    for product, suffix in store.card_statement_suffixes(owner):
+        label = statements_module.PRODUCTS.get(product)
+        if label in allowed:
+            labels.setdefault(suffix, set()).add(label)
+    return {suffix: found.pop() for suffix, found in labels.items() if len(found) == 1}
+
+
 def run_pilot(store: Store, data_dir: Path, settings: dict, read_only: bool) -> None:
     """Validate or import at most one visible authorized notice, without a broad scan."""
     preferences = store.preferences()
@@ -512,7 +528,10 @@ def run_pilot(store: Store, data_dir: Path, settings: dict, read_only: bool) -> 
         print("Piloto: aviso ya importado; se conservan las decisiones existentes.")
         return
     model = OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
-    proposals = extract(mail, preferences, model, store.own_account_suffixes("santiago"))
+    proposals = extract(
+        mail, preferences, model, store.own_account_suffixes("santiago"),
+        card_accounts=card_accounts(store, "santiago", preferences),
+    )
     store.import_message(mail.id, proposals)
     for month in {event["day"][:7] for event in proposals}:
         store.coverage(month, "partial", "Piloto de un solo aviso; no representa el gasto del mes.")

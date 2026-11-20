@@ -105,12 +105,14 @@ class EvidenceError(ValueError):
 
 def extract(
     mail: Mail, preferences: Preferences, model: JsonModel, own_accounts: list[str] | None = None,
-    known_credits: list[dict] | None = None,
+    known_credits: list[dict] | None = None, card_accounts: dict[str, str] | None = None,
 ) -> list[dict]:
     """Extract evidence-backed proposals; no model proposal is a human approval.
 
     own_accounts are the last four digits of the person's own accounts (for example a
-    Nequi wallet), so the model can recognise a transfer between them.
+    Nequi wallet), so the model can recognise a transfer between them. card_accounts maps
+    the last four digits of known credit cards to their account: when the notice names
+    exactly one of them, that is the account, whatever the model proposed.
     """
     if mail.sender.lower() not in preferences.approved_senders:
         raise ValueError("Remitente no autorizado. No se envia contenido a Ollama.")
@@ -172,6 +174,7 @@ def extract(
         try:
             proposals = _proposals(
                 result, mail, preferences, received, source, last_attempt=bool(attempt),
+                card_account=_named_card(source, card_accounts or {}),
             )
             if not proposals and not attempt and MONEY_LEFT.search(source):
                 # The notice says money left the account but the model returned nothing:
@@ -455,9 +458,18 @@ def _literal_merchant(merchant: str, source: str, allow_partial: bool) -> str:
     raise EvidenceError("merchant")
 
 
+def _named_card(source: str, card_accounts: dict[str, str]) -> str | None:
+    """The one known card whose last four digits the notice names, if exactly one."""
+    named = {
+        account for suffix, account in card_accounts.items()
+        if re.fullmatch(r"\d{4}", suffix) and re.search(rf"(?<!\d){suffix}(?!\d)", source)
+    }
+    return named.pop() if len(named) == 1 else None
+
+
 def _proposals(
     result: dict, mail: Mail, preferences: Preferences, received: datetime, source: str,
-    last_attempt: bool = False,
+    last_attempt: bool = False, card_account: str | None = None,
 ) -> list[dict]:
     events = result.get("events")
     if not isinstance(events, list) or len(events) > 30:
@@ -492,6 +504,9 @@ def _proposals(
         account = clean_text(event.get("account"), 150)
         if account not in preferences.accounts + preferences.excluded_accounts + ["Desconocida"]:
             raise ValueError("Ollama propuso una cuenta no configurada.")
+        if card_account and event.get("kind") != "income":
+            # The card's own digits in the notice decide; the model often names another card.
+            account = card_account
         currency = clean_text(event.get("currency"), 3).upper()
         if currency != notice_currency(source, preferences.currency):
             raise ValueError("Moneda sin evidencia en el aviso: requiere revision manual.")

@@ -1022,6 +1022,15 @@ class Store:
                         changes += 1
         return changes
 
+    def card_statement_suffixes(self, owner: str) -> list[tuple[str, str]]:
+        """(product, last four digits) of every credit card a member's statements showed."""
+        with self.connect() as db:
+            return [(row["product"], row["suffix"]) for row in db.execute(
+                """SELECT DISTINCT product, suffix FROM statement_checks
+                WHERE owner=? AND product LIKE 'TARJETA%' AND suffix IS NOT NULL AND suffix <> ''""",
+                (owner_id(owner),),
+            )]
+
     def own_account_suffixes(self, owner: str) -> list[str]:
         """Last four digits of the accounts registered as a member's own."""
         with self.connect() as db:
