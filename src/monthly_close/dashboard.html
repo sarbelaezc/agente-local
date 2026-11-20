@@ -2255,24 +2255,33 @@
         const remember = document.createElement("input");
         remember.type = "checkbox";
         remember.id = `group-remember-${decisionCardSequence++}`;
-        // An Ollama suggestion shared by every movement is offered as the destination's category.
-        const groupSuggestions = entry.rows.map(tx => categorySuggestions[tx.id]);
-        const suggestedSet = new Set(groupSuggestions.map(item => item && item.category));
-        const suggested = !isPrevious && suggestedSet.size === 1 ? [...suggestedSet][0] : undefined;
+        // One category for every purchase of the destination: a suggestion shared by all of them,
+        // else the category they already share, else "keep each one's" (sends no category).
         let groupCategory = null;
-        if (typeof suggested === "string" && entry.rows.every(tx => tx.kind === "purchase")) {
+        if (entry.rows.every(tx => tx.kind === "purchase")) {
+          const groupSuggestions = entry.rows.map(tx => categorySuggestions[tx.id]);
+          const suggestedSet = new Set(groupSuggestions.map(item => item && item.category));
+          const suggested = !isPrevious && suggestedSet.size === 1 ? [...suggestedSet][0] : undefined;
+          const currentSet = new Set(entry.rows.map(tx => tx.category));
+          const current = currentSet.size === 1 ? [...currentSet][0] : undefined;
+          const categories = safeArray(state.data.categories).filter(category => typeof category === "string");
+          const selected = typeof suggested === "string" ? suggested : categories.includes(current) ? current : "";
           const field = el("div", "field decision-category");
-          const label = el("label", "", "Categoría para Gasto personal o Familiar");
+          const label = el("label", "", `Categoría para los ${entry.rows.length} movimientos (Gasto personal o Familiar)`);
           label.htmlFor = `group-category-${decisionCardSequence++}`;
           groupCategory = document.createElement("select");
           groupCategory.id = label.htmlFor;
-          safeArray(state.data.categories).filter(category => typeof category === "string").forEach(category => {
+          const keep = el("option", "", "Mantener la de cada movimiento");
+          keep.value = "";
+          groupCategory.append(keep);
+          categories.forEach(category => {
             const option = el("option", "", category);
             option.value = category;
-            option.selected = category === suggested;
             groupCategory.append(option);
           });
-          field.append(label, groupCategory, el("p", "hint", suggestionNotes[groupSuggestions[0].source] || suggestionNotes.ollama));
+          groupCategory.value = selected;
+          field.append(label, groupCategory);
+          if (typeof suggested === "string") field.append(el("p", "hint", suggestionNotes[groupSuggestions[0].source] || suggestionNotes.ollama));
           card.append(field);
         }
         const actions = el("div", "decision-actions");
@@ -2288,7 +2297,7 @@
               owner: entry.owner, group: entry.group, decision,
               scope: isPrevious ? "all" : "pending", remember: remember.checked
             };
-            if (groupCategory && (decision === "personal" || decision === "family")) payload.category = groupCategory.value;
+            if (groupCategory && groupCategory.value && (decision === "personal" || decision === "family")) payload.category = groupCategory.value;
             postJson("/api/decision-group", payload, `Decisión guardada para ${entry.rows.length} movimientos.`);
           });
           actions.append(button);

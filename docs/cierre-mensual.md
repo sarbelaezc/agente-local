@@ -130,6 +130,13 @@ pista, con botones que deciden todos sus movimientos a la vez.
 - **Pagos futuros.** «Aplicar también a pagos futuros a este destino» crea una
   regla de destino, que se puede borrar en «Reglas por destino». Sin esa casilla
   no se crea ninguna regla.
+- **Categoría del destino.** Una tarjeta con varias compras tiene el selector
+  «Categoría para los N movimientos (Gasto personal o Familiar)». Al decidir
+  Gasto personal o Familiar, todos toman esa categoría, con la misma validación
+  todo o nada y una auditoría por movimiento; las demás decisiones no la usan.
+  Muestra la sugerencia común si la pediste, si no la categoría que ya comparten,
+  y si no «Mantener la de cada movimiento», que no cambia ninguna. También está
+  en «Decisiones anteriores» para recategorizar un destino ya decidido.
 - **Uno por uno.** Debajo de cada tarjeta se puede decidir cada movimiento, con
   su categoría y su tasa USD. Decidir un movimiento confirma su categoría.
 - **Corregir.** «Decisiones anteriores» muestra el historial y permite cambiar
@@ -144,16 +151,26 @@ En **Decisión**, «Reglas por comercio» evita repetir la misma decisión: «si
 comercio contiene `PRIMAX`, es Transporte y Familiar». Las escribes tú; Ollama no
 las aplica ni decide nada por su cuenta.
 
-### Sugerencias de Ollama
+- Coinciden por palabras completas, sin distinguir mayúsculas ni signos: `UBER`
+  coincide con `UBER*RIDES`, pero `IPS` no coincide con `TIPS`. Si coinciden
+  varias, gana la más larga.
+- Solo deciden **compras** pendientes como Gasto personal o Familiar con una
+  categoría configurada. También admiten el tipo **Ingreso** para dinero recibido
+  («si quien paga contiene `EMPRESA`, es Nómina»).
+- Nunca deciden transferencias, inversiones, cuentas excluidas, compras en USD sin
+  tasa, movimientos importados de un extracto ni posibles duplicados.
+- Se aplican al importar y al guardar la regla. Nunca cambian una decisión ya
+  tomada; cada decisión automática indica su regla y se puede corregir. Borrar una
+  regla no deshace lo que ya decidió.
 
-El botón **Sugerir reglas** (en «Reglas por comercio») pide a Ollama una categoría
-para los comercios de compras pendientes que ninguna regla cubre (hasta 25, los más
-frecuentes primero). Requiere un `runtime.json` válido y Ollama activo.
+### Sugerencias de reglas
 
-- Ollama solo recibe los nombres de esos comercios y tu lista de categorías; no
-  ve importes, fechas ni cuentas. Su respuesta se trata como texto no confiable:
-  se descartan los comercios que no se le preguntaron y las categorías que no
-  están en tu lista.
+El botón **Sugerir reglas** (en «Reglas por comercio») propone una categoría para
+los comercios de compras pendientes de avisos que ninguna regla cubre (hasta 25,
+los más frecuentes primero). Usa el mismo historial y los mismos ejemplos que las
+[sugerencias de categoría](#sugerencias-de-categoría-para-pendientes). Requiere un
+`runtime.json` válido y Ollama activo.
+
 - Cada sugerencia aparece con el comercio (editable), la categoría y el tipo
   (Gasto personal o Familiar). **Aprobar regla** la guarda como una regla normal,
   con su auditoría; **Descartar** la quita. Ollama no elige Personal o Familiar,
@@ -177,32 +194,17 @@ para las compras pendientes, también las importadas de extractos (que llegan co
   categorías y, como ejemplos, hasta 5 comercios ya decididos por cada uno que
   comparten palabras con él (los números de sucursal no cuentan) o reglas tuyas
   parecidas, con un máximo de 150 ejemplos por consulta. Ollama no recibe todo tu
-  historial ni aprende de él: cada consulta empieza de cero. Ollama solo ve nombres de comercio y categorías, sin importes,
-  fechas ni cuentas. Se descartan las respuestas sobre comercios no preguntados
-  o con categorías fuera de tu lista. No incluye ingresos.
-- Las sugerencias de reglas usan el mismo historial y los mismos ejemplos.
+  historial ni aprende de él: cada consulta empieza de cero.
+- Ollama solo ve nombres de comercio y categorías, sin importes, fechas ni
+  cuentas. Su respuesta se trata como texto no confiable: se descartan los
+  comercios no preguntados y las categorías fuera de tu lista. No incluye ingresos.
 - La sugerencia solo **preselecciona** la categoría, con una nota que dice si
-  viene de tus reglas, de tus decisiones anteriores o de Ollama. En un movimiento
-  queda en su selector de categoría; en la tarjeta de un destino cuyos
-  movimientos tienen la misma sugerencia aparece un selector «Categoría para
-  Gasto personal o Familiar».
-- Nada se guarda hasta que pulsas una decisión. Con Gasto personal o Familiar en la
-  tarjeta del destino, todos sus movimientos toman la categoría elegida, con la
-  misma validación todo o nada y una auditoría por movimiento. Las demás
-  decisiones (No cuenta, Inversión…) no usan esa categoría.
+  viene de tus reglas, de tus decisiones anteriores o de Ollama: en cada
+  movimiento, y en el selector de categoría de la tarjeta del destino cuando
+  todos sus movimientos tienen la misma sugerencia (ver
+  [Decidir movimientos](#decidir-movimientos)).
+- Nada se guarda hasta que pulsas una decisión.
 - Las sugerencias no se conservan: al recargar el panel hay que pedirlas de nuevo.
-
-- Coinciden por palabras completas, sin distinguir mayúsculas ni signos: `UBER`
-  coincide con `UBER*RIDES`, pero `IPS` no coincide con `TIPS`. Si coinciden
-  varias, gana la más larga.
-- Solo deciden **compras** pendientes como Gasto personal o Familiar con una
-  categoría configurada. También admiten el tipo **Ingreso** para dinero recibido
-  («si quien paga contiene `EMPRESA`, es Nómina»).
-- Nunca deciden transferencias, inversiones, cuentas excluidas, compras en USD sin
-  tasa, movimientos importados de un extracto ni posibles duplicados.
-- Se aplican al importar y al guardar la regla. Nunca cambian una decisión ya
-  tomada; cada decisión automática indica su regla y se puede corregir. Borrar una
-  regla no deshace lo que ya decidió.
 
 ## Compras en dólares
 

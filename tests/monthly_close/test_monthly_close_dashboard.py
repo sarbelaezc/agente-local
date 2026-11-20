@@ -722,7 +722,9 @@ def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(da
     page.wait_for_load_state("networkidle")
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     page.get_by_role("button", name="Sugerir categorías con Ollama").click()
-    group_select = page.get_by_label("Categoría para Gasto personal o Familiar")
+    group_select = page.locator("#pending-list .group-card").filter(has_text="FLYPASS PEAJE").get_by_label(
+        re.compile("Categoría para los 2 movimientos"),
+    )
     expect(group_select).to_have_value("Transporte")
     expect(page.get_by_text("Sugerida por tus decisiones anteriores de este comercio").first).to_be_visible()
     assert all(row["decision"] is None for row in store.state()["transactions"] if row["id"].startswith("stmt:"))
@@ -730,4 +732,38 @@ def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(da
     expect(page.get_by_role("status").filter(has_text="2 movimientos")).to_be_visible()
     saved = {row["id"]: (row["decision"], row["category"]) for row in store.state()["transactions"]}
     assert saved["stmt:6"] == saved["stmt:7"] == ("family", "Transporte")
+    assert not errors
+
+
+def test_group_category_can_be_set_without_suggestions_or_kept_per_movement(dashboard):
+    page, store, month, errors = dashboard
+    def purchase(event_id, merchant, category, day):
+        return {
+            "id": event_id, "message_id": "g", "day": f"{month}-0{day}", "merchant": merchant,
+            "account": "Tarjeta A", "amount_minor": 1000000, "currency": "COP", "category": category,
+            "kind": "purchase", "decision": None, "reason": "Extracto.",
+        }
+    store.import_message("g", [
+        purchase("same:1", "PEAJE NORTE", "Compras", 6), purchase("same:2", "PEAJE NORTE", "Compras", 7),
+        purchase("mixed:1", "TIENDA SOL", "Compras", 6), purchase("mixed:2", "TIENDA SOL", "Transporte", 7),
+    ])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    same = page.locator(".group-card").filter(has_text="PEAJE NORTE")
+    mixed = page.locator(".group-card").filter(has_text="TIENDA SOL")
+    expect(same.get_by_label(re.compile("Categoría para los 2 movimientos"))).to_have_value("Compras")
+    expect(mixed.get_by_label(re.compile("Categoría para los 2 movimientos"))).to_have_value("")
+
+    same.get_by_label(re.compile("Categoría para los 2 movimientos")).select_option("Transporte")
+    same.get_by_role("button", name=re.compile("^Gasto personal: 2 movimientos")).click()
+    expect(page.get_by_role("status").filter(has_text="2 movimientos")).to_be_visible()
+    mixed = page.locator(".group-card").filter(has_text="TIENDA SOL")
+    mixed.get_by_role("button", name=re.compile("^Familiar: 2 movimientos")).click()
+    expect(page.locator(".group-card").filter(has_text="TIENDA SOL")).to_have_count(1)
+
+    saved = {row["id"]: (row["decision"], row["category"]) for row in store.state()["transactions"]}
+    assert saved["same:1"] == saved["same:2"] == ("personal", "Transporte")
+    # "Keep each one's" sends no category, so each movement keeps its own.
+    assert saved["mixed:1"] == ("family", "Compras") and saved["mixed:2"] == ("family", "Transporte")
     assert not errors
