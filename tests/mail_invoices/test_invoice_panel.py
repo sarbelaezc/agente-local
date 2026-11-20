@@ -256,6 +256,24 @@ def test_the_server_answers_only_loopback_requests_with_its_token(tmp_path):
         panel.stop()
 
 
+def test_rejected_requests_with_a_body_always_get_their_403():
+    # The body of a rejected request is read and dropped: otherwise Windows can reset the
+    # connection and the client sees a network error instead of the refusal.
+    panel = started(actions={"/api/approve": lambda raw: {"finish": True}})
+    try:
+        with httpx.Client(trust_env=False) as client:
+            headers = {"Origin": "http://evil.example", "X-CSRF-Token": panel._csrf, "Content-Type": "application/json"}
+            body = json.dumps({"relleno": "x" * 20000})
+            statuses = [
+                client.post(panel.url + "api/approve", content=body, headers=headers).status_code
+                for _ in range(300)
+            ]
+        assert statuses == [403] * 300
+        assert not panel._decided.is_set()
+    finally:
+        panel.stop()
+
+
 def test_an_approval_ends_the_review_and_later_actions_are_refused():
     panel = started(actions={"/api/approve": lambda raw: {"finish": True}})
     try:

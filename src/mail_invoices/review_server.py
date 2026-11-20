@@ -144,6 +144,20 @@ class ReviewPanel:
                 self.end_headers()
                 self.wfile.write(payload)
 
+            def discard_body(self) -> None:
+                """Read and drop a rejected request's body, within the usual limit.
+
+                Closing a socket with unread data makes Windows reset the connection, so the
+                client would see a network error instead of the 403. Nothing read is used.
+                """
+                self.close_connection = True
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    return
+                if 0 < length <= MAX_BODY and self.headers.get("Transfer-Encoding") is None:
+                    self.rfile.read(length)
+
             def json_response(self, status: int, value: dict) -> None:
                 self.respond(status, json.dumps(value, ensure_ascii=False).encode(), "application/json; charset=utf-8")
 
@@ -181,6 +195,7 @@ class ReviewPanel:
                     or self.headers.get("Content-Type", "").split(";")[0] != "application/json"
                     or self.headers.get("Transfer-Encoding") is not None
                 ):
+                    self.discard_body()
                     self.json_response(403, {"error": "Solicitud local no autorizada."})
                     return
                 try:
