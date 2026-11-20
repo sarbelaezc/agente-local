@@ -16,6 +16,22 @@ from monthly_close.store import Store
 RECONCILE_AFTER = {"/api/decision", "/api/decision-group", "/api/failure/dismiss", "/api/card-series"}
 
 
+def required_texts(raw: dict, *names: str, error: str) -> tuple:
+    """The named fields of a request, all text; otherwise the request is refused."""
+    values = tuple(raw.get(name) for name in names)
+    if not all(isinstance(value, str) for value in values):
+        raise ValueError(error)
+    return values
+
+
+def optional_text(raw: dict, name: str, error: str) -> str | None:
+    """An optional request field: missing, or text."""
+    value = raw.get(name)
+    if value is not None and not isinstance(value, str):
+        raise ValueError(error)
+    return value
+
+
 def create_server(store: Store, port: int = 8766, model: CategoryModel | None = None) -> HTTPServer:
     """Serve the dashboard on loopback only, with strict Host/Origin and CSRF checks.
 
@@ -108,53 +124,33 @@ def create_server(store: Store, port: int = 8766, model: CategoryModel | None = 
                 if self.path == "/api/config":
                     store.configure(raw)
                 elif self.path == "/api/decision":
-                    event_id, decision = raw.get("id"), raw.get("decision")
-                    if not isinstance(event_id, str) or not isinstance(decision, str):
-                        raise ValueError("Decision invalida.")
-                    category = raw.get("category")
-                    if category is not None and not isinstance(category, str):
-                        raise ValueError("Categoria invalida.")
-                    currency, exchange_rate = raw.get("currency"), raw.get("exchange_rate")
-                    if currency is not None and not isinstance(currency, str):
-                        raise ValueError("Moneda invalida.")
-                    if exchange_rate is not None and not isinstance(exchange_rate, str):
-                        raise ValueError("Tasa invalida: debe enviarse como texto decimal.")
+                    event_id, decision = required_texts(raw, "id", "decision", error="Decision invalida.")
                     store.decide(
-                        event_id, decision, category,
-                        currency=currency, exchange_rate=exchange_rate,
+                        event_id, decision, optional_text(raw, "category", "Categoria invalida."),
+                        currency=optional_text(raw, "currency", "Moneda invalida."),
+                        exchange_rate=optional_text(raw, "exchange_rate", "Tasa invalida: debe enviarse como texto decimal."),
                     )
                 elif self.path == "/api/decision-group":
-                    owner, group, decision = raw.get("owner"), raw.get("group"), raw.get("decision")
-                    if not all(isinstance(value, str) for value in (owner, group, decision)):
-                        raise ValueError("Decision por destino invalida.")
+                    owner, group, decision = required_texts(
+                        raw, "owner", "group", "decision", error="Decision por destino invalida.",
+                    )
                     scope, remember = raw.get("scope", "pending"), raw.get("remember", False)
                     if scope not in {"pending", "all"} or type(remember) is not bool:
                         raise ValueError("Alcance de la decision invalido.")
-                    category = raw.get("category")
-                    if category is not None and not isinstance(category, str):
-                        raise ValueError("Categoria invalida.")
                     store.decide_group(
                         owner, group, decision, pending_only=scope == "pending", remember=remember,
-                        category=category,
+                        category=optional_text(raw, "category", "Categoria invalida."),
                     )
                 elif self.path == "/api/between-owners":
-                    owner, group = raw.get("owner"), raw.get("group")
-                    value, remember = raw.get("value"), raw.get("remember", False)
-                    if not isinstance(owner, str) or not isinstance(group, str) or type(remember) is not bool:
+                    owner, group = required_texts(raw, "owner", "group", error="Marca entre titulares invalida.")
+                    remember = raw.get("remember", False)
+                    if type(remember) is not bool:
                         raise ValueError("Marca entre titulares invalida.")
-                    store.mark_between_owners(owner, group, value, remember=remember)
+                    store.mark_between_owners(owner, group, raw.get("value"), remember=remember)
                 elif self.path == "/api/group-rules/delete":
-                    owner, group = raw.get("owner"), raw.get("group")
-                    if not isinstance(owner, str) or not isinstance(group, str):
-                        raise ValueError("Regla de destino invalida.")
-                    store.delete_group_rule(owner, group)
+                    store.delete_group_rule(*required_texts(raw, "owner", "group", error="Regla de destino invalida."))
                 elif self.path == "/api/rules":
-                    pattern, category, decision = (
-                        raw.get("pattern"), raw.get("category"), raw.get("decision"),
-                    )
-                    if not all(isinstance(value, str) for value in (pattern, category, decision)):
-                        raise ValueError("Regla invalida.")
-                    store.add_rule(pattern, category, decision)
+                    store.add_rule(*required_texts(raw, "pattern", "category", "decision", error="Regla invalida."))
                 elif self.path == "/api/rules/suggest":
                     self.json_response(200, {"suggestions": suggest_rules(store, configured_model())})
                     return
@@ -168,18 +164,11 @@ def create_server(store: Store, port: int = 8766, model: CategoryModel | None = 
                         raise ValueError("Regla invalida.")
                     store.delete_rule(raw["id"])
                 elif self.path == "/api/failure/dismiss":
-                    if not isinstance(raw.get("message_id"), str):
-                        raise ValueError("Aviso invalido.")
-                    store.dismiss_failure(raw["message_id"])
+                    store.dismiss_failure(*required_texts(raw, "message_id", error="Aviso invalido."))
                 elif self.path == "/api/card-series":
-                    owner, product, suffix, replaces = (
-                        raw.get("owner"), raw.get("product"), raw.get("suffix"), raw.get("replaces"),
-                    )
-                    if not all(isinstance(value, str) for value in (owner, product, suffix)) or not (
-                        replaces is None or isinstance(replaces, str)
-                    ):
-                        raise ValueError("Respuesta de tarjeta invalida.")
-                    store.decide_card_series(owner, product, suffix, replaces)
+                    error = "Respuesta de tarjeta invalida."
+                    owner, product, suffix = required_texts(raw, "owner", "product", "suffix", error=error)
+                    store.decide_card_series(owner, product, suffix, optional_text(raw, "replaces", error))
                 elif self.path == "/api/coverage":
                     if raw.get("status") != "reviewed":
                         raise ValueError("Solo se permite confirmar una revision manual.")

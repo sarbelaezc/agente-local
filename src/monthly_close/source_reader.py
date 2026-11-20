@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from email import policy
 from email.message import EmailMessage
@@ -11,6 +12,16 @@ from html.parser import HTMLParser
 from monthly_close.domain import clean_text
 from monthly_close.extraction import Mail
 from monthly_close.outlook import Candidate, OutlookError
+
+
+def checkpoint_key(folder: object, candidate: Candidate, received: str | None) -> str:
+    """Hash of a notice's folder and list metadata, to resume a walk; never message text."""
+    if received is None:
+        raise OutlookError("Aviso desconocido para este recorrido; no hay punto de reanudacion.")
+    return hashlib.sha256(json.dumps(
+        [folder, candidate.item_id, candidate.sender, candidate.subject, received],
+        sort_keys=True, ensure_ascii=False,
+    ).encode()).hexdigest()
 
 MAX_SOURCE_CHARS = 2_000_000
 

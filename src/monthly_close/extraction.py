@@ -238,18 +238,12 @@ def _card_payments(mail: Mail, preferences: Preferences, source: str) -> list[di
     """
     proposals: dict[str, dict] = {}
     for match in CARD_PAYMENT.finditer(source):
-        merchant = clean_text(match["card"], 150)
-        minor = amount_minor(match["amount"])
-        day = datetime.strptime(match["day"], "%d/%m/%Y").date().isoformat()
-        currency = notice_currency(source, preferences.currency)
-        identity = json.dumps([day, merchant, "Desconocida", minor, currency], ensure_ascii=False)
-        identifier = hashlib.sha256((mail.id + "\n" + identity).encode()).hexdigest()
-        proposals[identifier] = {
-            "id": identifier, "message_id": mail.id, "day": day, "merchant": merchant,
-            "account": "Desconocida", "amount_minor": minor, "currency": currency,
-            "category": CARD_PAYMENT_CATEGORY, "kind": "card_payment", "decision": "exclude",
-            "reason": "Pago a la tarjeta leido del aviso, sin Ollama. No es gasto: ya cuentan sus compras.",
-        }
+        identifier, event = _fixed_event(
+            mail, preferences, source, match["card"], match["amount"], _notice_day(match["day"]),
+            "card_payment", CARD_PAYMENT_CATEGORY,
+            "Pago a la tarjeta leido del aviso, sin Ollama. No es gasto: ya cuentan sus compras.",
+        )
+        proposals[identifier] = {**event, "decision": "exclude"}
     return list(proposals.values())
 
 
@@ -268,23 +262,14 @@ def _account_transfers(mail: Mail, preferences: Preferences, source: str) -> lis
     movement. Only the last four digits of the destination are kept, never the number.
     They stay pending: a person decides whether it is an expense.
     """
-    proposals: dict[str, dict] = {}
-    for match in ACCOUNT_TRANSFER.finditer(source):
-        merchant = "cuenta *" + match["last"]
-        minor = amount_minor(match["amount"])
-        day = datetime.strptime(
-            match["day"], "%Y/%m/%d" if match["day"][4] == "/" else "%d/%m/%Y",
-        ).date().isoformat()
-        currency = notice_currency(source, preferences.currency)
-        identity = json.dumps([day, merchant, "Desconocida", minor, currency], ensure_ascii=False)
-        identifier = hashlib.sha256((mail.id + "\n" + identity).encode()).hexdigest()
-        proposals[identifier] = {
-            "id": identifier, "message_id": mail.id, "day": day, "merchant": merchant,
-            "account": "Desconocida", "amount_minor": minor, "currency": currency,
-            "category": preferences.categories[-1], "kind": "transfer", "decision": None,
-            "reason": "Transferencia a otra cuenta leida del aviso, sin Ollama. "
-            "Confirma si es gasto, familiar o no cuenta.",
-        }
+    proposals = dict(
+        _fixed_event(
+            mail, preferences, source, "cuenta *" + match["last"], match["amount"], _notice_day(match["day"]),
+            "transfer", preferences.categories[-1],
+            "Transferencia a otra cuenta leida del aviso, sin Ollama. Confirma si es gasto, familiar o no cuenta.",
+        )
+        for match in ACCOUNT_TRANSFER.finditer(source)
+    )
     return list(proposals.values())
 
 
