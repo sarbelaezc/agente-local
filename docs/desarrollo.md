@@ -79,6 +79,17 @@ va en `src/shared/`.
 - Las pruebas del panel usan Chromium con Playwright (lo instala
   `bootstrap.ps1`). Las del lanzador ejecutan PowerShell con un Python y un Ollama
   simulados.
+- Para escribir una prueba del panel, usa las fixtures, no arranques nada a mano:
+  - `new_page(**opciones)` (`tests/conftest.py`) abre una página en un contexto
+    nuevo de un único Chromium por ejecución; lanzar uno por prueba costaba cerca
+    de un segundo cada vez.
+  - `start_panel(store, model=None)` (`tests/monthly_close/conftest.py`) arranca el
+    panel del cierre y devuelve su URL; se detiene solo al terminar la prueba y su
+    cierre no espera medio segundo.
+  - Tras abrir o recargar el panel del cierre, espera
+    `expect(page.locator("main")).to_have_attribute("aria-busy", "false")`, que
+    marca el fin de la primera carga, en vez de `networkidle` (que espera medio
+    segundo sin tráfico).
 - Deben demostrar que nada se escribe ni se mueve sin aprobación, que lo aprobado
   coincide con lo escrito, que el agente se detiene ante errores de sesión o de
   buzón y que nunca ejecuta código del modelo.

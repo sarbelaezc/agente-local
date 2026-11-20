@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
+import httpx
 import pytest
 
 from monthly_close.store import Store
@@ -106,43 +107,29 @@ def test_invalid_rules_are_rejected(store, pattern, category, decision):
     assert store.rules() == []
 
 
-def test_panel_endpoints_save_list_and_delete_rules(store):
-    import threading
-
-    import httpx
-
-    from monthly_close.server import create_server
-
+def test_panel_endpoints_save_list_and_delete_rules(store, start_panel):
     store.import_message("m1", [event("a", "EDS PRIMAX BOLIVARIA")])
-    server = create_server(store, 0)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    origin = f"http://127.0.0.1:{server.server_port}"
-    try:
-        with httpx.Client(base_url=origin, trust_env=False) as client:
-            headers = {"Origin": origin, "X-CSRF-Token": client.get("/api/state").json()["csrf"]}
-            saved = client.post(
-                "/api/rules", headers=headers,
-                json={"pattern": "primax", "category": TRANSPORT, "decision": "family"},
-            )
-            assert saved.status_code == 200
-            state = client.get("/api/state").json()
-            assert [rule["pattern"] for rule in state["rules"]] == ["PRIMAX"]
-            assert state["transactions"][0]["decision"] == "family"
-            bad = client.post(
-                "/api/rules", headers=headers,
-                json={"pattern": "primax", "category": TRANSPORT, "decision": "exclude"},
-            )
-            assert bad.status_code == 400
-            deleted = client.post(
-                "/api/rules/delete", headers=headers, json={"id": state["rules"][0]["id"]},
-            )
-            assert deleted.status_code == 200
-            assert client.get("/api/state").json()["rules"] == []
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join()
+    origin = start_panel(store)
+    with httpx.Client(base_url=origin, trust_env=False) as client:
+        headers = {"Origin": origin, "X-CSRF-Token": client.get("/api/state").json()["csrf"]}
+        saved = client.post(
+            "/api/rules", headers=headers,
+            json={"pattern": "primax", "category": TRANSPORT, "decision": "family"},
+        )
+        assert saved.status_code == 200
+        state = client.get("/api/state").json()
+        assert [rule["pattern"] for rule in state["rules"]] == ["PRIMAX"]
+        assert state["transactions"][0]["decision"] == "family"
+        bad = client.post(
+            "/api/rules", headers=headers,
+            json={"pattern": "primax", "category": TRANSPORT, "decision": "exclude"},
+        )
+        assert bad.status_code == 400
+        deleted = client.post(
+            "/api/rules/delete", headers=headers, json={"id": state["rules"][0]["id"]},
+        )
+        assert deleted.status_code == 200
+        assert client.get("/api/state").json()["rules"] == []
 
 
 def test_income_rules_decide_only_money_received(store):
@@ -217,34 +204,15 @@ def test_suggestion_with_no_pending_merchants_does_not_call_the_model(store):
     assert suggest_rules(store, Unused()) == []
 
 
-def test_suggest_endpoint_needs_csrf_and_a_model_and_never_writes(store):
-    import threading
-
-    import httpx
-
-    from monthly_close.server import create_server
-
+def test_suggest_endpoint_needs_csrf_and_a_model_and_never_writes(store, start_panel):
     store.import_message("m1", [event("a", "FLYPASS PEAJE")])
     model = FakeCategoryModel([{"merchant": "FLYPASS PEAJE", "category": TRANSPORT}])
-    servers = [create_server(store, 0, model), create_server(store, 0)]
-    threads = [threading.Thread(target=server.serve_forever) for server in servers]
-    for thread in threads:
-        thread.start()
-    try:
-        results = []
-        for server in servers:
-            url = f"http://127.0.0.1:{server.server_port}"
-            with httpx.Client(base_url=url, trust_env=False) as client:
-                headers = {"Origin": url, "X-CSRF-Token": client.get("/api/state").json()["csrf"]}
-                assert client.post("/api/rules/suggest", json={}).status_code == 403
-                results.append(client.post("/api/rules/suggest", headers=headers, json={}))
-    finally:
-        for server in servers:
-            server.shutdown()
-        for thread in threads:
-            thread.join(timeout=5)
-        for server in servers:
-            server.server_close()
+    results = []
+    for url in (start_panel(store, model), start_panel(store)):
+        with httpx.Client(base_url=url, trust_env=False) as client:
+            headers = {"Origin": url, "X-CSRF-Token": client.get("/api/state").json()["csrf"]}
+            assert client.post("/api/rules/suggest", json={}).status_code == 403
+            results.append(client.post("/api/rules/suggest", headers=headers, json={}))
 
     assert results[0].status_code == 200
     assert results[0].json() == {"suggestions": [{"pattern": "FLYPASS PEAJE", "category": TRANSPORT, "count": 1}]}

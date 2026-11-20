@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import re
-import threading
 from datetime import datetime
 
 import pytest
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import expect
 
-from monthly_close.server import create_server
 from monthly_close.store import Store
 
 MONTH = "2026-03"
@@ -26,7 +24,7 @@ def member(event_id: str, amount: int, kind: str, decision: str | None, **extra)
 
 
 @pytest.fixture
-def household(tmp_path, categories):
+def household(tmp_path, categories, start_panel, new_page):
     store = Store(tmp_path / "close.sqlite3")
     store.configure({
         "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
@@ -52,24 +50,14 @@ def household(tmp_path, categories):
         member("m333", 3000, "transfer", None, category="Otros gastos", group_key="tr:55550009999"),
         member("m4444", 7000, "transfer", None, category="Otros gastos", group_key="tr:55550009999"),
     ], {})
-    server = create_server(store, 0)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1280, "height": 1000})
-        page.set_default_timeout(3000)
-        errors = []
-        page.on("pageerror", lambda error: errors.append(str(error)))
-        page.goto(f"http://127.0.0.1:{server.server_port}/?month={MONTH}&currency=COP")
-        page.wait_for_load_state("networkidle")
-        try:
-            yield page, store, errors
-        finally:
-            browser.close()
-            server.shutdown()
-            thread.join(timeout=5)
-            server.server_close()
+    url = start_panel(store)
+    page = new_page(viewport={"width": 1280, "height": 1000})
+    page.set_default_timeout(3000)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(f"{url}/?month={MONTH}&currency=COP")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    yield page, store, errors
 
 
 def spend(page) -> str:
@@ -129,7 +117,7 @@ def test_year_view_shows_income_for_each_member_and_household(household):
     }])
     store.import_external("manuela", "manuela", [member("m55555", 50000, "income", "income", category="Nómina")], {})
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.locator("#tab-year").click()
     for owner, income in [("Hogar", r"3[.\s]?500,00"), ("Santiago", r"3[.\s]?000,00"), ("Manuela", r"\b500,00")]:
         choose(page, owner)
@@ -144,7 +132,7 @@ def test_year_summary_capitalizes_months_and_leaves_months_without_data_blank(ho
     page, store, errors = household
     page.clock.set_fixed_time(datetime(2026, 11, 16, 12))  # January elapsed, December still to come
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.locator("#tab-year").click()
     rows = page.locator("#year-table tbody tr")
     expect(rows).to_have_count(12)
@@ -180,7 +168,7 @@ def test_month_view_is_interactive_like_manuelas_dashboard(household):
             "kind": kind, "decision": decision, "reason": "Sintetico.",
         }])
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     tip = page.locator("#tip")
 
     # Instant tooltip on a chart slice, and on keyboard focus of a calendar day.

@@ -4,37 +4,31 @@ import json
 import os
 import re
 import socket
-import threading
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import httpx
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import expect
 
-from monthly_close.server import create_server
 from monthly_close.store import Store
 
 
-def test_idle_browser_connection_does_not_block_dashboard(tmp_path):
-    server = create_server(Store(tmp_path / "idle.sqlite3"), 0)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    idle = socket.create_connection(("127.0.0.1", server.server_port), timeout=2)
+def test_idle_browser_connection_does_not_block_dashboard(tmp_path, start_panel):
+    url = start_panel(Store(tmp_path / "idle.sqlite3"))
+    idle = socket.create_connection(("127.0.0.1", urlsplit(url).port), timeout=2)
     try:
         with httpx.Client(timeout=2, trust_env=False) as client:
-            response = client.get(f"http://127.0.0.1:{server.server_port}/")
+            response = client.get(url + "/")
         assert response.status_code == 200
         assert "<title>Cierre mensual" in response.text
     finally:
         idle.close()
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
 
 
 @pytest.fixture
-def dashboard(tmp_path, categories):
+def dashboard(tmp_path, categories, start_panel, new_page):
     store = Store(tmp_path / "dashboard.sqlite3")
     store.configure({
         "location": "Ciudad de prueba", "timezone": "America/Bogota", "currency": "COP",
@@ -52,24 +46,14 @@ def dashboard(tmp_path, categories):
             "kind": "purchase", "decision": decision, "reason": "Revisar movimiento.",
         }])
     store.coverage(month, "partial", "Datos sinteticos, sin correo real.")
-    server = create_server(store, 0)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1440, "height": 1000})
-        page.set_default_timeout(3000)
-        errors = []
-        page.on("pageerror", lambda error: errors.append(str(error)))
-        page.goto(f"http://127.0.0.1:{server.server_port}")
-        page.wait_for_load_state("networkidle")
-        try:
-            yield page, store, month, errors
-        finally:
-            browser.close()
-            server.shutdown()
-            thread.join(timeout=5)
-            server.server_close()
+    url = start_panel(store)
+    page = new_page(viewport={"width": 1440, "height": 1000})
+    page.set_default_timeout(3000)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(url)
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    yield page, store, month, errors
 
 
 def test_dashboard_renders_without_scripts_from_untrusted_text(dashboard):
@@ -92,7 +76,7 @@ def test_extraction_review_is_visible_across_currencies_and_renders_only_text(da
         month + "-06T12:00:00-05:00", month + "-06", "dinero / banco", "merchant",
     )
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     assert "1 aviso(s) sin extraer" in page.locator("#extraction-warning").inner_text()
     page.locator("#tab-decisions").click()
     review = page.locator("#extraction-review")
@@ -105,7 +89,7 @@ def test_extraction_review_is_visible_across_currencies_and_renders_only_text(da
     assert review.locator("button").all_inner_texts() == ["Descartar aviso"]
     store.import_message("blocked", [])
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     assert not page.locator("#extraction-warning").is_visible()
     assert not errors
 
@@ -117,7 +101,7 @@ def test_queued_notice_can_be_discarded_from_the_panel(dashboard):
         month + "-06T12:00:00-05:00", month + "-06", "dinero / banco", "amount_text",
     )
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.locator("#tab-decisions").click()
     review = page.locator("#extraction-review")
     assert "el monto que propuso Ollama no aparece en el aviso" in review.inner_text()
@@ -154,7 +138,7 @@ def test_decision_persists_and_updates_totals(dashboard):
         button.click()
     assert saved.value.status == 200, saved.value.text()
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     assert store.state()["transactions"][0]["decision"] == "personal"
     assert re.search(r"\b1[.\s]?700,58", page.locator("#month-metrics").inner_text())
     assert not errors
@@ -169,7 +153,7 @@ def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
         "kind": "purchase", "decision": None, "reason": "Aviso USD.",
     }])
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.locator("#tab-decisions").click()
     card = page.locator("#pending-list .decision-card").filter(has_text="AMAZON MKTPLACE")
     assert "USD" in card.inner_text()
@@ -182,7 +166,7 @@ def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
         card.get_by_role("button", name="Gasto personal", exact=True).click()
     assert saved.value.status == 200
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     # Existing COP expenses (1500.57) plus the USD estimate (51834.17).
     assert re.search(r"\b53[.\s]?334,74", page.locator("#month-metrics").inner_text())
     page.locator("#tab-year").click()
@@ -206,7 +190,7 @@ def test_grouped_usd_purchases_show_dollars_not_zero_cop(dashboard):
             "kind": "purchase", "decision": None, "reason": "Aviso USD.",
         }])
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.locator("#tab-decisions").click()
     card = page.locator("#pending-list .group-card").filter(has_text="OPENAI CHATGPT")
     amount = card.locator(".group-amount").inner_text()
@@ -246,7 +230,7 @@ def test_stale_backend_cannot_silently_ignore_exchange_fields(dashboard):
 
     page.route("**/api/state", stale_state)
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     assert "Reinicia el servidor" in page.locator("body").inner_text()
     assert not page.locator("#dashboard-area").is_visible()
     assert not errors
@@ -261,7 +245,7 @@ def test_investment_choice_updates_separate_month_year_totals_and_history(dashbo
         page.locator("#pending-list").get_by_role("button", name="Inversión", exact=True).click()
     assert saved.value.status == 200
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     row = next(tx for tx in store.state()["transactions"] if tx["id"] == "0")
     assert row["decision"] == "investment"
     assert row["category"] == "Inversiones"
@@ -306,7 +290,7 @@ def test_dashboard_mobile_and_desktop_screenshots(dashboard, tmp_path):
 def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(dashboard):
     page, _, month, errors = dashboard
     page.goto(f"{page.url.split('?')[0]}?tab=year&month={month}&year={month[:4]}&currency=COP")
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     assert not errors
     page.keyboard.press("Tab")
     skip_link = page.locator(".skip-link")
@@ -334,7 +318,7 @@ def test_decision_lists_only_render_fifty_cards_at_a_time(dashboard):
         }])
 
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.locator("#tab-decisions").click()
     pending = page.locator("#pending-list .decision-card")
     assert pending.count() == 50
@@ -347,7 +331,7 @@ def test_legacy_cash_withdrawal_updates_cumulative_personal_total(dashboard):
     page, store, _, errors = dashboard
     store.decide("0", "cash_withdrawal")
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     text = page.locator("#cumulative-chart .legend-row").inner_text()
     assert re.search(r"Personal\s+1[.\s]?700,58", text), text
     assert "Familiar 300,01" in text
@@ -407,7 +391,7 @@ def test_category_chart_uses_unique_consistent_colors_for_every_category(dashboa
             "day": month + "-06", "category": category, "amount_minor": 100,
         }])
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     labels = page.locator("#category-chart .legend-label").all_text_contents()
     assert set(labels) == set(extended_categories)
     month_colors = page.locator("#category-chart .legend-row").evaluate_all("""rows =>
@@ -473,7 +457,7 @@ def test_withdrawal_buttons_persist_and_apply_correct_expense_totals(
         page.locator("#pending-list").get_by_role("button", name=label, exact=True).click()
     assert saved.value.status == 200
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     row = next(tx for tx in store.state()["transactions"] if tx["id"] == "0")
     assert (row["decision"], row["category"]) == (decision, category)
     total = page.locator("#month-metrics .metric").filter(has_text="Total decidido").inner_text()
@@ -525,7 +509,7 @@ def test_configuration_form_saves_all_step_zero_answers(dashboard):
     with store.connect() as db:
         db.execute("DELETE FROM settings")
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     host = page.locator("#setup-form-host")
     host.locator("[name=location]").fill("Ciudad de prueba")
     host.locator("[name=timezone]").fill("America/Bogota")
@@ -616,7 +600,7 @@ def test_pending_card_hides_when_everything_is_decided_and_the_rest_share_one_ro
         page.locator("#pending-list").get_by_role("button", name="Familiar", exact=True).click()
     assert saved.value.status == 200
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     for tab, panel in (("#tab-month", "#month-metrics"), ("#tab-year", "#year-metrics")):
         page.locator(tab).click()
         heroes = page.locator(f"{panel} .metric.hero")
@@ -643,7 +627,7 @@ def test_a_new_card_number_is_asked_in_decisions_with_the_option_of_a_new_card(d
     ], [])
     store.update_reconciled_coverage(date(2026, 4, 15))
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.locator("#tab-decisions").click()
     review = page.locator("#card-review")
     expect(review).to_be_visible()
@@ -724,7 +708,7 @@ def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(da
 
     page.route("**/api/category-suggestions", answer)
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     page.get_by_role("button", name="Volver a sugerir categorías").click()
     group_select = page.locator("#pending-list .group-card").filter(has_text="FLYPASS PEAJE").get_by_label(
@@ -753,7 +737,7 @@ def test_group_category_can_be_set_without_suggestions_or_kept_per_movement(dash
         purchase("mixed:1", "TIENDA SOL", "Compras", 6), purchase("mixed:2", "TIENDA SOL", "Transporte", 7),
     ])
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     same = page.locator(".group-card").filter(has_text="PEAJE NORTE")
     mixed = page.locator(".group-card").filter(has_text="TIENDA SOL")
@@ -787,7 +771,7 @@ def test_group_category_shows_for_transfers_but_not_for_investments(dashboard):
         movement("inv:1", "TRASLADO A FONDO", "investment", 6), movement("inv:2", "TRASLADO A FONDO", "investment", 7),
     ])
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     label = re.compile("Categoría para los 2 movimientos")
     transfer = page.locator("#pending-list .group-card").filter(has_text="TRASLADO A NEQUI")
@@ -814,7 +798,7 @@ def test_saved_suggestions_survive_a_reload_and_owner_counts_filter_the_view(das
     store.import_message("p-m", [purchase("m1", "TIENDA SOL", "manuela", 7)], owner="manuela")
     store.save_category_suggestions({"s1": {"category": "Transporte", "source": "history"}}, replace=True)
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     card = page.locator("#pending-list .decision-card").filter(has_text="PEAJE NORTE")
     expect(card.get_by_label(re.compile("Categoría para PEAJE NORTE"))).to_have_value("Transporte")
@@ -837,7 +821,7 @@ def test_focus_moves_to_the_next_pending_card_after_a_decision(dashboard):
         "kind": "purchase", "decision": None, "reason": "Aviso.",
     } for index, name, amount in ((2, "UNO", 9000000), (3, "DOS", 8000000))])
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     first = page.locator("#pending-list > article").first
     expect(first).to_contain_text("COMERCIO UNO")
@@ -880,7 +864,7 @@ def test_pending_destinations_are_ordered_oldest_first(dashboard):
         "kind": "purchase", "decision": None, "reason": "Aviso.",
     } for day, name, amount in ((8, "RECIENTE GRANDE", 90000000), (2, "ANTIGUO PEQUENO", 100), (4, "MEDIO", 500))])
     page.reload()
-    page.wait_for_load_state("networkidle")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     titles = page.locator("#pending-list > article h3").all_inner_texts()
     order = [title for title in titles if title in {"RECIENTE GRANDE", "ANTIGUO PEQUENO", "MEDIO"}]

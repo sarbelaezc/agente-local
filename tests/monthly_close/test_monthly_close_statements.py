@@ -5,11 +5,11 @@ import base64
 import io
 import json
 import re
-import threading
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 
 import pytest
+from playwright.sync_api import expect
 from pypdf import PdfWriter
 
 from monthly_close import main as app
@@ -486,42 +486,29 @@ def test_statement_settings_require_password_and_exact_senders(tmp_path):
         app.statement_settings(tmp_path)
 
 
-def test_panel_shows_statement_checks_and_balances(store):
-    from playwright.sync_api import sync_playwright
-    from monthly_close.server import create_server
-
+def test_panel_shows_statement_checks_and_balances(store, start_panel, new_page):
     statements = [st.parse("FIDUCUENTA", "202601", FUND), st.parse("HIPOTECARIO", "202601", MORTGAGE)]
     visa = st.parse("TARJETA_VISA", "202601", CARD)
     visa.owner = "manuela"
     report = st.reconcile(statements + [visa], [], date(2026, 1, 1))
     store.record_statements(report.checks(), [])
-    server = create_server(store, 0)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page()
-            errors = []
-            page.on("pageerror", lambda error: errors.append(str(error)))
-            page.goto(f"http://127.0.0.1:{server.server_port}/?month=2026-01&currency=COP&owner=santiago")
-            page.wait_for_load_state("networkidle")
-            text = page.locator("#statements-card").inner_text()
-            assert "Inversiones" in text and "Créditos" in text
-            assert re.search(r"1[.\s]?204[.\s]?950,00", text)
-            assert "Fiducuenta *0003" in text and "Visa" not in text
-            page.locator("#owner-switch").get_by_role("button", name="Manuela").click()
-            text = page.locator("#statements-card").inner_text()
-            assert "Visa *0002" in text and "Fiducuenta" not in text
-            page.locator("#owner-switch").get_by_role("button", name="Hogar").click()
-            text = page.locator("#statements-card").inner_text()
-            assert "Visa *0002 · Manuela" in text and "Fiducuenta *0003 · Santiago" in text
-            assert not errors
-            browser.close()
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    url = start_panel(store)
+    page = new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(f"{url}/?month=2026-01&currency=COP&owner=santiago")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    text = page.locator("#statements-card").inner_text()
+    assert "Inversiones" in text and "Créditos" in text
+    assert re.search(r"1[.\s]?204[.\s]?950,00", text)
+    assert "Fiducuenta *0003" in text and "Visa" not in text
+    page.locator("#owner-switch").get_by_role("button", name="Manuela").click()
+    text = page.locator("#statements-card").inner_text()
+    assert "Visa *0002" in text and "Fiducuenta" not in text
+    page.locator("#owner-switch").get_by_role("button", name="Hogar").click()
+    text = page.locator("#statements-card").inner_text()
+    assert "Visa *0002 · Manuela" in text and "Fiducuenta *0003 · Santiago" in text
+    assert not errors
 
 
 def test_payroll_deducted_instalment_adds_matching_payroll_income(store):

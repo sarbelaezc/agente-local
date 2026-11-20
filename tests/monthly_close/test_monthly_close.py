@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import threading
 from argparse import Namespace
 from datetime import date, datetime
 
@@ -14,7 +13,6 @@ from monthly_close.domain import Preferences, amount_minor, received_local
 from monthly_close.extraction import EvidenceError, Mail, extract
 from monthly_close.main import due_close_month, months
 from monthly_close.outlook import Candidate, OutlookError
-from monthly_close.server import create_server
 from monthly_close.store import SCHEMA, Store
 
 
@@ -1078,19 +1076,11 @@ def test_a_failed_scheduled_close_is_not_recorded_and_runs_again(tmp_path, prefe
 
 
 @pytest.fixture
-def panel(tmp_path):
+def panel(tmp_path, start_panel):
     store = Store(tmp_path / "test.sqlite3")
-    server = create_server(store, 0)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    url = f"http://127.0.0.1:{server.server_port}"
-    try:
-        with httpx.Client(base_url=url, trust_env=False) as client:
-            yield store, client, url
-    finally:
-        server.shutdown()
-        thread.join(timeout=5)
-        server.server_close()
+    url = start_panel(store)
+    with httpx.Client(base_url=url, trust_env=False) as client:
+        yield store, client, url
 
 
 def test_panel_requires_origin_csrf_and_loopback_host(panel, preferences):
