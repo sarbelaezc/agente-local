@@ -173,12 +173,12 @@ SOURCE_TEXT = {
 
 def propose_statement_categories(
     store: Store, model: CategoryModel | None, events: list[dict], limit: int = 60,
-) -> tuple[int, bool]:
+) -> tuple[dict[str, dict], bool]:
     """Set a proposed category on statement purchases before they are recorded as pending.
 
     Nothing is decided: each event keeps decision None and its reason says where the
     category came from. If the model is missing or fails, rules and past decisions still
-    apply and the rest keep their default category. Returns (proposed, model_failed).
+    apply and the rest keep their default category. Returns (id -> proposal, model_failed).
     """
     purchases = [event for event in events if event["kind"] == "purchase"]
     by_merchant = _group_by_merchant(purchases)
@@ -195,4 +195,4 @@ def propose_statement_categories(
         event["reason"] = (
             f"{event['reason']} Categoría sugerida por {SOURCE_TEXT[proposal['source']]}; confírmala al decidir."
         )
-    return len([event for event in purchases if event["id"] in proposals]), failed
+    return proposals, failed

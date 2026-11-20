@@ -125,6 +125,11 @@ destino del pago (o las palabras del comercio, si el aviso no trae destino). Cad
 tarjeta muestra el número de movimientos, el rango de fechas, el total y una
 pista, con botones que deciden todos sus movimientos a la vez.
 
+- **Progreso.** Arriba, «Por decidir» muestra los destinos, los movimientos y el
+  importe pendientes de la vista, y un botón por titular con sus movimientos por
+  decidir («Santiago: 16», «Manuela: 68») que abre la vista de ese titular.
+- **Siguiente tarjeta.** Al decidir un destino o un movimiento, el foco pasa a la
+  tarjeta que ocupa ahora su lugar, para seguir con el teclado o sin desplazarte.
 - **Todo o nada.** Si un movimiento no pasa la validación (por ejemplo, una compra
   en USD sin tasa), no cambia ninguno.
 - **Pagos futuros.** «Aplicar también a pagos futuros a este destino» crea una
@@ -215,8 +220,10 @@ preselecciona, sin guardar. Requiere un `runtime.json` válido y Ollama activo.
   movimiento, y en el selector de categoría de la tarjeta del destino cuando
   todos sus movimientos tienen la misma sugerencia (ver
   [Decidir movimientos](#decidir-movimientos)).
-- Nada se guarda hasta que pulsas una decisión.
-- Las sugerencias no se conservan: al recargar el panel hay que pedirlas de nuevo.
+- Nada se decide hasta que pulsas una decisión. Las sugerencias se guardan aparte
+  de los movimientos (tabla `category_suggestions`, solo categoría y origen), así
+  que siguen ahí al recargar el panel; dejan de mostrarse cuando decides el
+  movimiento. «Volver a sugerir categorías» las reemplaza todas.
 
 ## Compras en dólares
 
@@ -774,6 +781,7 @@ origen. Las etiquetas principales:
 | `rule-local-user`, `group-rule-local-user`, `group-rule-between-local-user`, `group-rule-delete-local-user` | Regla por comercio o por destino creada, marcada entre titulares o borrada |
 | `decision-manuela`, `group-rule-manuela` | Decisiones importadas del panel anterior de Manuela |
 | `statement-import`, `statement-reclassify` | Movimiento importado de un extracto, o su tipo corregido |
+| `category-suggestions` | Sugerencias de categoría guardadas o recalculadas (solo el número) |
 | `decision-statement-phrase` | Línea de extracto decidida por un texto fijo confirmado (ver «Conciliar extractos») |
 | `destination-backfill` | Destino completado con `backfill-destinations` |
 | `payroll-deduction-income` | Ingreso espejo de una cuota descontada de la nómina |

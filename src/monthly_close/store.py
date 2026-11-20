@@ -54,6 +54,9 @@ CREATE TABLE IF NOT EXISTS group_rules (
     between_owners INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (owner, group_key)
 );
 CREATE TABLE IF NOT EXISTS owner_accounts (suffix TEXT PRIMARY KEY, owner TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS category_suggestions (
+    event_id TEXT PRIMARY KEY, category TEXT NOT NULL, source TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS payroll_deductions (
     owner TEXT NOT NULL, suffix TEXT NOT NULL, PRIMARY KEY (owner, suffix)
 );
@@ -500,6 +503,32 @@ class Store:
                 continue  # e.g. USD without a rate or an excluded account: a person decides.
             decided += 1
         return decided
+
+    def save_category_suggestions(self, suggestions: dict[str, dict], *, replace: bool) -> int:
+        """Keep proposed categories so the panel shows them after a reload; nothing is decided.
+
+        replace drops every earlier proposal first (a full recalculation); otherwise new
+        proposals are added or updated. Only sources and categories that a proposal can
+        carry are stored, and only for movements that exist.
+        """
+        allowed = set(self.preferences().categories) | {"Retiro en efectivo"}
+        with self.connect() as db:
+            if replace:
+                db.execute("DELETE FROM category_suggestions")
+            saved = 0
+            for event_id, item in suggestions.items():
+                if item.get("source") not in {"rule", "history", "ollama"} or item.get("category") not in allowed:
+                    raise ValueError("Sugerencia de categoria invalida.")
+                if db.execute("SELECT 1 FROM transactions WHERE id=?", (event_id,)).fetchone() is None:
+                    continue
+                db.execute(
+                    """INSERT INTO category_suggestions VALUES (?,?,?) ON CONFLICT(event_id)
+                    DO UPDATE SET category=excluded.category, source=excluded.source""",
+                    (event_id, item["category"], item["source"]),
+                )
+                saved += 1
+            self._audit(db, "category-suggestions", "pending", f"{saved} {'recalculadas' if replace else 'nuevas'}")
+        return saved
 
     def pending_purchases(self) -> list[dict]:
         """Id and merchant of every pending purchase, from notices and statements."""
@@ -1547,6 +1576,14 @@ class Store:
                     )
                 ],
                 "coverage": [dict(row) for row in db.execute("SELECT * FROM coverage ORDER BY month")],
+                # Proposals only for movements still pending; a decision makes them irrelevant.
+                "category_suggestions": {
+                    row["event_id"]: {"category": row["category"], "source": row["source"]}
+                    for row in db.execute(
+                        """SELECT s.* FROM category_suggestions s JOIN transactions t
+                        ON t.id=s.event_id WHERE t.decision IS NULL""",
+                    )
+                },
                 "rules": [
                     dict(row) for row in db.execute("SELECT * FROM merchant_rules ORDER BY pattern")
                 ],

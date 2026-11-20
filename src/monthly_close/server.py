@@ -141,7 +141,9 @@ def create_server(store: Store, port: int = 8766, model: CategoryModel | None = 
                     if self.path == "/api/rules/suggest":
                         self.json_response(200, {"suggestions": suggest_rules(store, model)})
                     else:
-                        self.json_response(200, {"by_id": suggest_pending_categories(store, model)})
+                        suggestions = suggest_pending_categories(store, model)
+                        store.save_category_suggestions(suggestions, replace=True)
+                        self.json_response(200, {"by_id": suggestions})
                     return
                 elif self.path == "/api/rules/delete":
                     if type(raw.get("id")) is not int:

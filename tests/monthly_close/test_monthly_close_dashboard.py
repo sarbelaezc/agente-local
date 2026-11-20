@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import socket
@@ -713,11 +714,14 @@ def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(da
             "reason": "Extracto.",
         } for index in (6, 7)
     ])
-    page.route("**/api/category-suggestions", lambda route: route.fulfill(
-        status=200, content_type="application/json",
-        body='{"by_id":{"stmt:6":{"category":"Transporte","source":"history"},'
-             '"stmt:7":{"category":"Transporte","source":"history"}}}',
-    ))
+    suggestions = {key: {"category": "Transporte", "source": "history"} for key in ("stmt:6", "stmt:7")}
+
+    def answer(route):
+        # Stands in for the server with Ollama: it saves the suggestions, then answers.
+        store.save_category_suggestions(suggestions, replace=True)
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"by_id": suggestions}))
+
+    page.route("**/api/category-suggestions", answer)
     page.reload()
     page.wait_for_load_state("networkidle")
     page.get_by_role("tab", name=re.compile("Decisi")).click()
@@ -794,4 +798,74 @@ def test_group_category_shows_for_transfers_but_not_for_investments(dashboard):
 
     saved = {row["id"]: (row["decision"], row["category"]) for row in store.state()["transactions"]}
     assert saved["tr:1"] == saved["tr:2"] == ("family", "Retiro en efectivo")
+    assert not errors
+
+
+def test_saved_suggestions_survive_a_reload_and_owner_counts_filter_the_view(dashboard):
+    page, store, month, errors = dashboard
+    def purchase(event_id, merchant, owner, day):
+        return {
+            "id": event_id, "message_id": f"p-{event_id}", "day": f"{month}-0{day}", "merchant": merchant,
+            "account": "Tarjeta A", "amount_minor": 1000000, "currency": "COP", "category": "Compras",
+            "kind": "purchase", "decision": None, "reason": "Extracto.",
+        }
+    store.import_message("p-s", [purchase("s1", "PEAJE NORTE", "santiago", 6)])
+    store.import_message("p-m", [purchase("m1", "TIENDA SOL", "manuela", 7)], owner="manuela")
+    store.save_category_suggestions({"s1": {"category": "Transporte", "source": "history"}}, replace=True)
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    card = page.locator("#pending-list .decision-card").filter(has_text="PEAJE NORTE")
+    expect(card.get_by_label(re.compile("Categoría para PEAJE NORTE"))).to_have_value("Transporte")
+    expect(card.get_by_text("Sugerida por tus decisiones anteriores")).to_be_visible()
+
+    counts = page.get_by_role("group", name="Pendientes por titular")
+    expect(counts.get_by_role("button", name=re.compile("^Manuela: 1 movimiento"))).to_be_visible()
+    counts.get_by_role("button", name=re.compile("^Manuela:")).click()
+    expect(page.locator("#owner-switch button[data-owner='manuela']")).to_have_attribute("aria-pressed", "true")
+    expect(page.locator("#pending-list").get_by_text("PEAJE NORTE")).to_have_count(0)
+    expect(page.locator("#pending-list").get_by_text("TIENDA SOL")).to_be_visible()
+    assert not errors
+
+
+def test_focus_moves_to_the_next_pending_card_after_a_decision(dashboard):
+    page, store, month, errors = dashboard
+    store.import_message("f", [{
+        "id": f"f{index}", "message_id": "f", "day": f"{month}-0{index}", "merchant": f"COMERCIO {name}",
+        "account": "Tarjeta A", "amount_minor": amount, "currency": "COP", "category": "Compras",
+        "kind": "purchase", "decision": None, "reason": "Aviso.",
+    } for index, name, amount in ((6, "UNO", 9000000), (7, "DOS", 8000000))])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    first = page.locator("#pending-list > article").first
+    expect(first).to_contain_text("COMERCIO UNO")
+    first.get_by_role("button", name="Gasto personal").first.click()
+    expect(page.locator("#pending-list > article").first).to_contain_text("COMERCIO DOS")
+    focused = page.evaluate("document.activeElement && document.activeElement.textContent")
+    assert focused == "COMERCIO DOS"
+    assert not errors
+
+
+def test_owner_count_buttons_are_readable_and_large_enough_in_both_themes(dashboard):
+    page, _, _, errors = dashboard
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    page.locator("#owner-switch button[data-owner='santiago']").click()
+    for theme in ["light", "dark"]:
+        if theme == "dark":
+            page.locator("#theme-toggle").click()
+        found = page.locator(".owner-progress .chip").evaluate_all(r"""chips => chips.map(chip => {
+            const luminance = color => color.match(/[\d.]+/g).slice(0, 3).map(Number).map(v => v / 255)
+                .map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4)
+                .reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0);
+            let host = chip, background = "rgba(0, 0, 0, 0)";
+            while (host && /rgba\(.*, 0\)$/.test(background)) {
+                background = getComputedStyle(host).backgroundColor;
+                host = host.parentElement;
+            }
+            const values = [luminance(getComputedStyle(chip).color), luminance(background)];
+            return [(Math.max(...values) + .05) / (Math.min(...values) + .05), chip.getBoundingClientRect().height];
+        })""")
+        assert len(found) == 2
+        assert all(ratio >= 4.5 and height >= 38 for ratio, height in found), (theme, found)
     assert not errors

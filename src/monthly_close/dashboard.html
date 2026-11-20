@@ -182,6 +182,9 @@
     #year-categories .bar-row { grid-template-columns: minmax(0, 170px) minmax(0, 1fr) auto; }
     .axis-label.current { fill: var(--ink); font-weight: 700; }
     .decision-summary strong { font-size: 30px; }
+    .owner-progress { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .owner-progress .chip { min-height: 38px; }
+    .owner-progress .chip[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
 
     /* Charts and lists */
     .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -2076,6 +2079,7 @@
       }
 
       function renderDecisions() {
+        loadSuggestions();
         renderCardQuestions();
         const failures = safeArray(state.data.extraction_failures);
         $("#extraction-review").hidden = failures.length === 0;
@@ -2122,17 +2126,20 @@
         badge.hidden = pending.length === 0;
         $("#tab-decisions").setAttribute("aria-label", pending.length
           ? `Decisión, ${pending.length} ${pending.length === 1 ? "destino" : "destinos"} por decidir` : "Decisión");
+        const pendingMovements = pending.reduce((total, entry) => total + entry.rows.length, 0);
         $("#decision-summary").replaceChildren(
           el("span", "label", "Por decidir"),
           el("strong", "", String(pending.length)),
           el("small", "", pending.length
-            ? `${pending.length === 1 ? "destino" : "destinos"} por decidir · ${formatMoney(pendingAmount)} que todavía no suman al gasto. Cada decisión vale para todos los pagos pendientes a ese mismo destino.`
-            : "No hay destinos por decidir.")
+            ? `${pending.length === 1 ? "destino" : "destinos"} por decidir · ${pendingMovements} ${pendingMovements === 1 ? "movimiento" : "movimientos"} · ${formatMoney(pendingAmount)} que todavía no suman al gasto. Cada decisión vale para todos los pagos pendientes a ese mismo destino.`
+            : "No hay destinos por decidir."),
+          ownerProgress()
         );
         const host = $("#pending-list");
         host.replaceChildren();
         if (!pending.length) host.append(el("div", "empty-state", "No hay movimientos pendientes para esta moneda."));
         pending.slice(0, state.pendingLimit).forEach(entry => host.append(makeGroupCard(entry, false)));
+        focusNextPending(host, pending.length);
         appendMoreButton(
           host, pending.length - state.pendingLimit, "destinos pendientes",
           () => { state.pendingLimit += decisionPageSize; renderDecisions(); }
@@ -2149,8 +2156,63 @@
         renderRules();
       }
 
-      // Movement id -> {category, source} proposed for pending purchases; kept only in this page, never saved.
+      // Pending movements of each owner in the selected currency, as buttons that open that owner's view.
+      function ownerProgress() {
+        const counts = { santiago: 0, manuela: 0 };
+        safeArray(state.data.transactions).forEach(tx => {
+          if (tx && tx.decision == null && tx.owner in counts && (
+            txCurrency(tx) === state.currency || (state.currency === "COP" && txCurrency(tx) === "USD")
+          )) counts[tx.owner] += 1;
+        });
+        const line = el("div", "owner-progress");
+        line.setAttribute("role", "group");
+        line.setAttribute("aria-label", "Pendientes por titular");
+        Object.entries(counts).forEach(([owner, count]) => {
+          const button = el("button", "chip", `${ownerLabel(owner)}: ${count}`);
+          button.type = "button";
+          button.setAttribute("aria-pressed", String(state.owner === owner));
+          button.setAttribute("aria-label", `${ownerLabel(owner)}: ${count} ${count === 1 ? "movimiento" : "movimientos"} por decidir. Ver solo los suyos.`);
+          button.addEventListener("click", () => {
+            const target = document.querySelector(`#owner-switch button[data-owner="${owner}"]`);
+            if (target) target.click();
+          });
+          line.append(button);
+        });
+        return line;
+      }
+
+      // After a decision, keyboard and screen focus move to the card now in the same place.
+      function focusNextPending(host, pendingCount) {
+        const position = state.focusPending;
+        const decided = state.lastPendingCount != null && pendingCount < state.lastPendingCount;
+        state.lastPendingCount = pendingCount;
+        state.focusPending = null;
+        if (position == null || !decided) return;
+        const cards = Array.from(host.children).filter(child => child.tagName === "ARTICLE");
+        const target = cards[Math.min(position, cards.length - 1)];
+        const heading = target && target.querySelector("h3");
+        if (!heading) return;
+        heading.tabIndex = -1;
+        heading.focus({ preventScroll: true });
+        heading.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      }
+
+      $("#pending-list").addEventListener("click", event => {
+        const button = event.target.closest("button");
+        if (!button) return;
+        const card = Array.from(event.currentTarget.children).find(child => child.contains(button));
+        const cards = Array.from(event.currentTarget.children).filter(child => child.tagName === "ARTICLE");
+        if (card) state.focusPending = cards.indexOf(card);
+      }, true);
+
+      // Movement id -> {category, source} proposed for pending movements, as the server keeps them.
       let categorySuggestions = {};
+      function loadSuggestions() {
+        const raw = state.data && typeof state.data.category_suggestions === "object" && state.data.category_suggestions
+          ? state.data.category_suggestions : {};
+        categorySuggestions = Object.fromEntries(Object.entries(raw).filter(([, item]) =>
+          item && typeof item.category === "string" && ["rule", "history", "ollama"].includes(item.source)));
+      }
       const suggestionNotes = {
         rule: "Sugerida por una de tus reglas; cámbiala si no corresponde.",
         history: "Sugerida por tus decisiones anteriores de este comercio; cámbiala si no corresponde.",
@@ -2444,7 +2506,7 @@
           });
           const body = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `El servidor respondió ${response.status}`);
-          showMessage(onAnswer(body));
+          showMessage(await onAnswer(body));
         } catch (error) {
           showMessage(`No se pudieron pedir sugerencias: ${error.message}`, "error");
         } finally {
@@ -2459,11 +2521,8 @@
           : "No hay sugerencias: o ya no quedan compras de avisos sin regla (las de extractos nunca las decide una regla), o Ollama no reconoció los comercios. Las de extractos ya llegan con categoría sugerida; para recalcularla usa «Volver a sugerir categorías» arriba.";
       }));
 
-      $("#suggest-categories").addEventListener("click", () => askOllama("/api/category-suggestions", body => {
-        const raw = body && typeof body.by_id === "object" && body.by_id ? body.by_id : {};
-        categorySuggestions = Object.fromEntries(Object.entries(raw).filter(([, item]) =>
-          item && typeof item.category === "string" && ["rule", "history", "ollama"].includes(item.source)));
-        renderDecisions();
+      $("#suggest-categories").addEventListener("click", () => askOllama("/api/category-suggestions", async () => {
+        await loadState(true);  // the server saved them: the panel shows what it kept
         const values = Object.values(categorySuggestions);
         const own = values.filter(item => item.source !== "ollama").length;
         return values.length ? `Categoría sugerida en ${values.length} compra(s) pendiente(s) (${own} por tus reglas o decisiones anteriores, ${values.length - own} por Ollama). Revísala y decide.`

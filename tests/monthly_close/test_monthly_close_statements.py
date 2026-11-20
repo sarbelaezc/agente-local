@@ -868,11 +868,24 @@ def test_statement_purchases_arrive_with_a_proposed_category_but_pending(store):
             raise LocalModelError("Ollama apagado")
 
     events = [line("a", "FLYPASS PEAJE"), line("b", "TIENDA LUNA"), line("c", "COMERCIO RARO"), line("d", "TIENDA LUNA", "transfer")]
-    assert propose_statement_categories(store, Down(), events) == (2, True)
+    proposals, failed = propose_statement_categories(store, Down(), events)
+    assert failed and proposals == {
+        "stmt:a": {"category": "Transporte", "source": "rule"},
+        "stmt:b": {"category": "Salud y farmacia", "source": "history"},
+    }
     assert [event["category"] for event in events] == ["Transporte", "Salud y farmacia", "Otros gastos", "Otros gastos"]
     assert "una de tus reglas" in events[0]["reason"] and "decisiones anteriores" in events[1]["reason"]
     store.record_statements([], events)
-    assert {row["id"]: row["decision"] for row in store.state()["transactions"]}["stmt:a"] is None
+    store.save_category_suggestions(proposals, replace=False)
+    state = store.state()
+    assert {row["id"]: row["decision"] for row in state["transactions"]}["stmt:a"] is None
+    # Kept for the panel, only while the movement is pending.
+    assert state["category_suggestions"]["stmt:a"] == {"category": "Transporte", "source": "rule"}
+    store.decide("stmt:a", "family", "Transporte")
+    assert "stmt:a" not in store.state()["category_suggestions"]
+    with pytest.raises(ValueError):
+        store.save_category_suggestions({"stmt:b": {"category": "Inventada", "source": "ollama"}}, replace=True)
+    assert store.state()["category_suggestions"] == {"stmt:b": {"category": "Salud y farmacia", "source": "history"}}
 
 
 def test_savings_interest_and_own_card_payments_are_decided_by_their_fixed_wording(store):

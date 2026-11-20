@@ -659,13 +659,17 @@ def reconcile_statements(
         )
         for candidate in report.missing
     ]
-    proposed, model_failed = 0, False
+    proposals: dict[str, dict] = {}
     if not read_only and any(event["kind"] == "purchase" for event in events):
         model = OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
-        proposed, model_failed = propose_statement_categories(store, model, events)
+        proposals, model_failed = propose_statement_categories(store, model, events)
         if model_failed:
             print("Ollama no respondio: las categorias se sugirieron solo con tus reglas y decisiones anteriores.", flush=True)
     imported = 0 if read_only else store.record_statements(report.checks(), events)
+    if proposals:
+        # Kept so the panel can say where each proposed category came from.
+        store.save_category_suggestions(proposals, replace=False)
+    proposed = len(proposals)
     reclassified = 0 if read_only else store.reclassify_statement_movements(
         _statement_kinds(report, preferences),
     )
