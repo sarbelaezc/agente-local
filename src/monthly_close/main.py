@@ -5,9 +5,9 @@ import calendar
 import hashlib
 import json
 import logging
-import os
 import sys
 import traceback
+from collections import Counter
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -548,6 +548,43 @@ class _AllFound(Exception):
     """Every notice the backfill needed was read; the walk can stop."""
 
 
+def reread_notices(data_dir: Path, settings: dict, preferences: Preferences, rows: list, handle) -> int:
+    """Read again (read-only, no Ollama) the notices behind rows; handle(mail, its rows) each one.
+
+    Folders are walked newest first and stop at notices older than the oldest row, or once
+    every notice was read. Returns how many notices were read.
+    """
+    if not rows:
+        return 0
+    by_notice: dict[str, list] = {}
+    for row in rows:
+        by_notice.setdefault(row["message_id"], []).append(row)
+    oldest = min(date.fromisoformat(row["day"]) for row in rows) - timedelta(days=10)
+    remaining = set(by_notice)
+    with open_source(data_dir, settings, preferences.approved_senders) as reader:
+
+        def visit(candidate: Candidate) -> bool | None:
+            if candidate.sender not in preferences.approved_senders:
+                raise OutlookError("La carpeta devolvio un remitente no autorizado. Detenido.")
+            stamp = getattr(reader, "_received", {}).get(candidate.item_id)
+            if isinstance(stamp, str) and received_local(stamp, preferences.timezone).date() < oldest:
+                return False
+            mail = reader.read(candidate)
+            if mail.id not in remaining:
+                return None
+            remaining.discard(mail.id)
+            handle(mail, by_notice[mail.id])
+            if not remaining:
+                raise _AllFound
+            return None
+
+        try:
+            reader.walk_folders(settings["max_messages"], visit)
+        except _AllFound:
+            pass
+    return len(by_notice) - len(remaining)
+
+
 def backfill_destinations(
     store: Store, data_dir: Path, settings: dict, preferences: Preferences,
 ) -> dict[str, int]:
@@ -562,43 +599,17 @@ def backfill_destinations(
             f"AND group_key IS NULL AND kind IN ({','.join('?' * len(OUTGOING_KINDS))})",
             OUTGOING_KINDS,
         ).fetchall()
-    if not rows:
-        return {"notices": 0, "read": 0, "updated": 0, "without_destination": 0}
-    by_notice: dict[str, list] = {}
-    for row in rows:
-        by_notice.setdefault(row["message_id"], []).append(row)
-    oldest = min(date.fromisoformat(row["day"]) for row in rows) - timedelta(days=10)
-    remaining = set(by_notice)
     found: dict[str, str] = {}
-    with open_source(data_dir, settings, preferences.approved_senders) as reader:
 
-        def visit(candidate: Candidate) -> bool | None:
-            if candidate.sender not in preferences.approved_senders:
-                raise OutlookError("La carpeta devolvio un remitente no autorizado. Detenido.")
-            stamp = getattr(reader, "_received", {}).get(candidate.item_id)
-            if isinstance(stamp, str) and received_local(stamp, preferences.timezone).date() < oldest:
-                return False
-            mail = reader.read(candidate)
-            if mail.id not in remaining:
-                return None
-            remaining.discard(mail.id)
-            events = [{"amount_minor": row["amount_minor"]} for row in by_notice[mail.id]]
-            assign_destinations(events, mail.subject + "\n" + mail.body)
-            for row, event in zip(by_notice[mail.id], events):
-                if event.get("group_key"):
-                    found[row["id"]] = event["group_key"]
-            if not remaining:
-                raise _AllFound
-            return None
+    def destinations(mail, notice_rows) -> None:
+        events = [{"amount_minor": row["amount_minor"]} for row in notice_rows]
+        assign_destinations(events, mail.subject + "\n" + mail.body)
+        found.update({row["id"]: event["group_key"] for row, event in zip(notice_rows, events) if event.get("group_key")})
 
-        try:
-            reader.walk_folders(settings["max_messages"], visit)
-        except _AllFound:
-            pass
-    updated = store.set_destinations(found)
+    read = reread_notices(data_dir, settings, preferences, rows, destinations)
     return {
-        "notices": len(by_notice), "read": len(by_notice) - len(remaining),
-        "updated": updated, "without_destination": len(rows) - len(found),
+        "notices": len({row["message_id"] for row in rows}), "read": read,
+        "updated": store.set_destinations(found), "without_destination": len(rows) - len(found),
     }
 
 
@@ -617,43 +628,20 @@ def backfill_card_accounts(
             "SELECT id,message_id,day,account FROM transactions WHERE owner='santiago' "
             "AND id NOT LIKE 'stmt:%' AND message_id NOT LIKE 'statement:%' AND kind<>'income'",
         ).fetchall()
-    by_notice: dict[str, list] = {}
-    for row in rows:
-        by_notice.setdefault(row["message_id"], []).append(row)
-    result = {"notices": len(by_notice), "read": 0, "changes": {}, "updated": 0, "backup": None}
-    if not by_notice or not known:
+    result = {"notices": len({row["message_id"] for row in rows}), "read": 0, "changes": {}, "updated": 0, "backup": None}
+    if not known:
         return result
-    oldest = min(date.fromisoformat(row["day"]) for row in rows) - timedelta(days=10)
-    remaining = set(by_notice)
     changes: dict[str, str] = {}
-    pairs: dict[str, int] = {}
-    with open_source(data_dir, settings, preferences.approved_senders) as reader:
+    pairs: Counter = Counter()
 
-        def visit(candidate: Candidate) -> bool | None:
-            if candidate.sender not in preferences.approved_senders:
-                raise OutlookError("La carpeta devolvio un remitente no autorizado. Detenido.")
-            stamp = getattr(reader, "_received", {}).get(candidate.item_id)
-            if isinstance(stamp, str) and received_local(stamp, preferences.timezone).date() < oldest:
-                return False
-            mail = reader.read(candidate)
-            if mail.id not in remaining:
-                return None
-            remaining.discard(mail.id)
-            card = card_named_in(mail, preferences, known)
-            for row in by_notice[mail.id]:
-                if card and row["account"] != card:
-                    changes[row["id"]] = card
-                    pair = f"{row['account']} -> {card}"
-                    pairs[pair] = pairs.get(pair, 0) + 1
-            if not remaining:
-                raise _AllFound
-            return None
+    def correct(mail, notice_rows) -> None:
+        card = card_named_in(mail, preferences, known)
+        for row in notice_rows:
+            if card and row["account"] != card:
+                changes[row["id"]] = card
+                pairs[f"{row['account']} -> {card}"] += 1
 
-        try:
-            reader.walk_folders(settings["max_messages"], visit)
-        except _AllFound:
-            pass
-    result.update(read=len(by_notice) - len(remaining), changes=pairs)
+    result.update(read=reread_notices(data_dir, settings, preferences, rows, correct), changes=dict(pairs))
     if not read_only:
         result["updated"], backup = store.set_card_accounts(changes)
         result["backup"] = backup.name if backup else None

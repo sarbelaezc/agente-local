@@ -100,19 +100,10 @@ def suggest_rules(store: Store, model: CategoryModel, limit: int = 25) -> list[d
     if not asked:
         return []
     counts = {item["merchant"]: item["count"] for item in asked}
-    categories = store.preferences().categories
-    history = CategoryHistory(store, categories)
-    chosen = {}
-    for merchant in counts:
-        known = history.known(merchant)
-        if known:
-            chosen[merchant] = known[0]
-    unknown = [merchant for merchant in counts if merchant not in chosen]
-    if unknown:
-        chosen |= _ask(model, unknown, categories, history.examples(unknown))
+    chosen = _categorize(store, model, {merchant: [merchant] for merchant in counts}, len(counts))
     return [
-        {"pattern": merchant, "category": category, "count": counts[merchant]}
-        for merchant, category in chosen.items()
+        {"pattern": merchant, "category": proposal["category"], "count": counts[merchant]}
+        for merchant, proposal in chosen.items()
     ]
 
 
