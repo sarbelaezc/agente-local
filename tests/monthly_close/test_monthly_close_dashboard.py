@@ -721,7 +721,7 @@ def test_ollama_category_suggestion_is_preselected_and_saved_only_on_decision(da
     page.reload()
     page.wait_for_load_state("networkidle")
     page.get_by_role("tab", name=re.compile("Decisi")).click()
-    page.get_by_role("button", name="Sugerir categorías con Ollama").click()
+    page.get_by_role("button", name="Volver a sugerir categorías").click()
     group_select = page.locator("#pending-list .group-card").filter(has_text="FLYPASS PEAJE").get_by_label(
         re.compile("Categoría para los 2 movimientos"),
     )

@@ -355,7 +355,18 @@ def run_reconcile(
         return texts[name]
 
     monkeypatch.setattr(st, "decrypt_text", decrypt)
-    return app.reconcile_statements(store, tmp_path, settings or {}, preferences, date(2026, 1, 1), read_only)
+    # Tests never reach a real Ollama: this one recognises nothing, so only rules and
+    # past decisions propose categories.
+    class SilentModel:
+        def __init__(self, url, model):
+            pass
+
+        def suggest_categories(self, merchants, categories, examples=None):
+            return {"suggestions": []}
+
+    monkeypatch.setattr(app, "OllamaJsonModel", SilentModel)
+    settings = {"ollama_url": "http://127.0.0.1:11434", "ollama_model": "prueba", **(settings or {})}
+    return app.reconcile_statements(store, tmp_path, settings, preferences, date(2026, 1, 1), read_only)
 
 
 def test_each_mailbox_statements_reconcile_against_its_owners_movements(store, tmp_path, preferences, monkeypatch):
@@ -430,7 +441,7 @@ def test_reconcile_command_reports_read_only_then_imports(store, tmp_path, prefe
         "Extracto_1_202601_CONSOLIDADO_0003.pdf": "no se lee",
     }
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=True)
-    assert result == {"statements": 2, "matched": 0, "missing": 5, "imported": 0, "balances": 1, "reclassified": 0}
+    assert result == {"statements": 2, "matched": 0, "missing": 5, "imported": 0, "balances": 1, "reclassified": 0, "categories_proposed": 0}
     assert store.state()["transactions"] == [] and store.state()["statement_checks"] == []
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
     assert result["imported"] == 5
@@ -715,7 +726,7 @@ def test_reconcile_stores_protection_figures_without_importing_movements(store, 
         "0A81F6F5_PensionVoluntaria_202512.pdf": VOLUNTARY_PREVIOUS,  # before the start: skipped
     }
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
-    assert result == {"statements": 2, "matched": 0, "missing": 0, "imported": 0, "balances": 2, "reclassified": 0}
+    assert result == {"statements": 2, "matched": 0, "missing": 0, "imported": 0, "balances": 2, "reclassified": 0, "categories_proposed": 0}
     assert store.state()["transactions"] == []
     checks = {check["product"]: check for check in store.state()["statement_checks"]}
     assert checks["PROTECCION_VOLUNTARIA"]["contributions_minor"] == 50_000_000
@@ -828,3 +839,36 @@ def test_own_card_payment_wording_is_decided_not_counted_only_on_card_statements
     store.decide("stmt:amex", "third_party_payment")
     store.record_statements([], [])
     assert {row["id"]: row["decision"] for row in store.state()["transactions"]}["stmt:amex"] == "third_party_payment"
+
+
+
+def test_statement_purchases_arrive_with_a_proposed_category_but_pending(store):
+    from shared.local_model import LocalModelError
+    from monthly_close.rule_suggestions import propose_statement_categories
+
+    store.add_rule("PEAJE", "Transporte", "family")
+    store.import_message("old", [{
+        "id": "old", "message_id": "old", "day": "2026-01-02", "merchant": "TIENDA LUNA",
+        "account": "Tarjeta A", "amount_minor": 100, "currency": "COP", "category": "Compras",
+        "kind": "purchase", "decision": None, "reason": "aviso",
+    }])
+    store.decide("old", "personal", "Salud y farmacia")
+
+    def line(event_id, merchant, kind="purchase"):
+        return {
+            "id": f"stmt:{event_id}", "message_id": "statement:x", "day": "2026-01-10",
+            "merchant": merchant, "account": "Tarjeta de crédito Visa", "amount_minor": 100,
+            "currency": "COP", "category": "Otros gastos", "kind": kind, "decision": None,
+            "owner": "santiago", "reason": "Leído del extracto.",
+        }
+
+    class Down:
+        def suggest_categories(self, merchants, categories, examples=None):
+            raise LocalModelError("Ollama apagado")
+
+    events = [line("a", "FLYPASS PEAJE"), line("b", "TIENDA LUNA"), line("c", "COMERCIO RARO"), line("d", "TIENDA LUNA", "transfer")]
+    assert propose_statement_categories(store, Down(), events) == (2, True)
+    assert [event["category"] for event in events] == ["Transporte", "Salud y farmacia", "Otros gastos", "Otros gastos"]
+    assert "una de tus reglas" in events[0]["reason"] and "decisiones anteriores" in events[1]["reason"]
+    store.record_statements([], events)
+    assert {row["id"]: row["decision"] for row in store.state()["transactions"]}["stmt:a"] is None

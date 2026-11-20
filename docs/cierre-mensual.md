@@ -186,9 +186,17 @@ los más frecuentes primero). Usa el mismo historial y los mismos ejemplos que l
 
 ### Sugerencias de categoría para pendientes
 
-En **Decisión**, el botón **Sugerir categorías con Ollama** propone una categoría
-para las compras pendientes, también las importadas de extractos (que llegan como
-«Otros gastos»). Requiere un `runtime.json` válido y Ollama activo.
+Las compras que solo muestra un extracto llegan ya con una **categoría sugerida**:
+al registrar extractos (`reconcile-statements`, no con `-ReadOnly`) se calcula como
+se explica abajo y la razón del movimiento dice su origen («Categoría sugerida por
+tus decisiones anteriores de este comercio; confírmala al decidir»). No decide nada:
+siguen pendientes. Si Ollama no responde, la importación sigue con solo tus reglas
+y decisiones anteriores, y lo demás queda en «Otros gastos»; el comando lo avisa.
+
+En **Decisión**, el botón **Volver a sugerir categorías** recalcula la sugerencia
+para todas las compras pendientes, por ejemplo después de crear reglas o decidir
+más movimientos, o para las que se importaron antes con «Otros gastos». Solo
+preselecciona, sin guardar. Requiere un `runtime.json` válido y Ollama activo.
 
 - Primero, sin Ollama: si una de tus reglas por comercio coincide, se sugiere su
   categoría; si no, y ya decidiste ese mismo comercio como Gasto personal o
@@ -400,7 +408,9 @@ Fiducuenta, crédito de consumo e hipotecario):
 - Un movimiento del extracto **coincide** con uno conocido del mismo importe y
   moneda con hasta 5 días de diferencia; cada uno se usa una sola vez. Lo que solo
   muestra el extracto entra **pendiente** (`statement-import`) y lo decide una
-  persona. Repetir no importa nada dos veces.
+  persona; si es una compra, con una categoría sugerida (ver
+  [Sugerencias de categoría](#sugerencias-de-categoría-para-pendientes)). Repetir no
+  importa nada dos veces.
 - Única excepción: una línea que dice exactamente «ABONO SUCURSAL VIRTUAL» en el
   extracto de una tarjeta de crédito, de cualquiera de los dos titulares, es un
   pago propio desde la cuenta de ahorros y queda decidida **No cuenta**

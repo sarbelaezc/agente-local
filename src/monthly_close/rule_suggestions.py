@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Protocol
 
+from shared.local_model import LocalModelError
 from monthly_close.store import Store, merchant_words
 
 
@@ -115,18 +116,14 @@ def suggest_rules(store: Store, model: CategoryModel, limit: int = 25) -> list[d
     ]
 
 
-def suggest_pending_categories(store: Store, model: CategoryModel, limit: int = 60) -> dict[str, dict]:
-    """Suggest a category for each pending purchase (statement ones included); save nothing.
+def _categorize(
+    store: Store, model: CategoryModel | None, by_merchant: dict[str, list[str]], limit: int,
+) -> dict[str, dict]:
+    """Movement id -> {category, source} for merchants grouped from movements.
 
-    Returns movement id -> {category, source}. The source is "rule" or "history" when the
-    person's own rules or past decisions answer it, and "ollama" otherwise. The panel only
-    preselects it: the person decides.
+    Rules and consistent past decisions answer first; the rest go to the model with
+    examples, unless there is no model. Raises LocalModelError if the model fails.
     """
-    by_merchant: dict[str, list[str]] = {}
-    for row in store.pending_purchases():
-        words = merchant_words(row["merchant"]).strip()
-        if len(words) >= 3:
-            by_merchant.setdefault(words, []).append(row["id"])
     if not by_merchant:
         return {}
     categories = store.preferences().categories
@@ -140,10 +137,62 @@ def suggest_pending_categories(store: Store, model: CategoryModel, limit: int = 
         (words for words in by_merchant if words not in chosen),
         key=lambda words: (-len(by_merchant[words]), words),
     )[:limit]
-    if unknown:
+    if unknown and model is not None:
         for words, category in _ask(model, unknown, categories, history.examples(unknown)).items():
             chosen[words] = (category, "ollama")
     return {
         event_id: {"category": category, "source": source}
         for words, (category, source) in chosen.items() for event_id in by_merchant[words]
     }
+
+
+def _group_by_merchant(rows: list[dict]) -> dict[str, list[str]]:
+    by_merchant: dict[str, list[str]] = {}
+    for row in rows:
+        words = merchant_words(row["merchant"]).strip()
+        if len(words) >= 3:
+            by_merchant.setdefault(words, []).append(row["id"])
+    return by_merchant
+
+
+def suggest_pending_categories(store: Store, model: CategoryModel, limit: int = 60) -> dict[str, dict]:
+    """Suggest a category for each pending purchase (statement ones included); save nothing.
+
+    Returns movement id -> {category, source}. The source is "rule" or "history" when the
+    person's own rules or past decisions answer it, and "ollama" otherwise. The panel only
+    preselects it: the person decides.
+    """
+    return _categorize(store, model, _group_by_merchant(store.pending_purchases()), limit)
+
+
+SOURCE_TEXT = {
+    "rule": "una de tus reglas", "history": "tus decisiones anteriores de este comercio",
+    "ollama": "Ollama",
+}
+
+
+def propose_statement_categories(
+    store: Store, model: CategoryModel | None, events: list[dict], limit: int = 60,
+) -> tuple[int, bool]:
+    """Set a proposed category on statement purchases before they are recorded as pending.
+
+    Nothing is decided: each event keeps decision None and its reason says where the
+    category came from. If the model is missing or fails, rules and past decisions still
+    apply and the rest keep their default category. Returns (proposed, model_failed).
+    """
+    purchases = [event for event in events if event["kind"] == "purchase"]
+    by_merchant = _group_by_merchant(purchases)
+    try:
+        proposals = _categorize(store, model, by_merchant, limit)
+        failed = False
+    except LocalModelError:
+        proposals, failed = _categorize(store, None, by_merchant, limit), True
+    for event in purchases:
+        proposal = proposals.get(event["id"])
+        if proposal is None:
+            continue
+        event["category"] = proposal["category"]
+        event["reason"] = (
+            f"{event['reason']} Categoría sugerida por {SOURCE_TEXT[proposal['source']]}; confírmala al decidir."
+        )
+    return len([event for event in purchases if event["id"] in proposals]), failed

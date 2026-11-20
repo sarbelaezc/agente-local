@@ -69,14 +69,14 @@ estas opciones a los comandos de Python.
 
 | Comando | Qué hace | Ollama |
 |---|---|---|
-| `serve` (predeterminado) | Abre el panel del cierre mensual | No |
+| `serve` (predeterminado) | Abre el panel del cierre mensual | Opcional: solo los botones de sugerencias |
 | `login [-Mailbox <buzón>]` | Inicia sesión: sin `-Mailbox`, el Outlook de Santiago; `-Mailbox manuela`, su Gmail; `-Mailbox facturas`, el buzón de facturas | No |
 | `check-config` | Comprueba el paso 0 y la configuración del cierre | No |
 | `import [-Start AAAA-MM-DD -End AAAA-MM-DD]` | `check-config`, `scan` y apertura del panel | Sí |
 | `scan [-Start … -End …] [-ReadOnly] [-ReprocessEmpty]` | Lee los buzones: sin fechas, solo lo nuevo; con fechas, el rango completo | Sí, salvo con `-ReadOnly` |
 | `pilot [-ReadOnly]` | Prueba la lectura con un solo aviso | Sí, salvo con `-ReadOnly` |
 | `summary -Month AAAA-MM [-Owner santiago\|manuela\|hogar]` | Resumen de un mes en la terminal | No |
-| `reconcile-statements [-Start AAAA-MM-DD] [-ReadOnly]` | Concilia los extractos PDF del banco y de Protección | No |
+| `reconcile-statements [-Start AAAA-MM-DD] [-ReadOnly]` | Concilia los extractos PDF del banco y de Protección | Opcional: sugiere categorías de compras; sin él, solo reglas e historial |
 | `import-manuela [-SourceDir <carpeta>]` | Importa los movimientos exportados del panel de Manuela | No |
 | `owner-account -Owner <titular> -Suffix NNNN` | Registra una cuenta (últimos 4 dígitos) de un titular | No |
 | `payroll-deduction -Owner <titular> -Suffix NNNN` | Marca un crédito cuyas cuotas se descuentan de la nómina | No |

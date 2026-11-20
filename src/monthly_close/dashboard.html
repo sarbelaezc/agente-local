@@ -477,8 +477,8 @@
           </section>
           <h3 id="pending-heading" hidden>Movimientos por decidir</h3>
           <div id="category-suggest" class="decision-actions" style="align-items:center;margin:8px 0 12px">
-            <button type="button" id="suggest-categories" class="button">Sugerir categorías con Ollama</button>
-            <p class="hint" style="margin:0">Preselecciona una categoría en las compras pendientes, también las de extractos. Ollama solo ve el nombre del comercio; tú decides cada destino o movimiento.</p>
+            <button type="button" id="suggest-categories" class="button">Volver a sugerir categorías</button>
+            <p class="hint" style="margin:0">Las compras de extractos ya llegan con una categoría sugerida. Esto la recalcula para las pendientes con tus reglas, tus decisiones anteriores y Ollama (que solo ve el nombre del comercio), y solo la preselecciona: tú decides.</p>
           </div>
           <div id="pending-list" class="decision-list"></div>
           <details class="history-detail" id="rules-detail">
@@ -2456,7 +2456,7 @@
         ruleSuggestions = safeArray(body.suggestions).filter(item => item && typeof item.pattern === "string" && typeof item.category === "string");
         renderRuleSuggestions();
         return ruleSuggestions.length ? `${ruleSuggestions.length} sugerencia(s) por revisar.`
-          : "No hay sugerencias: o ya no quedan compras de avisos sin regla (las de extractos nunca las decide una regla), o Ollama no reconoció los comercios. Para las de extractos usa «Sugerir categorías con Ollama» arriba.";
+          : "No hay sugerencias: o ya no quedan compras de avisos sin regla (las de extractos nunca las decide una regla), o Ollama no reconoció los comercios. Las de extractos ya llegan con categoría sugerida; para recalcularla usa «Volver a sugerir categorías» arriba.";
       }));
 
       $("#suggest-categories").addEventListener("click", () => askOllama("/api/category-suggestions", body => {
