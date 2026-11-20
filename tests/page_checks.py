@@ -7,8 +7,9 @@ from collections.abc import Iterator
 # For each element: its text contrast against the first opaque background behind it
 # (WCAG relative luminance) and its height, to check readability and touch size.
 _READABILITY = r"""elements => elements.map(element => {
+    // rgb() gives channels from 0 to 255; color(srgb ...), the result of color-mix(), from 0 to 1.
     const luminance = color => color.match(/[\d.]+/g).slice(0, 3).map(Number)
-        .map(value => value / 255)
+        .map(value => color.startsWith("color(") ? value : value / 255)
         .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
         .reduce((total, value, index) => total + value * [.2126, .7152, .0722][index], 0);
     let host = element, background = "rgba(0, 0, 0, 0)";

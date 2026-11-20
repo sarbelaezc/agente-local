@@ -162,9 +162,21 @@ Estos modos no escriben el Excel ni mueven correos. Se ejecutan con Python:
 Se abre en el navegador en `http://127.0.0.1:<puerto libre>/` y se cierra al
 terminar, con el mismo estilo del panel del cierre mensual y tema claro u oscuro.
 
-- **Cada correo es una tarjeta** con su estado, sus avisos, la carpeta destino y
-  sus facturas editables: empresa, razón social, fecha, valor, número y moneda.
-  Un correo con errores de extracción se muestra en solo lectura.
+- **Cada correo es una tarjeta** con sus avisos, la carpeta destino y sus facturas
+  editables: empresa, razón social, fecha, valor, número y moneda. El estado solo
+  aparece cuando deja de ser «Pendiente de aprobación» (aprobado, archivado,
+  bloqueado…). Un correo con errores de extracción se muestra en solo lectura, con
+  cada dato junto a su nombre.
+- **Carpeta sugerida.** Bajo «Carpeta destino» se indica qué carpeta se sugiere y
+  por qué, por ejemplo «Sugerida: Salud (historial del proveedor)».
+- **Valor.** Debajo del valor se muestra cómo quedará registrado, por ejemplo «Se
+  registrará: $ 119.000 COP», con la misma lectura de separadores que usa el
+  agente al escribir el Excel: `1.234` es mil doscientos treinta y cuatro y
+  `1.234,5` lleva decimales. Si el valor es ambiguo, lo dice antes de aprobar.
+- **Cabecera y barra.** La cabecera muestra solo el nombre del Excel (la ruta
+  completa aparece al pasar el cursor). «Seleccionar correos aptos» está encima de
+  la lista; la barra fija de abajo deja «Aprobado por», «Cerrar sin ejecutar» y
+  «Aprobar y ejecutar», en una sola fila de botones en el móvil.
 - **Advertencias corregibles.** Los campos que Ollama no pudo respaldar y una
   diferencia entre el número del asunto y el del documento se muestran como
   advertencias: contrasta con el PDF y corrige antes de aprobar.
@@ -299,7 +311,9 @@ personales: no las subas a Git.
 operaciones permitidas, reintentos, carpetas, adjuntos, huella del cuerpo,
 movimiento y verificación), aprobación conjunta, persistencia, cancelación,
 recuperación sin duplicar registros, bloqueo de lotes simultáneos, el panel en
-Chromium y el escritor de Excel con libros sintéticos.
+Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas y que la vista
+previa del valor lee los montos igual que el escritor del Excel) y el escritor de
+Excel con libros sintéticos.
 
 **Pendiente**
 
@@ -308,3 +322,5 @@ Chromium y el escritor de Excel con libros sintéticos.
 - No consta una prueba con un PDF escaneado real (OCR).
 - Las pruebas no miden la precisión general del modelo: cada campo se revisa en el
   panel.
+- Los cambios de presentación del panel (vista previa del valor, carpeta sugerida,
+  barra compacta en el móvil) no se han usado todavía con un lote real.

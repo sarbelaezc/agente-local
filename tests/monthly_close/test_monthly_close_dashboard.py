@@ -13,7 +13,7 @@ import httpx
 from playwright.sync_api import expect
 
 from builders import movement
-from page_checks import assert_readable, in_both_themes
+from tests.page_checks import assert_readable, in_both_themes
 from monthly_close.store import Store
 
 

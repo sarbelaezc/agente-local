@@ -24,6 +24,7 @@ from mail_invoices.review import ReviewItem
 from mail_invoices.review_server import ReviewPanel
 from mail_invoices.settings import MailSettings
 from mail_invoices.workbook import InvoiceWorkbook, ReviewedInvoice
+from tests.page_checks import assert_readable
 
 CLIENT_ID = "11111111-2222-3333-4444-555555555555"
 FOLDERS = ["Salud", "Hogar/Servicios"]
@@ -482,3 +483,74 @@ def test_the_classification_panel_saves_examples_and_records_the_folders(tmp_pat
     assert not thread.is_alive()
     assert report["messages"][0]["reviewed_folder"] == "Hogar/Servicios"
     assert store.load()[0].folder == "Salud"
+
+
+MONEY_SAMPLES = [
+    "119000", "119.000", "119,000", "1.234.567", "1,234,567", "1.234,56", "1,234.56", "$ 119.000",
+    "119 000", "12,5", "12.50", "0,5", "007", "1.2,3.4", "1,23", "1.2345", "12.34.56", "abc", "",
+    "1.234.56", "1,234,56", "-5", "1e3", "1\u00a0234,00",
+]
+
+
+def test_the_amount_preview_reads_values_exactly_as_the_server(new_page):
+    from decimal import Decimal
+
+    from mail_invoices.documents import DocumentError, parse_money
+
+    panel = started()
+    try:
+        page = new_page()
+        page.goto(panel.url)
+        page.get_by_role("heading", name="Facturas por aprobar").wait_for()
+        shown = page.evaluate("samples => samples.map(sample => parseMoney(sample))", MONEY_SAMPLES)
+    finally:
+        panel._closed.set()
+    for sample, value in zip(MONEY_SAMPLES, shown):
+        try:
+            expected = parse_money(sample)
+        except DocumentError:
+            expected = None
+        assert (None if value is None else Decimal(value)) == expected, sample
+
+
+def test_the_review_page_is_compact_and_keeps_labels_with_their_values(tmp_path, book, new_page):
+    messages = [message("m1"), message("m2", numbers=("FE-9",), errors=["Adjunto ilegible: FE.pdf"])]
+    view, pdfs = br.batch_view(messages, FOLDERS, settings(tmp_path, book), None, book)
+    panel = started(view=lambda: br.refresh_view(view, messages), pdfs=pdfs)
+    try:
+        page = new_page(viewport={"width": 390, "height": 844})
+        page.goto(panel.url)
+        page.get_by_role("heading", name="Facturas por aprobar").wait_for()
+        # A locked invoice reads as label/value pairs.
+        pairs = page.locator(".readonly > div").evaluate_all(
+            "pairs => pairs.map(pair => [pair.querySelector('dt').textContent, pair.querySelector('dd').textContent])")
+        assert pairs[:2] == [["Empresa", "Proveedor SAS"], ["Razón social", "Proveedor SAS"]]
+        # The amount shows how it will be written, and follows the edits.
+        amount = page.get_by_label("Valor").first
+        assert page.get_by_text("Se registrará: $ 119.000 COP").count() >= 1
+        amount.fill("1.234,5")
+        assert page.get_by_text("Se registrará: $ 1.234,5 COP").count() == 1
+        # The folder field says which folder is suggested and why.
+        assert page.get_by_text("Sugerida: Salud (historial del proveedor).").count() >= 1
+        # Only the workbook's name, and no state pill while every message is just pending.
+        assert page.locator("#meta").inner_text().startswith(f"Excel: {book.path.name} ·")
+        assert page.locator('[data-role="state"]:visible').count() == 0
+        # On a phone the approval bar stays small.
+        assert page.locator("#bar").bounding_box()["height"] <= 160
+    finally:
+        panel._closed.set()
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_review_texts_and_controls_are_readable_in_both_themes(tmp_path, book, new_page, theme):
+    messages = [message("m1"), message("m2", numbers=("FE-9",), errors=["Adjunto ilegible: FE.pdf"])]
+    view, pdfs = br.batch_view(messages, FOLDERS, settings(tmp_path, book), None, book)
+    panel = started(view=lambda: br.refresh_view(view, messages), pdfs=pdfs)
+    try:
+        page = new_page(color_scheme=theme)
+        page.goto(panel.url)
+        page.get_by_role("heading", name="Facturas por aprobar").wait_for()
+        assert_readable(page.locator(".hint:visible, .readonly dt, .meta, .notes li"), theme, at_least=5)
+        assert_readable(page.locator(".button:visible"), theme, at_least=3, min_height=38)
+    finally:
+        panel._closed.set()

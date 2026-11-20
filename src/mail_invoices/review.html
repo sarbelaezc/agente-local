@@ -11,7 +11,7 @@
     /* Same visual language as the monthly close dashboard: warm paper, ink, rounded cards. */
     :root {
       color-scheme: light;
-      --bg: #f6f5f2; --surf: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --mut: #6f6e69;
+      --bg: #f6f5f2; --surf: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --mut: #68675f;
       --line: #e6e5e0; --soft: #efeeea;
       --acc: #2a78d6; --good: #1a7f4b; --warn: #8a5200; --bad: #b42318;
       --good-soft: color-mix(in srgb, var(--good) 13%, var(--surf));
@@ -88,6 +88,7 @@
     .field .error { color: var(--bad); font-size: 13px; }
     .field .hint { color: var(--mut); font-size: 12.5px; }
     .folder-row { margin-top: 12px; max-width: 520px; }
+    .list-actions { display: flex; justify-content: flex-end; margin: 0 0 10px; }
 
     .invoice { margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--soft); }
     .invoice-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -98,7 +99,10 @@
     @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } .card-head { grid-template-columns: auto 1fr; } .card-head .pill { grid-column: 2; justify-self: start; } }
     .readonly dd { margin: 0 0 6px; overflow-wrap: anywhere; }
     .readonly dt { color: var(--mut); font-size: 12.5px; }
-    .readonly { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 12px; margin: 0; }
+    .readonly { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; margin: 0; }
+    .readonly > div { min-width: 0; }
+    @media (max-width: 760px) { .readonly { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 480px) { .readonly { grid-template-columns: 1fr; } }
     .numeric { font-variant-numeric: tabular-nums; }
 
     .button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 9px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surf); font-weight: 600; text-decoration: none; color: var(--ink); }
@@ -125,9 +129,10 @@
       .summary-detail { display: none; }
       .bar .field { max-width: none; grid-template-columns: auto 1fr; align-items: center; column-gap: 10px; }
       .bar .field .error { grid-column: 1 / -1; }
-      .bar-actions { grid-column: 1; grid-row: auto; display: grid; grid-template-columns: 1fr 1fr; }
-      .bar-actions .button { min-height: 44px; padding: 8px 10px; font-size: 13.5px; }
-      .bar-actions .primary { grid-column: 1 / -1; order: 3; font-size: 15px; }
+      /* One row: a compact way out, and the approval taking the rest of the width. */
+      .bar-actions { grid-column: 1; grid-row: auto; display: grid; grid-template-columns: auto 1fr; }
+      .bar-actions .button { min-height: 44px; padding: 8px 12px; font-size: 13.5px; }
+      .bar-actions .primary { font-size: 15px; }
     }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   </style>
@@ -150,6 +155,7 @@
       <p class="lede">Estas facturas coinciden con una fila del Excel que no tiene número. Decide cada una y vuelve a aprobar.</p>
       <div id="legacy-list"></div>
     </section>
+    <div class="list-actions"><button type="button" class="button small" id="select-ready">Seleccionar correos aptos</button></div>
     <div id="cards"></div>
   </main>
 
@@ -165,7 +171,6 @@
         <span class="error" id="approver-error"></span>
       </div>
       <div class="bar-actions">
-        <button type="button" class="button" id="select-ready">Seleccionar correos aptos</button>
         <button type="button" class="button" id="close">Cerrar sin ejecutar</button>
         <button type="button" class="button primary" id="approve">Aprobar y ejecutar</button>
       </div>
@@ -260,7 +265,11 @@
       if (extra) box.append(extra);
       if (!editable) {
         const list = el("dl", "readonly");
-        for (const [key, label] of FIELDS) { list.append(el("dt", "", label), el("dd", key === "amount" ? "numeric" : "", invoice.values[key] || "—")); }
+        for (const [key, label] of FIELDS) {
+          const pair = el("div");
+          pair.append(el("dt", "", label), el("dd", key === "amount" ? "numeric" : "", invoice.values[key] || "—"));
+          list.append(pair);
+        }
         box.append(list);
         return box;
       }
@@ -278,12 +287,54 @@
         if (key === "currency") { input.maxLength = 3; input.autocapitalize = "characters"; }
         let hint = "";
         if (key === "company" && invoice.company_hint === "history") hint = "Sugerida por el historial del Excel; verifícala.";
-        if (key === "company" && invoice.company_hint === "legal_name") hint = "Sin historial: se usa la razón social.";
+        if (key === "amount") hint = amountPreview(input.value, invoice.values.currency);
         input.addEventListener("blur", () => checkField(input));
         grid.append(field(`f-${message.id}-${index}-${key}`.replace(/[^\w-]/g, "_"), label, input, hint));
       }
       box.append(grid);
+      const amount = grid.querySelector('input[data-key="amount"]');
+      const currency = grid.querySelector('input[data-key="currency"]');
+      const refresh = () => { $(`${amount.id}-hint`).textContent = amountPreview(amount.value, currency.value); };
+      amount.addEventListener("input", refresh);
+      currency.addEventListener("input", refresh);
       return box;
+    }
+
+    // Same reading as parse_money on the server, so the preview is what will be written.
+    function parseMoney(text) {
+      let value = String(text).trim().replace(/\$/g, "").replace(/[  ]/g, "");
+      if (!/^\d+(?:[.,]\d+)*$/.test(value)) return null;
+      if (value.includes(",") && value.includes(".")) {
+        const decimal = value.lastIndexOf(",") > value.lastIndexOf(".") ? "," : ".";
+        const thousands = decimal === "," ? "." : ",";
+        value = value.split(thousands).join("").split(decimal).join(".");
+      } else if (value.includes(",") || value.includes(".")) {
+        const separator = value.includes(",") ? "," : ".";
+        const parts = value.split(separator);
+        if (parts.length > 2 || parts[parts.length - 1].length === 3) {
+          if (!parts.slice(1).every((part) => part.length === 3)) return null;
+          value = parts.join("");
+        } else {
+          value = parts.join(".");
+        }
+      }
+      // Decimal() on the server rejects anything else, such as two decimal points left over.
+      return /^\d+(?:\.\d+)?$/.test(value) ? value : null;
+    }
+
+    function amountPreview(text, currency) {
+      if (!String(text).trim()) return "Completa el valor de la factura.";
+      const value = parseMoney(text);
+      if (value === null) return "No se reconoce el valor: usa números con un solo tipo de separador decimal.";
+      const [whole, fraction = ""] = value.split(".");
+      const grouped = whole.replace(/^0+(?=\d)/, "").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+      const decimals = fraction.replace(/0+$/, "");
+      const shown = decimals ? `${grouped},${decimals}` : grouped;
+      return `Se registrará: $ ${shown} ${String(currency || "").trim().toUpperCase()}`.trim();
+    }
+
+    function folderSuggestion(message) {
+      return message.folder ? `Sugerida: ${message.folder} (${message.reason}).` : `Sin carpeta sugerida: ${message.reason}.`;
     }
 
     function batchCard(message) {
@@ -312,6 +363,7 @@
       const pill = el("span", "pill", message.state_text);
       pill.dataset.tone = TONE[message.state] || "";
       pill.dataset.role = "state";
+      pill.hidden = message.state === "pending";
       head.append(hit, titles, pill);
       card.append(head);
       const items = [];
@@ -320,13 +372,13 @@
       for (const warning of message.warnings) items.push([warning, "warn"]);
       if (message.last_error) items.push([`Último error: ${message.last_error}`, "bad"]);
       if (message.editable && !message.selectable) items.push(["No se puede aprobar mientras tenga errores de extracción. Revísalo en Outlook.", "bad"]);
-      if (message.reason) items.push([`Carpeta sugerida: ${message.reason}`, ""]);
+      if (message.reason && !editable) items.push([folderSuggestion(message), ""]);
       const list = notes(items);
       if (list) { list.dataset.role = "notes"; card.append(list); }
       if (editable) {
         const select = folderSelect(`d-${message.id}`.replace(/[^\w-]/g, "_"), state.view.folders, message.folder, false);
         select.addEventListener("blur", () => checkField(select));
-        const box = field(select.id, "Carpeta destino", select);
+        const box = field(select.id, "Carpeta destino", select, message.reason ? folderSuggestion(message) : "");
         box.classList.add("folder-row");
         card.append(box);
       } else if (message.folder) {
@@ -376,8 +428,9 @@
         ? "Revisa los datos de cada factura y la carpeta de cada correo. Solo se registran y archivan los correos que selecciones; las casillas empiezan vacías."
         : "Revisa la carpeta propuesta para cada correo. Esta simulación no mueve correos ni registra facturas.";
       $("meta").textContent = batch
-        ? `Excel: ${view.workbook} · se hace una copia de seguridad antes de escribir.`
+        ? `Excel: ${String(view.workbook).split(/[\\/]/).pop()} · se hace una copia de seguridad antes de escribir.`
         : (view.decisions_path ? `Ejemplos guardados en ${view.decisions_path}` : "");
+      $("meta").title = batch ? String(view.workbook) : "";
       $("approver-label").textContent = batch ? "Aprobado por" : "Confirmado por";
       $("approver").value = view.approver || "";
       $("select-ready").hidden = !batch;
@@ -584,7 +637,7 @@
       for (const message of view.messages) {
         const card = document.querySelector(`.card[data-id="${CSS.escape(message.id)}"]`);
         const pill = card && card.querySelector('[data-role="state"]');
-        if (pill) { pill.textContent = message.state_text; pill.dataset.tone = TONE[message.state] || ""; }
+        if (pill) { pill.textContent = message.state_text; pill.dataset.tone = TONE[message.state] || ""; pill.hidden = message.state === "pending"; }
       }
     }
 
