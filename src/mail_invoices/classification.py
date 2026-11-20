@@ -68,8 +68,7 @@ def _classify(
     mailbox, settings: MailSettings, days: int, authorized_history: list[str], use_model: bool,
     *, include_review_items: bool, candidate_text: str | None,
 ) -> dict:
-    from mail_invoices.workflow import _build_ocr, _extract_file, _prefer_xml_candidates
-    from mail_invoices.review import ReviewItem
+    from mail_invoices.workflow import _build_ocr
 
     store = InvoiceWorkbook(settings.workbook, settings.backup_dir, settings.sheet)
     model = OllamaJsonModel(settings.ollama_url, settings.ollama_model) if use_model else None
@@ -101,31 +100,7 @@ def _classify(
             result["body_digest"] = detail.body_digest
             if not paths:
                 result["errors"].append("No supported attachments downloaded")
-            items = []
-            # XML first: a loose PDF paired one-to-one with an XML is its graphic
-            # rendering, exactly as inside a ZIP, so it is not read, OCR'd or sent to Ollama.
-            xmls: list[tuple[str, set[str]]] = []
-            claimed: set[int] = set()
-            for path in sorted(paths, key=lambda item: item.suffix.lower() != ".xml"):
-                if path.suffix.lower() == ".pdf":
-                    pair = rendered_xml(path.name, xmls)
-                    if pair is not None and pair not in claimed:
-                        claimed.add(pair)
-                        continue
-                if path.stat().st_size > MAX_FILE_BYTES:
-                    result["errors"].append(f"{path.name}: larger than 10 MB")
-                    path.unlink()
-                    continue
-                extracted, issues = _extract_file(path, ocr, model)
-                # Only an XML that yielded an invoice can make its PDF a mere rendering.
-                if path.suffix.lower() == ".xml" and extracted:
-                    xmls.append((path.stem.lower(), {c.number.lower() for c, _, _ in extracted if c.number}))
-                result["errors"].extend(f"{i['source']}: {i['error']}" for i in issues)
-                for candidate, rejected, error in extracted:
-                    # Include archive name in identity, without merging different ZIPs.
-                    candidate = _with_archive_path(candidate, path)
-                    items.append(ReviewItem(candidate, subject, rejected, error))
-            items = _prefer_xml_candidates(items)
+            items = _review_items(paths, subject, ocr, model, result["errors"])
             if include_review_items:
                 result["review_items"] = items
             statuses = []
@@ -176,6 +151,39 @@ def _classify(
         "confirmed_examples": len(confirmed),
         "messages": results,
     }
+
+
+def _review_items(paths: list[Path], subject: str, ocr, model, errors: list[str]) -> list:
+    """The invoices found in a message's attachments; problems are added to errors.
+
+    XML first: a loose PDF paired one-to-one with an XML is its graphic rendering,
+    exactly as inside a ZIP, so it is not read, OCR'd or sent to Ollama.
+    """
+    from mail_invoices.workflow import _extract_file, _prefer_xml_candidates
+    from mail_invoices.review import ReviewItem
+
+    items = []
+    xmls: list[tuple[str, set[str]]] = []
+    claimed: set[int] = set()
+    for path in sorted(paths, key=lambda item: item.suffix.lower() != ".xml"):
+        if path.suffix.lower() == ".pdf":
+            pair = rendered_xml(path.name, xmls)
+            if pair is not None and pair not in claimed:
+                claimed.add(pair)
+                continue
+        if path.stat().st_size > MAX_FILE_BYTES:
+            errors.append(f"{path.name}: larger than 10 MB")
+            path.unlink()
+            continue
+        extracted, issues = _extract_file(path, ocr, model)
+        # Only an XML that yielded an invoice can make its PDF a mere rendering.
+        if path.suffix.lower() == ".xml" and extracted:
+            xmls.append((path.stem.lower(), {c.number.lower() for c, _, _ in extracted if c.number}))
+        errors.extend(f"{i['source']}: {i['error']}" for i in issues)
+        for candidate, rejected, error in extracted:
+            # Include archive name in identity, without merging different ZIPs.
+            items.append(ReviewItem(_with_archive_path(candidate, path), subject, rejected, error))
+    return _prefer_xml_candidates(items)
 
 
 def _with_archive_path(candidate: InvoiceCandidate, path: Path) -> InvoiceCandidate:
