@@ -69,7 +69,7 @@ estas opciones a los comandos de Python.
 
 | Comando | Qué hace | Ollama |
 |---|---|---|
-| `serve` (predeterminado) | Abre el panel del cierre mensual | Opcional: solo los botones de sugerencias |
+| `serve [-Red]` (predeterminado) | Abre el panel del cierre mensual; con `-Red`, también para tus [dispositivos emparejados](docs/configuracion.md#11-paneles-desde-otros-dispositivos-opcional) | Opcional: solo los botones de sugerencias |
 | `login [-Mailbox <buzón>]` | Inicia sesión: sin `-Mailbox`, el Outlook de Santiago; `-Mailbox manuela`, su Gmail; `-Mailbox facturas`, el buzón de facturas | No |
 | `check-config` | Comprueba el paso 0 y la configuración del cierre | No |
 | `import [-Start AAAA-MM-DD -End AAAA-MM-DD]` | `check-config`, `scan` y apertura del panel | Sí |
@@ -85,8 +85,10 @@ estas opciones a los comandos de Python.
 | `backfill-destinations` | Completa el destino de pagos de Santiago ya importados | No |
 | `backfill-card-accounts [-ReadOnly]` | Corrige la tarjeta de movimientos de Santiago ya importados según los dígitos del aviso | No |
 | `scheduled` | Cierre automático de la tarea programada | Solo si toca cerrar |
-| `invoices [-BatchSize 1-20] [-Days 1-365] [-Resume]` | Lote de facturas: 10 correos de los últimos 90 días por defecto | Sí |
+| `invoices [-BatchSize 1-20] [-Days 1-365] [-Resume] [-Red]` | Lote de facturas: 10 correos de los últimos 90 días por defecto; con `-Red`, el panel también para tus dispositivos emparejados | Sí |
 | `invoices-cleanup [-OlderThanDays N] [-Apply]` | Limpia estados de lotes que ya no hace falta guardar | No |
+| `devices [-Revoke <nombre> \| -RevokeAll]` | Lista o revoca los dispositivos emparejados con los paneles | No |
+| `lan-firewall [-Remove]` | Como administrador, crea (o quita) la regla del firewall que deja entrar a los paneles desde tu red privada | No |
 
 Si la política de PowerShell bloquea los scripts, ejecútalo así desde CMD o Git
 Bash:
@@ -145,6 +147,7 @@ ignora. Para guardarlo en otro lugar, define la variable de entorno
 | `.local\MonthlyCloseAgent\` | `runtime.json`, `close.sqlite3` (movimientos, decisiones, reglas y auditoría), sesiones de Microsoft y Google, `statements.json` (contraseñas de los extractos de cada titular), `credit_ledgers.json` y `last-close.txt` |
 | `.local\MailInvoiceAgent\` | Sesión de Microsoft de facturas, estados de lotes, decisiones de carpetas, copias del Excel (las 5 más recientes) y `tessdata` |
 | `.local\ImportManuela\` | Archivos exportados del panel de Manuela |
+| `.local\red-local\` | Solo si usas `-Red`: el certificado de la red de casa y su clave, el certificado del servidor y los dispositivos emparejados de cada panel (solo un resumen de su sesión) |
 | `…\logs\` (en cada carpeta) | Un registro por ejecución; se conservan los 10 más recientes |
 | `config\settings.yaml` | Configuración de facturas (también ignorada por Git) |
 
@@ -161,6 +164,11 @@ ignora. Para guardarlo en otro lugar, define la variable de entorno
   equipo.
 - **Sin cifrado propio.** Usa una cuenta de Windows protegida y cifrado de disco.
   Otros procesos del equipo pueden acceder a los paneles locales.
+- **Otros dispositivos.** Los paneles solo escuchan en tu equipo, salvo que los
+  abras con `-Red`. Entonces también responden por HTTPS en tu red privada, pero
+  solo a los dispositivos que emparejas con un código que aparece en la terminal;
+  sus cambios quedan registrados con el nombre del dispositivo. Ver
+  [docs/configuracion.md](docs/configuracion.md#11-paneles-desde-otros-dispositivos-opcional).
 - **Borrar datos.** Con el agente cerrado, borra la carpeta de la funcionalidad
   en `.local`. En facturas, `invoices-cleanup` borra solo los estados de lotes
   que ya no hacen falta.

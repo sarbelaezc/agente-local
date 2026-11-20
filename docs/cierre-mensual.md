@@ -648,7 +648,9 @@ $env:PYTHONPATH = "src"
 ## El panel
 
 Se abre con `.\scripts\agente-local.ps1` en `http://127.0.0.1:8766`, solo en tu
-equipo. Arriba eliges el titular (**Santiago / Manuela / Hogar**, Hogar por
+equipo. Con `serve -Red` también se puede usar desde tus dispositivos emparejados
+de la red de casa, en `https://<dirección del equipo>:8767/` (ver
+[Paneles desde otros dispositivos](configuracion.md#11-paneles-desde-otros-dispositivos-opcional)). Arriba eliges el titular (**Santiago / Manuela / Hogar**, Hogar por
 defecto) y la moneda; debajo, las pestañas **Mes**, **Año** y **Decisión**. La
 vista se guarda en la URL, así que se puede volver a ella. El tema sigue el modo
 claro u oscuro del sistema y el botón «Tema» puede fijar uno.
@@ -695,7 +697,8 @@ claro u oscuro del sistema y el botón «Tema» puede fijar uno.
 controles para evitar envíos dobles; si algo falla, se muestra el error y se
 puede reintentar con **Actualizar**. Borrar una regla o descartar un aviso pide
 confirmación. Nada se decide sin pulsar un botón de aprobación. El panel
-responde solo a sí mismo (Host, Origin y token por ejecución).
+responde solo a sí mismo (Host, Origin y token por ejecución) y, con `-Red`, solo a
+dispositivos emparejados con su sesión vigente.
 
 ## Lectura de los buzones
 
@@ -806,7 +809,9 @@ el comercio es el destinatario nombrado, no el banco.
 ## Auditoría
 
 Cada cambio de un movimiento queda en la tabla `audit` de `close.sqlite3` con su
-origen. Las etiquetas principales:
+origen. Su columna `device` guarda el nombre del dispositivo emparejado desde el
+que se hizo (con `serve -Red`), o queda vacía si se hizo en el equipo. Las
+etiquetas principales:
 
 | Etiqueta | Origen |
 |---|---|
@@ -925,6 +930,9 @@ tablas. No cambia importes, decisiones ni auditoría.
   dos tienen extractos de septiembre y octubre). Probado solo sobre una copia de la
   base y con datos sintéticos.
 
+- Usar el panel desde un celular real con `serve -Red`: regla del firewall,
+  certificado instalado, emparejar, decidir y revocar. Probado en Chromium con una
+  segunda dirección local.
 - La primera ejecución real de la tarea programada.
 - Cuánto dura en la práctica la sesión de Gmail en Testing, y si pasar la app a
   producción lo evita.

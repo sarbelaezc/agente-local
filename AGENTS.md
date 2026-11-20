@@ -59,6 +59,7 @@ The documentation has two levels: `README.md` is the entry point and `docs/` hol
 - Tesseract (local) and `pypdfium2` for scanned PDF OCR.
 - SQLite for local state, configuration, and auditing.
 - A local web panel on 127.0.0.1 for review and approval (exact Host and Origin, per-run CSRF token, no external resources), in the style of the monthly close dashboard. No Tkinter.
+- Only when the user starts a panel with `-Red`, the same panel is also served over HTTPS on this computer's private (RFC 1918) address, to paired devices only (`shared/lan_access.py`): a one-time code shown only in the terminal, an expiring `HttpOnly`/`Secure`/`SameSite=Strict` session, a certificate from a local authority name-constrained to private addresses, the same Host, Origin and CSRF checks for that address, and the paired device recorded with every change. Never listen on all interfaces or on a non-private address, and never serve anything to an unpaired device beyond the pairing page.
 - Pytest for tests.
 
 Do not add unnecessary dependencies without a clear reason.
@@ -69,7 +70,8 @@ Do not add unnecessary dependencies without a clear reason.
 src/
   shared/             helpers every feature uses: storage.py (local data folder),
                       local_model.py (Ollama client), run_log.py (per-run logs),
-                      local_panel.py (security checks every local web panel inherits)
+                      local_panel.py (security checks every local web panel inherits),
+                      lan_access.py (opt-in HTTPS access for paired devices of the home network)
   mail_invoices/      Hotmail invoices
   monthly_close/      monthly close through Microsoft Graph (Outlook) and the Gmail API
 tests/
