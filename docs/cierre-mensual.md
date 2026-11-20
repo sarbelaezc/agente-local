@@ -920,6 +920,9 @@ tablas. No cambia importes, decisiones ni auditoría.
   conocidos en los extractos de Santiago, así que sus avisos siguen dependiendo de
   Ollama.
 
+- Acceso desde otro dispositivo de la red de casa (2026-11-20): regla del
+  firewall creada, red marcada como privada y entrada al panel con `serve -Red`.
+
 **Pendiente**
 
 - Importar (no solo leer) los extractos de los dos titulares con el lector de
@@ -930,9 +933,8 @@ tablas. No cambia importes, decisiones ni auditoría.
   dos tienen extractos de septiembre y octubre). Probado solo sobre una copia de la
   base y con datos sintéticos.
 
-- Usar el panel desde un celular real con `serve -Red`: regla del firewall,
-  certificado instalado, emparejar, decidir y revocar. Probado en Chromium con una
-  segunda dirección local.
+- Decidir y revocar desde un dispositivo real con `serve -Red` (probado en
+  Chromium con una segunda dirección local).
 - La primera ejecución real de la tarea programada.
 - Cuánto dura en la práctica la sesión de Gmail en Testing, y si pasar la app a
   producción lo evita.
