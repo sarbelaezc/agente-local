@@ -2015,11 +2015,12 @@
       // How a balance moved, in words: the sign alone is easy to miss.
       // Coloured like the year table's balance: green when it helps (investments up, debt
       // down), red when it hurts. The words carry the direction too, not only the colour.
-      function balanceChange(amount, upIsGood) {
-        if (!amount) return el("span", "balance-change", "sin cambio");
-        const good = amount > 0 === upIsGood;
-        return el("span", `balance-change ${good ? "positive" : "negative"}`,
-          `${amount > 0 ? "subió" : "bajó"} ${formatMoney(Math.abs(amount), "COP")}`);
+      // A line that starts with it begins in uppercase; after « · » it continues a sentence.
+      function balanceChange(amount, upIsGood, startsLine = false) {
+        const text = !amount ? "sin cambio" : `${amount > 0 ? "subió" : "bajó"} ${formatMoney(Math.abs(amount), "COP")}`;
+        const shown = startsLine ? capitalize(text) : text;
+        if (!amount) return el("span", "balance-change", shown);
+        return el("span", `balance-change ${amount > 0 === upIsGood ? "positive" : "negative"}`, shown);
       }
 
       // Investments and credits over the year. Each group has one chart: its total by default,
@@ -2119,7 +2120,7 @@
             const since = first.period_end < `${state.year}-01-01` ? "en el año" : `desde el ${formatDate(first.period_end)}`;
             row.append(name, el("strong", "", formatMoney(last.balance_minor, "COP")),
               el("span", "statement-detail"));
-            row.lastChild.append(balanceChange(last.balance_minor - first.balance_minor, upIsGood), ` ${since} · al ${formatDate(last.period_end)}`);
+            row.lastChild.append(balanceChange(last.balance_minor - first.balance_minor, upIsGood, true), ` ${since} · al ${formatDate(last.period_end)}`);
             row.addEventListener("click", () => {
               state.balanceFocus[group] = state.balanceFocus[group] === key ? null : key;
               renderYearBalances();

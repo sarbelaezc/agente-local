@@ -560,7 +560,7 @@ def test_year_view_shows_how_investments_and_credits_moved(store, start_panel, n
     expect(products).not_to_have_attribute("open", "")
     products.locator("summary").click()
     fund = investments.locator(".statement-row").filter(has_text="*0003")
-    expect(fund).to_contain_text(re.compile(r"subió 30[.\s]?000,00\sCOP en el año · al 28 feb 2026"))
+    expect(fund).to_contain_text(re.compile(r"Subió 30[.\s]?000,00\sCOP en el año · al 28 feb 2026"))
     late = investments.locator(".statement-row").filter(has_text="*0005")
     expect(late).to_contain_text("desde el 28 feb 2026")
 
