@@ -1546,7 +1546,7 @@
         const host = $("#calendar");
         host.replaceChildren();
         for (const day of weekdayNames) {
-          const heading = el("div", "weekday", day);
+          const heading = el("div", "weekday", capitalize(day));
           heading.setAttribute("aria-hidden", "true");
           host.append(heading);
         }
@@ -2209,7 +2209,7 @@
         for (let index = 0; index < 12; index++) {
           const month = `${state.year}-${String(index + 1).padStart(2, "0")}`;
           const axis = svgEl("text", { x: xOf(index), y: height - 10, "text-anchor": "middle", class: month === current ? "axis-label current" : "axis-label" });
-          axis.textContent = monthNames[index].slice(0, 3);
+          axis.textContent = capitalize(monthNames[index].slice(0, 3));
           svg.append(axis);
         }
         // One column per month with a point: a guide line and its balance on hover, touch or focus.
@@ -2266,7 +2266,7 @@
             svg.append(rect);
           });
           const label = svgEl("text", { x: left + band * index + band / 2, y: height - 12, "text-anchor": "middle", class: inProgress ? "axis-label current" : "axis-label" });
-          label.textContent = monthNames[index].slice(0, 3);
+          label.textContent = capitalize(monthNames[index].slice(0, 3));
           svg.append(label);
         });
         host.append(svg);
@@ -2333,7 +2333,7 @@
             stackedHeight += segmentHeight;
           });
           const label = svgEl("text", { x: left + band * index + band / 2, y: height - 13, "text-anchor": "middle", class: inProgress ? "axis-label current" : "axis-label" });
-          label.textContent = monthNames[index].slice(0, 3);
+          label.textContent = capitalize(monthNames[index].slice(0, 3));
           svg.append(label);
         });
         host.append(svg);

@@ -152,7 +152,7 @@ def test_decision_card_shows_the_hour_next_to_the_date(dashboard):
     expect(detail.locator('button.detail-row[data-tx-id="hour"]')).to_contain_text(re.compile(r"5 \w+\.? \d{4} · 10:32 · TIENDA CON HORA"))
 
 
-# Chart axes and the calendar's weekday header are the only texts that stay lowercase.
+# Every text starts in uppercase, chart axes and the calendar's weekday header included.
 VISIBLE_TEXTS = """() => {
   const texts = [];
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -162,8 +162,7 @@ VISIBLE_TEXTS = """() => {
     const text = node.textContent.trim();
     // A text right after a figure or a separator in the same element continues its sentence.
     const before = node.previousSibling ? (node.previousSibling.textContent || "").trim() : "";
-    if (!parent || parent.closest("svg, .weekday")) continue;
-    if (text && parent.getClientRects().length && !before) texts.push(text);
+    if (text && parent && parent.getClientRects().length && !before) texts.push(text);
   }
   document.querySelectorAll("[aria-label],[title],[placeholder],[data-tip]").forEach(element => {
     for (const name of ["aria-label", "title", "placeholder", "data-tip"]) {
