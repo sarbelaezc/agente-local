@@ -108,6 +108,9 @@ SPECIAL_CATEGORIES = {
 
 # A mailbox movement that may repeat one the same member already brought by file import.
 # It stays pending, and no rule decides it: a person compares both.
+# A corrected payment of a credit register is looked for this many days around the old one,
+# less than a fortnight so it never reaches the next instalment.
+CORRECTION_DAYS = 10
 DUPLICATE_NOTE = "Posible duplicado"
 NOT_DUPLICATE = f"(note IS NULL OR note NOT LIKE '{DUPLICATE_NOTE}%')"
 
@@ -910,6 +913,7 @@ class Store:
 
     def import_credit_ledger(
         self, owner: str, suffix: str, events: list[dict], product: str = "CREDITO",
+        since: str | None = None,
     ) -> dict[str, int]:
         """Import a credit's payments from the person's register, in one transaction.
 
@@ -917,6 +921,12 @@ class Store:
         show the last payment of each period. Payments enter pending; account movements
         with the same amount within three days get a note, so a person can mark the
         duplicate as «No cuenta». Repeating the import changes nothing.
+
+        The register is the source of its payments from since on: a payment no longer in
+        it (its date or total was corrected, or the row was removed) is removed from the
+        panel, and the corrected payment takes its decision and category (see
+        _replace_corrected_payments). A payment whose date and total did not change keeps
+        its decision and takes the register's current split and wording.
         """
         owner = owner_id(owner)
         with self.connect() as db:
@@ -932,6 +942,16 @@ class Store:
                 ).rowcount:
                     inserted.append(event)
                     self._audit(db, "ledger-import", event["id"], event["message_id"])
+                elif db.execute(
+                    """UPDATE transactions SET message_id=:message_id, merchant=:merchant, note=:note,
+                    reason=:reason WHERE id=:id AND owner=:owner AND (message_id IS NOT :message_id
+                    OR merchant IS NOT :merchant OR note IS NOT :note OR reason IS NOT :reason)""",
+                    {**event, "owner": owner},
+                ).rowcount:
+                    self._audit(db, "ledger-update", event["id"], event["note"])
+            corrected = self._replace_corrected_payments(
+                db, owner, product, suffix, {event["id"] for event in events}, since,
+            )
             replaced = 0
             for loan in db.execute(
                 "SELECT id FROM transactions WHERE owner=? AND message_id LIKE ?",
@@ -958,7 +978,45 @@ class Store:
                     linked += 1
             self._sync_payroll_income(db)
         self.apply_rules()
-        return {"imported": len(inserted), "replaced": replaced, "possible_duplicates": linked}
+        return {
+            "imported": len(inserted), "replaced": replaced, "possible_duplicates": linked,
+            "corrected": corrected,
+        }
+
+    def _replace_corrected_payments(
+        self, db: sqlite3.Connection, owner: str, product: str, suffix: str, current: set[str],
+        since: str | None,
+    ) -> int:
+        """Remove the register's payments it no longer lists; the corrected one inherits its decision.
+
+        A payment's id comes from its date and total, so correcting either one in the
+        workbook gives a new id. The old payment (and the payroll income mirroring it) is
+        removed with an audit record. If it counted as personal or family spending, the
+        pending payment of the same credit closest in date (up to CORRECTION_DAYS away)
+        takes that decision and category, audited as a correction. A payment the person
+        had marked «No cuenta» is just removed. Returns the number of removed payments.
+        """
+        stale = [
+            row for row in db.execute(
+                "SELECT * FROM transactions WHERE owner=? AND message_id LIKE ? AND day>=? ORDER BY day",
+                (owner, f"ledger:{product}:{suffix}:%", since or ""),
+            ).fetchall()
+            if row["id"] not in current
+        ]
+        for old in stale:
+            for twin in ("payroll:" + old["id"], "payroll-extra:" + old["id"], old["id"]):
+                if db.execute("DELETE FROM transactions WHERE id=?", (twin,)).rowcount:
+                    self._audit(db, "ledger-row-removed", twin, f"{old['day']} {old['amount_minor']}")
+            if old["decision"] not in {"personal", "family"}:
+                continue
+            heir = db.execute(
+                """SELECT id FROM transactions WHERE owner=? AND message_id LIKE ? AND decision IS NULL
+                AND abs(julianday(day) - julianday(?)) <= ? ORDER BY abs(julianday(day) - julianday(?)), day LIMIT 1""",
+                (owner, f"ledger:{product}:{suffix}:%", old["day"], CORRECTION_DAYS, old["day"]),
+            ).fetchone()
+            if heir is not None:
+                self._decide(db, heir["id"], old["decision"], old["category"], audit=("ledger-correction", old["id"]))
+        return len(stale)
 
     def _sync_ledger_payroll(self, db: sqlite3.Connection, owner: str, suffix: str) -> int:
         """Payroll income for payments read from a register: one per fortnight, pending for bonus extras."""

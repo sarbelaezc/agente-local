@@ -97,6 +97,70 @@ def test_register_is_read_only_when_it_matches_the_bank(setup):
     assert "0 nuevos" in again[0]
 
 
+def save_rows(folder, rows) -> None:
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "Hoja1"
+    sheet.append(HEADER)
+    for row in rows:
+        sheet.append(row)
+    book.save(folder / "pagos.xlsx")
+
+
+def ledger_rows(store: Store) -> list[dict]:
+    return sorted((r for r in store.state()["transactions"] if r["id"].startswith("ledger:")), key=lambda r: r["day"])
+
+
+def test_a_payment_corrected_in_the_register_replaces_the_old_one_and_keeps_its_decision(setup):
+    folder, store, preferences = setup()
+    app.import_credit_ledgers(store, folder, preferences)
+    store.set_payroll_deduction("santiago", "4444")
+    first, extra, last = ledger_rows(store)
+    store.decide(first["id"], "family", "Compras")
+    store.decide(extra["id"], "exclude")  # the person had marked it «No cuenta»
+    store.decide(last["id"], "personal", "Transporte")
+    # The date and a few pesos of interest of the first payment are corrected, and the
+    # capital payment marked «No cuenta» was in fact paid with the last fortnight.
+    rows = [list(row) for row in ROWS]
+    rows[2][2], rows[2][6], rows[2][8] = datetime(2026, 1, 16), 50010, 355010
+    del rows[3]
+    rows[3][5] += 500000  # the bank still sees the same capital in the period
+    rows[3][8] += 500000
+    save_rows(folder, rows)
+    lines = app.import_credit_ledgers(store, folder, preferences)
+    assert "2 nuevos, 3 pagos que ya no estan en el registro quitados" in lines[0], lines
+    after = ledger_rows(store)
+    assert [(r["day"], r["amount_minor"], r["decision"], r["category"]) for r in after] == [
+        ("2026-01-16", 35501000, "family", "Compras"), ("2026-01-30", 74500000, "personal", "Transporte"),
+    ]
+    assert after[0]["note"] == "Capital 300.000 · intereses 50.010 · seguros 5.000"
+    ids = {r["id"] for r in store.state()["transactions"]}
+    assert first["id"] not in ids and extra["id"] not in ids and "payroll:" + first["id"] not in ids
+    # The corrected payment mirrors its payroll income again.
+    assert "payroll:" + after[0]["id"] in ids
+    with store.connect() as db:
+        actions = [row[0] for row in db.execute("SELECT action FROM audit ORDER BY id")]
+    assert "ledger-row-removed" in actions and "ledger-correction" in actions
+    # Importing the same register again changes nothing.
+    again = app.import_credit_ledgers(store, folder, preferences)
+    assert "0 nuevos, 0 pagos que ya no estan" in again[0]
+
+
+def test_a_payment_with_a_new_split_keeps_its_decision_and_shows_the_split(setup):
+    folder, store, preferences = setup()
+    app.import_credit_ledgers(store, folder, preferences)
+    first = ledger_rows(store)[0]
+    store.decide(first["id"], "family", "Compras")
+    rows = [list(row) for row in ROWS]
+    rows[2][6], rows[2][7] = 49000, 6000  # same total: a different split of interest and insurance
+    save_rows(folder, rows)
+    lines = app.import_credit_ledgers(store, folder, preferences)
+    assert "0 nuevos, 0 pagos que ya no estan" in lines[0]
+    row = next(r for r in ledger_rows(store) if r["id"] == first["id"])
+    assert (row["decision"], row["category"]) == ("family", "Compras")
+    assert row["note"] == "Capital 300.000 · intereses 49.000 · seguros 6.000"
+
+
 def test_register_that_does_not_match_the_bank_imports_nothing(setup):
     rows = [list(row) for row in ROWS]
     rows[3][4] = rows[3][3] = rows[3][8] = 400000  # a capital payment the bank never saw
