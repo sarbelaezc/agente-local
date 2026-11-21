@@ -194,11 +194,13 @@
     /* Secondary figures: tiles of one width that grow to fill each row, whatever the length of each note. */
     .metric-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     /* --per-row comes from the number of tiles, so rows stay balanced (7 tiles: 4 + 3, never 5 + 2). */
-    .metric.minor { flex: 1 1 calc((100% - (var(--per-row, 4) - 1) * 8px) / var(--per-row, 4)); display: flex; flex-direction: column; gap: 3px; min-width: 190px; padding: 10px 14px; border-radius: 12px; }
+    .metric.minor { flex: 1 1 calc((100% - (var(--per-row, 4) - 1) * 8px) / var(--per-row, 4)); display: flex; flex-wrap: wrap; align-items: baseline; align-content: flex-start; justify-content: space-between; gap: 3px 12px; min-width: 190px; padding: 10px 14px; border-radius: 12px; }
+    /* The name on the left and the figure on the right of one line; a narrow tile moves the
+       figure below the name. The note and the detail take a line of their own. */
+    .metric.minor .label { flex: 1 0 auto; }
+    .metric.minor small, .metric.minor details.inline-detail, .metric.minor.stacked .label { flex-basis: 100%; }
     /* A tile with its detail open takes the whole row, so the list is never squeezed. */
     .metric.minor:has(> details[open]) { flex-basis: 100%; }
-    /* Tiles of a row share one height; a tile's link sits at its foot, close to its note. */
-    .metric.minor details.inline-detail { margin-top: auto; }
     .metric.minor details.inline-detail > summary { padding: 2px 0 0; }
     /* How much of the spending the income covers: one neutral fill, the text says the figure. */
     .split-bar.meter span { flex: none; background: color-mix(in srgb, var(--ink2) 70%, var(--surf)); }
@@ -1058,6 +1060,26 @@
         const count = strip.childElementCount;
         strip.style.setProperty("--per-row", String(Math.ceil(count / Math.ceil(count / 5))));
       }
+      // Each tile puts its figure to the right of its name; when one tile of a row has no room
+      // for that, the whole row puts the figures below the names, so a row never mixes both.
+      function fitTiles(host) {
+        for (const strip of host.querySelectorAll(".metric-strip")) {
+          const tiles = Array.from(strip.children);
+          tiles.forEach(tile => tile.classList.remove("stacked"));
+          const rows = new Map();
+          tiles.forEach(tile => rows.set(tile.offsetTop, [...(rows.get(tile.offsetTop) || []), tile]));
+          rows.forEach(row => {
+            const wrapped = row.some(tile => {
+              const label = tile.querySelector(".label"), figure = tile.querySelector(":scope > strong");
+              return label && figure && figure.offsetTop > label.offsetTop + 2;
+            });
+            if (wrapped) row.forEach(tile => tile.classList.add("stacked"));
+          });
+        }
+      }
+      // Refit when a summary shows, the window changes width or a tile opens its list.
+      const tileObserver = new ResizeObserver(entries => entries.forEach(entry => fitTiles(entry.target)));
+      ["#month-metrics", "#year-metrics"].forEach(id => tileObserver.observe($(id)));
       // Headline cards of the month and year summaries. "Por decidir" opens the Decision tab
       // and only appears while something is pending; otherwise the other three share one row.
       function summaryHeroes(cards, pending, pendingIncomes) {
@@ -1495,6 +1517,7 @@
         }
         balanceStrip(strip);
         $("#month-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
+        fitTiles($("#month-metrics"));
 
         $("#income-card").hidden = incomes.length === 0;
         $("#card-payment-card").hidden = cardPayments.length === 0;
@@ -2094,6 +2117,7 @@
         if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed} ${coverage.elapsed === 1 ? "mes" : "meses"}`, "Revisados o conciliados");
         balanceStrip(strip);
         $("#year-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
+        fitTiles($("#year-metrics"));
 
         const categoryHost = $("#year-categories");
         categoryHost.replaceChildren();
