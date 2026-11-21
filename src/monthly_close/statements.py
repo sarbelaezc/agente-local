@@ -617,6 +617,55 @@ def match_existing(
     return matched, missing
 
 
+TWIN_DAYS = 3
+TWIN_KINDS = {"purchase", "pse", "unknown"}
+
+
+def _compact(text: str) -> str:
+    return re.sub(r"[\W_]", "", text.upper())
+
+
+def same_merchant(a: str, b: str) -> bool:
+    """One merchant written with or without spaces or a trailing letter ("LA TIENDA DEL CAFE E")."""
+    first, second = _compact(a), _compact(b)
+    return min(len(first), len(second)) >= 5 and (first.startswith(second) or second.startswith(first))
+
+
+def find_twins(
+    lines: list[tuple[Candidate, str]], rows: list[dict], used: set[str], owner: str,
+) -> list[tuple[Candidate, str, str]]:
+    """Movements the statement shows only once but the panel has twice; the statement prevails.
+
+    lines pairs each purchase the statement alone shows with the id it has (or will have)
+    in the panel. A twin is another movement of the same owner and merchant within a few
+    days that matched no statement line: the same purchase recorded in another currency
+    or for another amount. Each line takes at most one twin, the closest in time.
+    Returns (line, its id, twin id).
+    """
+    free = [
+        row for row in rows
+        if row["owner"] == owner and row["id"] not in used and not row["id"].startswith("stmt:")
+        and row.get("kind") in TWIN_KINDS and row.get("decision") != "exclude"
+    ]
+    taken: set[str] = set()
+    twins = []
+    for candidate, line_id in sorted(lines, key=lambda pair: pair[0].movement.day):
+        movement = candidate.movement
+        if movement.hint != "purchase" or movement.amount_minor <= 0:
+            continue
+        options = [
+            row for row in free
+            if row["id"] not in taken and same_merchant(row["merchant"], movement.description)
+            and abs((date.fromisoformat(row["day"]) - movement.day).days) <= TWIN_DAYS
+        ]
+        if not options:
+            continue
+        best = min(options, key=lambda row: (abs((date.fromisoformat(row["day"]) - movement.day).days), row["id"]))
+        taken.add(best["id"])
+        twins.append((candidate, line_id, best["id"]))
+    return twins
+
+
 KIND_FOR_HINT = {
     "purchase": "purchase", "card_payment": "card_payment", "transfer": "transfer",
     "income": "income", "investment": "investment", "investment_withdrawal": "unknown",
@@ -624,14 +673,19 @@ KIND_FOR_HINT = {
 }
 
 
+def line_id(candidate: Candidate) -> str:
+    """Id of the movement a statement line becomes in the panel, the same in every run."""
+    statement, movement = candidate.statement, candidate.movement
+    identity = f"{statement.identity}|{movement.day}|{movement.description}|{movement.amount_minor}|{movement.currency}"
+    return "stmt:" + hashlib.sha256(identity.encode()).hexdigest()
+
+
 def missing_event(candidate: Candidate, category: str, income_category: str) -> dict:
     """A pending movement for something the statement shows and no notice did."""
     statement, movement = candidate.statement, candidate.movement
-    identity = f"{statement.identity}|{movement.day}|{movement.description}|{movement.amount_minor}|{movement.currency}"
-    digest = hashlib.sha256(identity.encode()).hexdigest()
     kind = KIND_FOR_HINT[movement.hint]
     return {
-        "id": "stmt:" + digest, "message_id": "statement:" + statement.identity,
+        "id": line_id(candidate), "message_id": "statement:" + statement.identity,
         "day": movement.day.isoformat(), "merchant": movement.description[:150],
         "account": PRODUCTS.get(statement.product, "Desconocida"),
         "amount_minor": abs(movement.amount_minor), "currency": movement.currency,
@@ -649,6 +703,8 @@ class Reconciliation:
     statements: list[Statement]
     matched: list[tuple[Candidate, str]]
     missing: list[Candidate]
+    # (statement line, its id in the panel, the other movement that duplicates it)
+    twins: list[tuple[Candidate, str, str]] = field(default_factory=list)
 
     def checks(self) -> list[dict]:
         rows = []
@@ -673,13 +729,19 @@ def reconcile(statements: list[Statement], rows: list[dict], start: date) -> Rec
     """Compare statements with known movements from start on; nothing is decided here.
 
     Each owner's statements pair with each other and match only that owner's movements.
+    A line the statement alone shows (now, or in an earlier run that imported it) may
+    have a twin: the same purchase recorded in another currency or amount.
     """
     matched: list[tuple[Candidate, str]] = []
     missing: list[Candidate] = []
+    twins: list[tuple[Candidate, str, str]] = []
     for owner in dict.fromkeys(statement.owner for statement in statements):
         own = [statement for statement in statements if statement.owner == owner]
         candidates = [c for c in pair_internal(own) if c.movement.day >= start]
         found, absent = match_existing(candidates, rows, owner)
         matched += found
         missing += absent
-    return Reconciliation(statements, matched, missing)
+        lines = [(c, line_id(c)) for c in absent]
+        lines += [(c, row_id) for c, row_id in found if row_id.startswith("stmt:")]
+        twins += find_twins(lines, rows, {row_id for _, row_id in found}, owner)
+    return Reconciliation(statements, matched, missing, twins)
