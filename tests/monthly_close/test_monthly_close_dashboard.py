@@ -382,6 +382,45 @@ def test_saving_blocks_duplicate_decisions_and_recovers_after_error(dashboard):
     assert button.is_enabled()
 
 
+def test_save_and_error_messages_float_in_view_wherever_the_page_is_scrolled(dashboard):
+    page, store, month, _ = dashboard
+    store.import_message("otra", [{
+        "id": "otra", "message_id": "otra", "day": month + "-06", "merchant": "OTRA TIENDA",
+        "account": "Tarjeta A", "amount_minor": 1000, "currency": "COP", "category": "Compras",
+        "kind": "purchase", "decision": None, "reason": "Revisar.",
+    }])
+    page.set_viewport_size({"width": 390, "height": 600})
+    page.clock.install()
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.locator("#tab-decisions").click()
+    button = page.locator("#pending-list").get_by_role("button", name="Gasto personal", exact=True).first
+    button.scroll_into_view_if_needed()
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+
+    def in_view(locator) -> bool:
+        box = locator.bounding_box()
+        return box is not None and 0 <= box["y"] and box["y"] + box["height"] <= 600
+
+    button.click()
+    message = page.locator("#global-message")
+    expect(message).to_contain_text("Decisión guardada.")
+    assert in_view(message)
+    # A confirmation goes away by itself.
+    page.clock.run_for(5000)
+    expect(message).to_be_hidden()
+
+    # An error stays until it is closed.
+    page.route("**/api/decision", lambda route: route.fulfill(status=500, json={"error": "Fallo simulado."}))
+    page.locator("#pending-list").get_by_role("button", name="Familiar", exact=True).first.click()
+    expect(message).to_contain_text("Fallo simulado")
+    page.clock.run_for(10000)
+    expect(message).to_be_visible()
+    assert in_view(message)
+    message.get_by_role("button", name="Cerrar mensaje").click()
+    expect(message).to_be_hidden()
+
+
 def test_category_chart_uses_unique_consistent_colors_for_every_category(dashboard, categories):
     page, store, month, _ = dashboard
     original = next(tx for tx in store.state()["transactions"] if tx["id"] == "1")

@@ -84,11 +84,28 @@
     .alert.warning { background: color-mix(in srgb, var(--s4) 16%, transparent); color: var(--ink); }
     .alert.error { background: var(--red-soft); color: var(--bad); }
     .alert.success { background: var(--green-soft); color: var(--ink); }
-    main[aria-busy="true"] #global-message { display: flex; align-items: center; gap: 10px; }
-    main[aria-busy="true"] #global-message::before { width: 14px; height: 14px; flex: 0 0 auto; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; content: ""; animation: spin .8s linear infinite; }
+    #global-message[aria-busy="true"]::before { width: 14px; height: 14px; flex: 0 0 auto; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; content: ""; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) { main[aria-busy="true"] #global-message::before { animation: none; } }
-    #global-message, #load-error, #dashboard-area > .alert, #sender-warning { margin: 6px 0 10px; }
+    @media (prefers-reduced-motion: reduce) { #global-message[aria-busy="true"]::before { animation: none; } }
+    #dashboard-area > .alert, #sender-warning { margin: 6px 0 10px; }
+    /* Save and error messages float at the bottom of the screen, wherever the page is scrolled. */
+    .toast-region {
+      position: fixed; z-index: 30; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom));
+      display: flex; flex-direction: column; gap: 8px; width: min(560px, calc(100% - 28px));
+      transform: translateX(-50%); pointer-events: none;
+    }
+    .toast-region .alert {
+      display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 14px;
+      border: 1px solid var(--line); background: var(--surf); box-shadow: 0 8px 24px #0000002e;
+      pointer-events: auto; animation: toast-in .18s ease-out;
+    }
+    .toast-region .alert.success { border-left: 4px solid var(--good); }
+    .toast-region .alert.error { border-left: 4px solid var(--bad); background: var(--surf); color: var(--ink); }
+    .toast-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .toast-close { flex: none; min-width: 44px; min-height: 44px; margin: -8px -6px -8px 0; border: 0; border-radius: 10px; background: transparent; color: var(--ink2); font-size: 20px; line-height: 1; }
+    .toast-close:hover { background: var(--soft); color: var(--ink); }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+    @media (prefers-reduced-motion: reduce) { .toast-region .alert { animation: none; } }
 
     /* Cards */
     .intro { max-width: 70ch; margin: 10px 0 18px; color: var(--ink2); line-height: 1.5; }
@@ -359,8 +376,10 @@
       </div>
     </header>
 
-    <div id="global-message" class="alert" role="status" aria-live="polite" hidden></div>
-    <div id="load-error" class="alert error" role="alert" hidden></div>
+    <div class="toast-region">
+      <div id="global-message" class="alert" role="status" aria-live="polite" hidden></div>
+      <div id="load-error" class="alert error" role="alert" hidden></div>
+    </div>
 
     <main id="main-content" tabindex="-1">
       <section id="setup-area" class="panel" hidden aria-labelledby="setup-title">
@@ -627,17 +646,37 @@
       }
       let decisionCardSequence = 0;
 
+      // A floating message: a confirmation goes away by itself after a few seconds (unless
+      // the panel is still working, or the pointer or focus is on it); an error stays until
+      // it is closed or solved.
+      let messageTimer = null;
+      function fillToast(box, message, closable) {
+        box.replaceChildren(el("span", "toast-text", message));
+        box.hidden = !message;
+        if (!message || !closable) return;
+        const close = el("button", "toast-close", "×");
+        close.type = "button";
+        close.setAttribute("aria-label", "Cerrar mensaje");
+        close.addEventListener("click", () => { box.hidden = true; });
+        box.append(close);
+      }
       function showMessage(message, type = "success") {
         const box = $("#global-message");
         box.className = `alert ${type}`;
-        box.textContent = message;
-        box.hidden = !message;
+        clearTimeout(messageTimer);
+        fillToast(box, message, type === "error");
+        if (!message || type === "error" || message.endsWith("…")) return;
+        const hideLater = () => {
+          messageTimer = setTimeout(() => {
+            if (state.busy || box.matches(":hover, :focus-within")) hideLater();
+            else box.hidden = true;
+          }, 4000);
+        };
+        hideLater();
       }
 
       function setError(message) {
-        const box = $("#load-error");
-        box.textContent = message;
-        box.hidden = !message;
+        fillToast($("#load-error"), message, true);
       }
 
       function formatMoney(minor, currency = state.currency) {
@@ -1114,7 +1153,8 @@
         const body = await response.json().catch(() => null);
         if (!response.ok) {
           const reason = body && typeof body.detail === "string" ? body.detail : body && typeof body.error === "string" ? body.error : "";
-          throw new Error(`El servidor respondió ${response.status} ${response.statusText || ""}${reason ? `: ${reason}` : ""}`.trim());
+          // The server's own reason says what to fix; the status code only when there is none.
+          throw new Error(reason ? reason.replace(/\.+$/, "") : `El servidor respondió ${response.status} ${response.statusText || ""}`.trim());
         }
         return body || {};
       }
@@ -1136,7 +1176,7 @@
           }
           return false;
         } catch (error) {
-          showMessage(`No se guardó el cambio: ${error.message}. Tus datos no se han confirmado.`, "error");
+          showMessage(`No se guardó el cambio: ${error.message}. Nada cambió: revisa el motivo y vuelve a intentar.`, "error");
           return false;
         } finally {
           setBusy(false);

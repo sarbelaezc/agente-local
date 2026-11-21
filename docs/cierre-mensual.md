@@ -730,8 +730,11 @@ claro u oscuro del sistema y el botón «Tema» puede fijar uno.
 [Avisos sin extraer](#avisos-sin-extraer).
 
 **Comportamiento seguro.** Durante una carga o un guardado se bloquean los
-controles para evitar envíos dobles; si algo falla, se muestra el error y se
-puede reintentar con **Actualizar**. Borrar una regla o descartar un aviso pide
+controles para evitar envíos dobles. Los mensajes de guardado y de error flotan
+abajo de la pantalla, así se ven aunque estés al final de la lista: una
+confirmación se oculta sola a los pocos segundos y un error queda visible, con
+su motivo, hasta que lo cierras con **×**; se puede reintentar con
+**Actualizar**. Borrar una regla o descartar un aviso pide
 confirmación. Nada se decide sin pulsar un botón de aprobación. El panel
 responde solo a sí mismo (Host, Origin y token por ejecución) y, con `-Red`, solo a
 dispositivos emparejados con su sesión vigente.
