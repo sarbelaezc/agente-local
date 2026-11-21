@@ -682,8 +682,9 @@ $env:PYTHONPATH = "src"
 Se abre con `.\scripts\agente-local.ps1` en `http://127.0.0.1:8766`, solo en tu
 equipo. Con `serve -Red` también se puede usar desde tus dispositivos emparejados
 de la red de casa, en `https://<dirección del equipo>:8767/` (ver
-[Paneles desde otros dispositivos](configuracion.md#11-paneles-desde-otros-dispositivos-opcional)). Arriba eliges el titular (**Santiago / Manuela / Hogar**, Hogar por
-defecto) y la moneda; debajo, las pestañas **Mes**, **Año** y **Decisión**. La
+[Paneles desde otros dispositivos](configuracion.md#11-paneles-desde-otros-dispositivos-opcional)). Arriba eliges la moneda; debajo, el titular (**Santiago / Manuela / Hogar**,
+Hogar por defecto) y las pestañas **Mes**, **Año** y **Decisión**, que siguen
+visibles al desplazarte. La
 vista se guarda en la URL, así que se puede volver a ella. El tema sigue el modo
 claro u oscuro del sistema y el botón «Tema» puede fijar uno.
 
@@ -740,7 +741,7 @@ aviso del formulario de configuración inicial no se puede cerrar.
 - Los botones, selectores y campos tienen al menos 44 px de alto para tocarlos
   sin errores, y los campos usan letra de 16 px para que el teléfono no acerque
   la vista al escribir.
-- Las pestañas siguen visibles al desplazarte.
+- El titular y las pestañas siguen visibles al desplazarte; la moneda no.
 - Los botones de una decisión van en dos columnas; si sobra uno, ocupa la fila
   completa.
 - Las listas con barras muestran el nombre completo en su propia línea.

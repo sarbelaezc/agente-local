@@ -139,7 +139,10 @@
     .form-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 
     /* Navigation: sticky tabs and month chips, as in Manuela's dashboard */
-    .tabs { position: sticky; top: 0; z-index: 5; display: flex; gap: 6px; margin: 4px 0 12px; padding: 8px 0; background: var(--bg); }
+    /* The owner switch and the tabs stay at the top while scrolling; the currency scrolls away. */
+    .sticky-nav { position: sticky; top: 0; z-index: 5; display: grid; gap: 8px; margin: 4px 0 12px; padding: 8px 0; background: var(--bg); }
+    html { scroll-padding-top: 124px; }
+    .tabs { display: flex; gap: 6px; }
     .tab { flex: 1; min-height: 42px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 6px; background: var(--surf); color: var(--ink2); font-weight: 600; }
     .tab:hover { border-color: var(--ink2); }
     .tab[aria-selected="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
@@ -437,6 +440,13 @@
         </div>
         <div class="toolbar">
           <div class="toolbar-group">
+            <label class="control-label" for="currency-select">Moneda</label>
+            <span class="select-button"><select id="currency-select" aria-label="Moneda para mostrar"></select></span>
+          </div>
+        </div>
+        <p id="extraction-warning" class="hint" role="status" hidden></p>
+        <div class="sticky-nav">
+          <div class="toolbar-group">
             <span class="control-label" id="owner-label">Titular</span>
             <div id="owner-switch" class="owner-switch" role="group" aria-labelledby="owner-label">
               <button type="button" data-owner="santiago" aria-pressed="false">Santiago</button>
@@ -444,16 +454,11 @@
               <button type="button" data-owner="hogar" aria-pressed="false">Hogar</button>
             </div>
           </div>
-          <div class="toolbar-group">
-            <label class="control-label" for="currency-select">Moneda</label>
-            <span class="select-button"><select id="currency-select" aria-label="Moneda para mostrar"></select></span>
+          <div class="tabs" role="tablist" aria-label="Vista del cierre">
+            <button class="tab" id="tab-month" type="button" role="tab" aria-selected="true" aria-controls="panel-month" tabindex="0">Mes</button>
+            <button class="tab" id="tab-year" type="button" role="tab" aria-selected="false" aria-controls="panel-year" tabindex="-1">Año</button>
+            <button class="tab" id="tab-decisions" type="button" role="tab" aria-selected="false" aria-controls="panel-decisions" tabindex="-1">Decisión<span id="decision-badge" class="tab-badge" aria-hidden="true" hidden></span></button>
           </div>
-        </div>
-        <p id="extraction-warning" class="hint" role="status" hidden></p>
-        <div class="tabs" role="tablist" aria-label="Vista del cierre">
-          <button class="tab" id="tab-month" type="button" role="tab" aria-selected="true" aria-controls="panel-month" tabindex="0">Mes</button>
-          <button class="tab" id="tab-year" type="button" role="tab" aria-selected="false" aria-controls="panel-year" tabindex="-1">Año</button>
-          <button class="tab" id="tab-decisions" type="button" role="tab" aria-selected="false" aria-controls="panel-decisions" tabindex="-1">Decisión<span id="decision-badge" class="tab-badge" aria-hidden="true" hidden></span></button>
         </div>
 
         <section id="panel-month" role="tabpanel" aria-labelledby="tab-month">

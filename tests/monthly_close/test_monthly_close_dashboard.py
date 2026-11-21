@@ -352,6 +352,17 @@ def test_a_movement_of_the_category_detail_can_be_changed_in_place(dashboard):
         assert db.execute("SELECT count(*) FROM audit WHERE target='1' AND action LIKE 'decision%'").fetchone()[0] >= 1
 
 
+def test_owner_switch_and_tabs_stay_at_the_top_while_scrolling(dashboard):
+    page, _, _, _ = dashboard
+    page.set_viewport_size({"width": 390, "height": 700})
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    for locator in (page.locator("#owner-switch"), page.locator(".tabs")):
+        box = locator.bounding_box()
+        assert box is not None and 0 <= box["y"] < 140
+    # The currency scrolls away with the page.
+    assert page.locator("#currency-select").bounding_box()["y"] < 0
+
+
 def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(dashboard):
     page, _, month, _ = dashboard
     page.goto(f"{page.url.split('?')[0]}?tab=year&month={month}&year={month[:4]}&currency=COP")
