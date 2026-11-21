@@ -172,7 +172,8 @@
     .decision-summary { margin-bottom: 12px; }
     /* Year view: monthly table with the month always visible while scrolling sideways. */
     #year-table table { min-width: 860px; }
-    #year-table caption { caption-side: top; padding: 0 0 6px; color: var(--mut); font-size: 12px; text-align: left; }
+    #year-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .table-note { margin: 0 0 6px; color: var(--mut); font-size: 12px; line-height: 1.45; }
     #year-table th:first-child, #year-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surf); }
     #year-table tfoot td { border-top: 2px solid var(--line); color: var(--ink); font-weight: 700; }
     #year-table td.spend { font-weight: 700; }
@@ -301,12 +302,42 @@
       .coverage-form { grid-template-columns: 1fr; }
       .coverage-form .button { width: 100%; }
       th, td { padding: 8px 3px; }
+
+      /* Phone comfort: one-row header, 44 px touch targets, 16 px fields (no zoom while typing). */
+      .topbar { align-items: center; }
+      .topbar .eyebrow, .top-actions .theme-label { display: none; }
+      .top-actions { flex-wrap: nowrap; }
+      .button, .top-actions .button, .owner-switch button, .select-button, .tab, .chip, .decision-actions .button { min-height: 44px; }
+      .select-button { padding-top: 0; padding-bottom: 0; }
+      .select-button select { min-height: 44px; }
+      .top-actions .button { min-width: 44px; }
+      .field input, .field select, .field textarea, .control, .select-button select { font-size: 16px; }
+      .field input, .field select, .control { min-height: 44px; }
+      details summary { min-height: 44px; padding: 12px 0; }
+      .check-line { min-height: 44px; margin-top: 6px; }
+      .check-line input { width: 22px; height: 22px; flex: none; }
+      .owner-tag, .status-pill, .flag-tag, .tab-badge { font-size: 12px; }
+
+      /* Decisions: two even columns, so labels fit on one line; a lone last button takes the row. */
+      .decision-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .decision-actions > .button:last-child:nth-child(odd) { grid-column: 1 / -1; }
+      #category-suggest { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+      #category-suggest .button { width: 100%; }
+      .decision-card, .group-card { padding: 12px; }
+      .decision-category { max-width: none; }
+
+      /* Bar rankings: the full name on its own line, the bar and amount below. */
+      .bar-row, #year-categories .bar-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
+      .bar-row .bar-name { grid-column: 1 / -1; white-space: normal; }
     }
     @media (max-width: 390px) {
       .top-actions { gap: 5px; }
       .top-actions .button { font-size: 12px; }
       .top-actions .refresh-label { display: none; }
       .owner-switch button { padding: 7px 10px; }
+      /* The pending count stays beside «Decisión» instead of dropping to a second line. */
+      .tab { padding: 10px 2px; white-space: nowrap; }
+      .tab-badge { margin-left: 3px; }
     }
   </style>
 </head>
@@ -322,7 +353,7 @@
         </div>
       </div>
       <div class="top-actions">
-        <button class="button" id="theme-toggle" type="button" aria-pressed="false" aria-label="Cambiar tema claro u oscuro"><span aria-hidden="true">◐</span> <span>Tema</span></button>
+        <button class="button" id="theme-toggle" type="button" aria-pressed="false" aria-label="Cambiar tema claro u oscuro"><span aria-hidden="true">◐</span> <span class="theme-label">Tema</span></button>
         <button class="button" id="refresh-button" type="button" aria-label="Actualizar" hidden><span aria-hidden="true">↻</span> <span class="refresh-label">Actualizar</span></button>
         <button class="button" id="edit-config-button" type="button" hidden>Configuración</button>
       </div>
@@ -1924,7 +1955,13 @@
         const coverageByMonth = new Map(safeArray(state.data.coverage).filter(entry => entry && typeof entry.month === "string").map(entry => [entry.month, entry]));
         const importedMonths = new Set(transactions().map(monthOf).filter(Boolean));
         const table = document.createElement("table");
-        table.append(el("caption", "", `Importes en ${state.currency}. Un guion (—) significa que no hubo movimientos de ese tipo, nunca gasto cero.`));
+        const tableNote = `Importes en ${state.currency}. Un guion (—) significa que no hubo movimientos de ese tipo, nunca gasto cero.`;
+        // The caption names the table for screen readers; the visible note stays outside the
+        // sideways scroll, so a phone shows it whole.
+        table.append(el("caption", "", tableNote));
+        const visibleNote = el("p", "table-note", tableNote);
+        visibleNote.setAttribute("aria-hidden", "true");
+        host.append(visibleNote);
         const head = document.createElement("thead");
         const header = document.createElement("tr");
         const columns = ["Mes", "Gasto", "Personal", "Familiar", "Abonos", "Ingresos", "Balance", "Inversiones", "Efectivo", "Pendiente", "Cobertura"];

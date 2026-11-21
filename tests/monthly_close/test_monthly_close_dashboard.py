@@ -274,6 +274,28 @@ def test_dashboard_mobile_and_desktop_screenshots(dashboard, tmp_path):
     page.screenshot(path=str(output / "mobile-dark.png"), full_page=True)
 
 
+def test_phone_controls_are_easy_to_tap_and_the_year_table_note_fits(dashboard):
+    page, _, _, _ = dashboard
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.locator("#tab-decisions").click()
+    # Every visible control is at least 44 px tall (checkboxes sit in a 44 px label row), and
+    # text fields use 16 px so a phone does not zoom in while typing.
+    sizes = page.evaluate("""() => [...document.querySelectorAll(
+        '#main-content button, #main-content select, #main-content input:not([type=checkbox]), #main-content summary, .top-actions button, .check-line'
+      )].filter(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden').map(e => ({
+        name: (e.textContent || e.getAttribute('aria-label') || e.id).trim().slice(0, 30),
+        height: e.getBoundingClientRect().height,
+        font: e.matches('select, input') ? parseFloat(getComputedStyle(e).fontSize) : 16,
+      }))""")
+    assert sizes
+    assert [item for item in sizes if item["height"] < 44 or item["font"] < 16] == []
+    page.locator("#tab-year").click()
+    note = page.locator("#year-table .table-note")
+    expect(note).to_be_visible()
+    box, screen = note.bounding_box(), page.viewport_size
+    assert box["x"] >= 0 and box["x"] + box["width"] <= screen["width"]
+
+
 def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(dashboard):
     page, _, month, _ = dashboard
     page.goto(f"{page.url.split('?')[0]}?tab=year&month={month}&year={month[:4]}&currency=COP")

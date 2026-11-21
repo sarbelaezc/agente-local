@@ -711,6 +711,20 @@ claro u oscuro del sistema y el botón «Tema» puede fijar uno.
   muestra como «X/Y» (el detalle completo aparece al pasar el cursor).
 - Tocar un mes de la tabla o una barra abre ese mes.
 
+**En el celular**
+
+- El encabezado queda en una fila: el subtítulo se oculta y «Tema» queda como un
+  icono.
+- Los botones, selectores y campos tienen al menos 44 px de alto para tocarlos
+  sin errores, y los campos usan letra de 16 px para que el teléfono no acerque
+  la vista al escribir.
+- Las pestañas siguen visibles al desplazarte.
+- Los botones de una decisión van en dos columnas; si sobra uno, ocupa la fila
+  completa.
+- Las listas con barras muestran el nombre completo en su propia línea.
+- En **Resumen por mes**, la nota de importes queda fuera de la tabla, que se
+  desplaza de lado con el mes siempre visible.
+
 **Decisión:** ver [Decidir movimientos](#decidir-movimientos),
 [Reglas por comercio](#reglas-por-comercio) y
 [Avisos sin extraer](#avisos-sin-extraer).
