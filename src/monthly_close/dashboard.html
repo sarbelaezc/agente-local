@@ -88,6 +88,10 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { #global-message[aria-busy="true"]::before { animation: none; } }
     #dashboard-area > .alert, #sender-warning { margin: 6px 0 10px; }
+    #safety-note { display: flex; align-items: flex-start; gap: 10px; }
+    #safety-note[hidden] { display: none; }
+    .note-close { flex: none; min-width: 44px; min-height: 44px; margin: -10px -8px -10px 0; border: 0; border-radius: 10px; background: transparent; color: inherit; font-size: 20px; line-height: 1; }
+    .note-close:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
     /* Save and error messages float at the bottom of the screen, wherever the page is scrolled. */
     .toast-region {
       position: fixed; z-index: 30; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom));
@@ -389,8 +393,9 @@
       </section>
 
       <section id="dashboard-area" hidden aria-label="Panel de cierre mensual">
-        <div class="alert warning" role="note">
-          Los datos importados pueden estar incompletos; las sugerencias del modelo son texto no confiable y requieren revisión. No introduzcas credenciales bancarias. No hay escaneo desde esta página: las importaciones se ejecutan por CLI.
+        <div id="safety-note" class="alert warning" role="note">
+          <span class="toast-text">Los datos importados pueden estar incompletos; las sugerencias del modelo son texto no confiable y requieren revisión. No introduzcas credenciales bancarias. No hay escaneo desde esta página: las importaciones se ejecutan por CLI.</span>
+          <button type="button" id="safety-note-close" class="note-close" aria-label="Cerrar este aviso; no volverá a aparecer en este navegador">×</button>
         </div>
         <p id="sender-warning" class="alert warning" role="note" hidden>No hay remitentes aprobados. La importación debe permanecer bloqueada hasta que añadas direcciones exactas en Configuración.</p>
         <div id="config-area" class="panel" hidden aria-labelledby="config-title">
@@ -2877,6 +2882,16 @@
         if (saved === "dark" || saved === "light") document.documentElement.dataset.theme = saved;
       } catch { /* la preferencia del tema es opcional */ }
       applyTheme();
+      // The safety note shows until it is closed once; this browser remembers it.
+      const noteKey = "monthly-close-safety-note-closed";
+      try {
+        if (localStorage.getItem(noteKey) === "1") $("#safety-note").hidden = true;
+      } catch { /* sin almacenamiento local el aviso sigue visible */ }
+      $("#safety-note-close").addEventListener("click", () => {
+        $("#safety-note").hidden = true;
+        try { localStorage.setItem(noteKey, "1"); } catch { /* se oculta solo en esta visita */ }
+        $("#main-content").focus({ preventScroll: true });
+      });
       loadState();
     })();
   </script>

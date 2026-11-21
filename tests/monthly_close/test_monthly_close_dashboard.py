@@ -296,6 +296,18 @@ def test_phone_controls_are_easy_to_tap_and_the_year_table_note_fits(dashboard):
     assert box["x"] >= 0 and box["x"] + box["width"] <= screen["width"]
 
 
+def test_safety_note_can_be_closed_and_stays_closed_in_this_browser(dashboard):
+    page, _, _, _ = dashboard
+    note = page.locator("#safety-note")
+    expect(note).to_be_visible()
+    expect(note).to_contain_text("No introduzcas credenciales")
+    note.get_by_role("button", name=re.compile("^Cerrar este aviso")).click()
+    expect(note).to_be_hidden()
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    expect(note).to_be_hidden()
+
+
 def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(dashboard):
     page, _, month, _ = dashboard
     page.goto(f"{page.url.split('?')[0]}?tab=year&month={month}&year={month[:4]}&currency=COP")

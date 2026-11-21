@@ -677,6 +677,12 @@ defecto) y la moneda; debajo, las pestañas **Mes**, **Año** y **Decisión**. L
 vista se guarda en la URL, así que se puede volver a ella. El tema sigue el modo
 claro u oscuro del sistema y el botón «Tema» puede fijar uno.
 
+El aviso amarillo de arriba (datos que pueden estar incompletos, sugerencias del
+modelo que hay que revisar, no escribir credenciales) se cierra con **×**. Cada
+navegador recuerda que lo cerraste, igual que el tema; en otro dispositivo, o
+con otra dirección, como la de `-Red`, aparece de nuevo hasta cerrarlo allí. El
+aviso del formulario de configuración inicial no se puede cerrar.
+
 **Mes**
 
 - Meses en orden cronológico con nombre corto y la línea de cobertura del mes.
