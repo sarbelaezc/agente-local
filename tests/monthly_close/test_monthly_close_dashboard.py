@@ -833,13 +833,15 @@ def test_income_and_balance_cards_show_their_split_and_coverage(dashboard):
             "kind": "income", "decision": "income", "reason": "Ingreso.",
         } for index, (amount, category) in enumerate([(80000, "Nómina"), (20000, "Otros ingresos")])
     ])
-    page.goto(page.url.split("?")[0] + f"?month={month}&owner=santiago")
-    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     metrics = page.locator("#month-metrics .metric.hero")
     income = metrics.filter(has_text="Ingresos").first
-    # One owner: the kinds of income, each with its amount.
-    expect(income.locator(".split-legend")).to_contain_text("Nómina")
-    expect(income.locator(".split-legend")).to_contain_text("Otros ingresos")
+    for owner in ("hogar", "santiago"):
+        page.goto(page.url.split("?")[0] + f"?month={month}&owner={owner}")
+        expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+        # The kinds of income, also in Hogar; never who earned it.
+        expect(income.locator(".split-legend")).to_contain_text("Nómina")
+        expect(income.locator(".split-legend")).to_contain_text("Otros ingresos")
+        expect(income.locator(".split-legend")).not_to_contain_text("Santiago")
     # Spending decided is 1500,57: 1000,00 of income covers 67 % of it.
     balance = metrics.filter(has_text="Balance")
     expect(balance.get_by_role("img")).to_have_attribute("aria-label", "Los ingresos cubren el 67 % del gasto")

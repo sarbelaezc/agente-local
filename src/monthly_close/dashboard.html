@@ -985,17 +985,11 @@
           ]
           : [["Personal", personal, palette[0]], ["Familiar", family, palette[1]]]);
       }
-      // In Hogar, whose income it was, with each owner's colour of the spending bar; for one
-      // owner, its kinds when there is more than one. Each kind keeps its colour by the fixed
-      // order of the income categories, apart from the personal and family colours.
+      // The kinds of income when there is more than one, in every view (Hogar too: whose income
+      // it was is in the owner filter). Each kind keeps its colour by the fixed order of the
+      // income categories, apart from the personal and family colours.
       function appendIncomeSplit(card, incomes) {
         if (sum(incomes) <= 0) return;
-        if (state.owner === "hogar") {
-          appendSplit(card, safeArray(state.data.owners).map((owner, index) => [
-            owner.label, incomes.filter(tx => tx.owner === owner.id), index ? palette[3] : palette[0]
-          ]));
-          return;
-        }
         const kinds = [...incomeCategories(), "Sin tipo"];
         const colors = [palette[2], palette[4], palette[5], palette[6]];
         const typeOf = tx => kinds.includes(tx.category) ? tx.category : "Sin tipo";
