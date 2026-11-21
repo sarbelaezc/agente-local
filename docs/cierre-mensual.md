@@ -737,8 +737,10 @@ aviso del formulario de configuración inicial no se puede cerrar.
   4 + 3, nunca 5 + 2) y llenan el ancho; en el celular van de a dos por fila.
   La ficha «Abonos de terceros» (en Mes y en Año) abre la lista de esos abonos;
   el Gasto solo muestra la resta en su nota. Con la lista abierta, la ficha ocupa
-  toda la fila y una lista larga se desplaza dentro de ella. «Ingresos» abre la
-  lista de sus ingresos igual.
+  toda la fila y una lista larga se desplaza dentro de ella. La lista de los
+  ingresos está en la tarjeta «Ingresos por tipo», bajo el reparto por tipo;
+  «Ver los N ingresos» en la cifra Ingresos lleva a esa tarjeta con la lista
+  abierta.
 - Calendario por día (tocar un día muestra sus movimientos), dona por categoría
   (tocar una categoría abre su detalle), acumulado, días de la semana, medios de
   pago, ingresos, pagos por tarjeta y comercios frecuentes. «Comercios frecuentes»

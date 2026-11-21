@@ -168,6 +168,8 @@
     .chip .chip-year { margin-left: 4px; opacity: .7; font-size: 12px; }
     .link-button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; cursor: pointer; }
     .link-button:hover { text-decoration-color: currentColor; }
+    /* The income card's link to the list of incomes, further down in «Ingresos por tipo». */
+    .metric .card-jump { margin-top: 8px; color: var(--ink2); font-size: 13px; font-weight: 500; }
     .legend-row.link-button { width: 100%; text-decoration: none; }
     .legend-row.link-button:hover .legend-label > span:last-child { text-decoration: underline; }
     svg .jump { cursor: pointer; }
@@ -263,15 +265,15 @@
     .bar-row .bar-track { height: 10px; }
     .bar-row .bar-fill { height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--s1); }
     .bar-row strong { font-weight: 600; font-variant-numeric: tabular-nums; }
-    .metric details.inline-detail { margin-top: 6px; }
+    details.inline-detail { margin-top: 6px; }
     /* A long list scrolls inside its card instead of stretching the whole row. */
     .detail-row.stacked { align-items: baseline; }
     .detail-row .detail-text { display: grid; gap: 1px; }
     .detail-row .detail-title { color: var(--ink); overflow-wrap: anywhere; }
     .detail-row .detail-sub { color: var(--mut); font-size: 12px; }
-    .metric .inline-detail .detail-rows { max-height: 280px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
-    .metric details.inline-detail > summary { padding: 4px 0; color: var(--ink2); font-size: 13px; font-weight: 500; }
-    .metric .inline-detail .detail-row strong, .metric .inline-detail .flag-tag { display: inline; margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0; white-space: nowrap; }
+    .inline-detail .detail-rows { max-height: 280px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+    details.inline-detail > summary { padding: 4px 0; color: var(--ink2); font-size: 13px; font-weight: 500; }
+    .inline-detail .detail-row strong, .inline-detail .flag-tag { display: inline; margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0; white-space: nowrap; }
 
     /* Tables and details */
     .table-wrap { width: 100%; overflow-x: auto; }
@@ -515,6 +517,7 @@
             <article class="card" id="income-card">
               <div class="card-header"><div><h3>Ingresos por tipo</h3><p>Solo dinero recibido que confirmaste como ingreso</p></div></div>
               <div id="income-ranking" class="rank-list"></div>
+              <div id="income-detail"></div>
             </article>
             <article class="card" id="card-payment-card">
               <div class="card-header"><div><h3>Pagos por tarjeta</h3><p>Abonos a la deuda leídos del aviso; no suman al gasto</p></div></div>
@@ -1488,7 +1491,14 @@
         );
         income.classList.add("hero");
         appendIncomeSplit(income, incomes);
-        if (incomes.length) income.append(inlineDetail(`Ver ${incomes.length === 1 ? "el ingreso" : `los ${incomes.length} ingresos`}`, incomes));
+        // The list of incomes lives in «Ingresos por tipo»; the summary card takes you there.
+        const incomeLabel = `Ver ${incomes.length === 1 ? "el ingreso" : `los ${incomes.length} ingresos`}`;
+        if (incomes.length) {
+          const jump = el("button", "link-button card-jump", incomeLabel);
+          jump.type = "button";
+          jump.addEventListener("click", openIncomeDetail);
+          income.append(jump);
+        }
         const net = makeMetric(
           "Balance", formatMoney(balance),
           incomeTotal === 0 && total === 0 ? "Sin ingresos ni gastos decididos"
@@ -1522,6 +1532,7 @@
         $("#income-card").hidden = incomes.length === 0;
         $("#card-payment-card").hidden = cardPayments.length === 0;
         renderRanking("#income-ranking", incomes, tx => tx.category, "Sin tipo", items => items);
+        $("#income-detail").replaceChildren(...(incomes.length ? [inlineDetail(incomeLabel, incomes)] : []));
         // "tarjeta de credito *1234" from the notice: the short name keeps the digits visible.
         renderRanking("#card-payment-ranking", cardPayments, tx => {
           const digits = typeof tx.merchant === "string" ? /\*\s*(\d{4})\s*$/.exec(tx.merchant) : null;
@@ -1889,6 +1900,16 @@
           `${name} · ${value.count}`, value.total, max,
           `${name}: ${formatMoney(value.total)} en ${value.count} ${value.count === 1 ? "movimiento" : "movimientos"}`
         )));
+      }
+
+      // Opens the list of incomes in «Ingresos por tipo» and brings that card into view.
+      function openIncomeDetail() {
+        const detail = $("#income-detail details");
+        if (!detail) return;
+        detail.open = true;
+        hideTip();
+        $("#income-card").scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        detail.querySelector("summary").focus({ preventScroll: true });
       }
 
       // Opens a category of the month's detail and brings it into view; spending comes first in the list.
