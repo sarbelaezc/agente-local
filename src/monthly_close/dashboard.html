@@ -190,11 +190,12 @@
     .split-bar span { display: block; min-width: 2px; }
     .split-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; color: var(--ink2); font-size: 12px; }
     .split-legend span { display: inline-flex; align-items: center; gap: 5px; }
-    .metric-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-    .metric.minor { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; padding: 7px 13px; border-radius: 999px; font-size: 13px; }
-    .metric.minor .label { display: inline; font-size: inherit; letter-spacing: 0; text-transform: none; font-weight: 600; }
-    .metric.minor strong { display: inline; margin: 0; font-size: inherit; letter-spacing: 0; }
-    .metric.minor small { display: inline; margin: 0; font-size: 12px; }
+    /* Secondary figures: tiles of one width that grow to fill each row, whatever the length of each note. */
+    .metric-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .metric.minor { flex: 1 1 210px; display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 10px 14px; border-radius: 12px; }
+    .metric.minor .label { font-size: 12.5px; letter-spacing: 0; text-transform: none; font-weight: 600; }
+    .metric.minor strong { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: 0; font-variant-numeric: tabular-nums; overflow-wrap: normal; white-space: nowrap; }
+    .metric.minor small { margin: 0; color: var(--mut); font-size: 12px; line-height: 1.4; }
     .decision-summary { margin-bottom: 12px; }
     /* Year view: monthly table with the month always visible while scrolling sideways. */
     #year-table table { min-width: 860px; }
@@ -351,6 +352,8 @@
       .top-actions .button { min-height: 38px; padding: 7px 9px; font-size: 13px; }
       .config-form { grid-template-columns: 1fr; }
       .metrics, .month-summary .metrics, .month-summary .metrics.single-row { grid-template-columns: 1fr; gap: 10px; }
+      .metric.minor { flex-basis: 140px; padding: 10px 12px; }
+      .metric.minor strong { font-size: 14.5px; white-space: normal; }
       .toolbar { align-items: flex-start; }
       .toolbar-group { width: 100%; }
       .month-chips { margin-right: -14px; padding-right: 14px; }

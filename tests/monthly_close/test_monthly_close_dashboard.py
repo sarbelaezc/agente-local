@@ -804,6 +804,46 @@ def test_pending_card_hides_when_everything_is_decided_and_the_rest_share_one_ro
         assert len(tops) == 1, (panel, tops)
 
 
+def test_secondary_figures_fill_each_row_without_overflowing(dashboard):
+    page, _, _, _ = dashboard
+    # The longest figures and notes the month and year views show, seven of them.
+    notes = ["Por mes cerrado · 10 meses", "Agosto de 2026", "56 aportes − 47 retiros · neto, no saldo · fuera del gasto",
+             "Fuera del gasto", "Ya incluido en el gasto", "15 · restan del gasto", "Revisados o conciliados"]
+    for width in (1440, 390):
+        page.set_viewport_size({"width": width, "height": 1000})
+        rows = page.evaluate("""notes => {
+          document.querySelectorAll('#month-metrics .metric-strip').forEach(node => node.remove());
+          const strip = document.createElement('div');
+          strip.className = 'metric-strip';
+          notes.forEach(note => {
+            const tile = document.createElement('div');
+            tile.className = 'metric minor';
+            for (const [tag, text] of [['span', 'Inversión neta'], ['strong', '-43.624.110,00 COP'], ['small', note]]) {
+              const part = document.createElement(tag);
+              part.textContent = text;
+              tile.append(part);
+            }
+            strip.append(tile);
+          });
+          document.querySelector('#month-metrics').append(strip);
+          const right = strip.getBoundingClientRect().right;
+          const tiles = [...strip.children];
+          return {
+            overflow: tiles.filter(tile => tile.scrollWidth > tile.clientWidth).length,
+            // Each row ends at the strip's right edge: no ragged gap after the last tile.
+            ragged: tiles.filter((tile, index) => {
+              const next = tiles[index + 1];
+              const lastInRow = !next || next.getBoundingClientRect().top > tile.getBoundingClientRect().top + 1;
+              return lastInRow && Math.abs(tile.getBoundingClientRect().right - right) > 1;
+            }).length,
+            rowCount: new Set(tiles.map(tile => Math.round(tile.getBoundingClientRect().top))).size,
+          };
+        }""", notes)
+        assert rows["overflow"] == 0 and rows["ragged"] == 0, (width, rows)
+    # On a phone two tiles share each row, instead of seven tall rows.
+    assert rows["rowCount"] == 4, rows
+
+
 def test_a_new_card_number_is_asked_in_decisions_with_the_option_of_a_new_card(dashboard):
     page, store, _, _ = dashboard
 
