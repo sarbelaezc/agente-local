@@ -207,6 +207,7 @@ The repository follows GitFlow:
 - `develop`: integration branch. Receives finished features.
 - `feature/<short-name>`: branches off `develop` and merges back into `develop` through a pull request.
 - `release/<version>`: branches off `develop` to prepare a version. Only minor fixes are allowed, and it merges into `main` and then back into `develop` through pull requests.
+- Every release ends with its annotated tag `v<version>` ("Release <version>") on the merge into `main` and a GitHub release for that tag, created with `gh release create v<version> --verify-tag --notes-file <file>` and marked as latest. A tag alone does not show up as a release on GitHub. Write the notes in Spanish, grouped by feature with the pull request numbers, ending with the validation and what is pending, as in the previous releases.
 - `hotfix/<short-name>`: branches off `main` to fix urgent production bugs. It merges into `main` and then into `develop` through pull requests.
 
 Rules:
