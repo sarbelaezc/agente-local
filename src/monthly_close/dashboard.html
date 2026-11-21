@@ -876,7 +876,8 @@
       }
       function itemText(item) {
         const name = typeof item === "string" && item.trim() ? item.trim() : "Sin especificar";
-        return name;
+        // Names come as the notice wrote them («tarjeta de credito *1234»): they start in uppercase.
+        return name.charAt(0).toLocaleUpperCase("es") + name.slice(1);
       }
       // Owner label in the household view, plus marks a person still has to see.
       function appendFlags(host, tx) {
@@ -1428,7 +1429,11 @@
         $("#income-card").hidden = incomes.length === 0;
         $("#card-payment-card").hidden = cardPayments.length === 0;
         renderRanking("#income-ranking", incomes, tx => tx.category, "Sin tipo", items => items);
-        renderRanking("#card-payment-ranking", cardPayments, tx => tx.merchant, "Sin tarjeta", items => items);
+        // "tarjeta de credito *1234" from the notice: the short name keeps the digits visible.
+        renderRanking("#card-payment-ranking", cardPayments, tx => {
+          const digits = typeof tx.merchant === "string" ? /\*\s*(\d{4})\s*$/.exec(tx.merchant) : null;
+          return digits ? `Tarjeta *${digits[1]}` : tx.merchant;
+        }, "Sin tarjeta", items => items);
         renderCalendar(inMonth, monthDate);
         renderDonut(decisions);
         renderCumulative(inMonth, monthDate);
@@ -1541,7 +1546,7 @@
         const host = $("#calendar");
         host.replaceChildren();
         for (const day of weekdayNames) {
-          const heading = el("div", "weekday", day);
+          const heading = el("div", "weekday", capitalize(day));
           heading.setAttribute("aria-hidden", "true");
           host.append(heading);
         }
@@ -1756,7 +1761,8 @@
         const fill = el("div", "bar-fill");
         fill.style.width = `${max > 0 ? Math.max(1, 100 * Math.max(0, amount) / max) : 0}%`;
         track.append(fill);
-        row.append(el("span", "bar-name", name), track, el("strong", "", formatMoney(amount)));
+        // A bar's name is a list line of its own: weekdays and card names from notices start in uppercase.
+        row.append(el("span", "bar-name", capitalize(name)), track, el("strong", "", formatMoney(amount)));
         return row;
       }
 
@@ -2203,7 +2209,7 @@
         for (let index = 0; index < 12; index++) {
           const month = `${state.year}-${String(index + 1).padStart(2, "0")}`;
           const axis = svgEl("text", { x: xOf(index), y: height - 10, "text-anchor": "middle", class: month === current ? "axis-label current" : "axis-label" });
-          axis.textContent = monthNames[index].slice(0, 3);
+          axis.textContent = capitalize(monthNames[index].slice(0, 3));
           svg.append(axis);
         }
         // One column per month with a point: a guide line and its balance on hover, touch or focus.
@@ -2260,7 +2266,7 @@
             svg.append(rect);
           });
           const label = svgEl("text", { x: left + band * index + band / 2, y: height - 12, "text-anchor": "middle", class: inProgress ? "axis-label current" : "axis-label" });
-          label.textContent = monthNames[index].slice(0, 3);
+          label.textContent = capitalize(monthNames[index].slice(0, 3));
           svg.append(label);
         });
         host.append(svg);
@@ -2327,7 +2333,7 @@
             stackedHeight += segmentHeight;
           });
           const label = svgEl("text", { x: left + band * index + band / 2, y: height - 13, "text-anchor": "middle", class: inProgress ? "axis-label current" : "axis-label" });
-          label.textContent = monthNames[index].slice(0, 3);
+          label.textContent = capitalize(monthNames[index].slice(0, 3));
           svg.append(label);
         });
         host.append(svg);

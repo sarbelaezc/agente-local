@@ -152,9 +152,7 @@ def test_decision_card_shows_the_hour_next_to_the_date(dashboard):
     expect(detail.locator('button.detail-row[data-tx-id="hour"]')).to_contain_text(re.compile(r"5 \w+\.? \d{4} · 10:32 · TIENDA CON HORA"))
 
 
-# Weekday and month abbreviations on chart axes are the only texts that stay lowercase.
-AXIS_ABBREVIATIONS = {"lun", "mar", "mié", "jue", "vie", "sáb", "dom",
-                      "ene", "feb", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"}
+# Every text starts in uppercase, chart axes and the calendar's weekday header included.
 VISIBLE_TEXTS = """() => {
   const texts = [];
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -182,6 +180,8 @@ def test_every_text_of_the_panel_starts_in_uppercase(dashboard):
     store.import_message("x", [
         movement("inc", "EMPRESA", message_id="x", day=day, kind="income", category="Otros ingresos", time="09:00"),
         movement("card", "Pago tarjeta", message_id="x", day=day, kind="card_payment", category="Pago de tarjeta"),
+        movement("own-card", "tarjeta de credito *5678", message_id="x", day=day, kind="card_payment",
+                 category="Pago de tarjeta", decision="exclude"),
         movement("inv", "FONDO", message_id="x", day=day, kind="investment"),
         movement("wd", "FONDO RETIRO", message_id="x", day=day, kind="unknown", group_key="fd:ab12"),
         movement("usd", "AMAZON", message_id="x", day=day, currency="USD"),
@@ -203,9 +203,13 @@ def test_every_text_of_the_panel_starts_in_uppercase(dashboard):
             page.evaluate("() => document.querySelectorAll('details').forEach(detail => { detail.open = true; })")
             lowercase.update(
                 text for text in page.evaluate(VISIBLE_TEXTS)
-                if text[0].islower() and text not in AXIS_ABBREVIATIONS
+                if text[0].islower()
             )
     assert not lowercase, sorted(lowercase)
+    # A card payment is named by its digits, which stay visible in the bar's name.
+    page.locator('[data-owner="hogar"]').first.click()
+    page.locator("#tab-month").click()
+    expect(page.locator("#card-payment-ranking .bar-name")).to_have_text(["Tarjeta *5678 · 1"])
 
 
 def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
