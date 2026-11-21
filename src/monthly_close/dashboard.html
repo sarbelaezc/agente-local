@@ -312,6 +312,7 @@
     .empty-state { padding: 10px 0; color: var(--mut); font-size: 13px; }
     /* Year balances: one line chart and one list of products per kind. */
     .balance-section .statement-head { margin-bottom: 4px; }
+    .balance-grid.single { grid-template-columns: minmax(0, 560px); justify-content: center; }
     .balance-focus { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; color: var(--ink2); font-size: 12.5px; }
     .balance-note { grid-column: 1 / -1; color: var(--mut); font-size: 12.5px; line-height: 1.45; }
     .balance-products > summary { color: var(--ink2); font-size: 13px; font-weight: 500; }
@@ -534,7 +535,7 @@
           </article>
           <article class="card" id="balances-card" hidden>
             <div class="card-header"><div><h3>Inversiones y créditos</h3><p>Saldo al cierre de cada mes según el último extracto de cada producto; un mes sin extracto nuevo repite el saldo anterior.</p></div></div>
-            <div class="grid-2">
+            <div class="grid-2 balance-grid">
               <section id="investment-balances" class="balance-section"></section>
               <section id="credit-balances" class="balance-section"></section>
             </div>
@@ -2049,6 +2050,7 @@
         groups.forEach(([group, selector, label, products, colorName, stroke, upIsGood]) => {
           const host = $(selector);
           host.replaceChildren();
+          host.hidden = true;
           host.style.setProperty("--balance-color", `var(${colorName})`);
           const byProduct = new Map();
           checks.filter(check => products.includes(check.product) && check.period_end <= yearEnd).forEach(check => {
@@ -2060,6 +2062,7 @@
             .filter(({ list }) => list[list.length - 1].period_end.startsWith(`${state.year}-`));
           if (!series.length) return;
           shown++;
+          host.hidden = false;
           const startOf = list => latestBy(list, `${Number(state.year) - 1}-12-31`) || list.find(check => check.period_end.startsWith(`${state.year}-`));
           const endOf = list => list[list.length - 1];
           const start = series.reduce((total, { list }) => total + startOf(list).balance_minor, 0);
@@ -2140,6 +2143,8 @@
           host.append(details);
         });
         card.hidden = state.currency !== "COP" || shown === 0;
+        // With one group (for example Manuela, without credits) it is centred, not left half-empty.
+        card.querySelector(".balance-grid").classList.toggle("single", shown === 1);
       }
 
       // Round axis steps (1, 2 or 5 times a power of ten) that cover the values.

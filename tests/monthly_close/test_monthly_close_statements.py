@@ -591,7 +591,14 @@ def test_year_view_shows_how_investments_and_credits_moved(store, start_panel, n
     expect(investments.locator(".balance-focus")).to_have_count(0)
     assert tips() == total
     investments.locator("details.balance-products > summary").click()
+    # Manuela has no credits: her investments are centred instead of leaving an empty column.
+    page.locator("#owner-switch").get_by_role("button", name="Manuela").click()
+    expect(credits).to_be_hidden()
+    expect(page.locator(".balance-grid")).to_have_class(re.compile(r"\bsingle\b"))
+    card, chart = page.locator("#balances-card").bounding_box(), investments.bounding_box()
+    assert abs((chart["x"] - card["x"]) - (card["x"] + card["width"] - chart["x"] - chart["width"])) < 4
     page.locator("#owner-switch").get_by_role("button", name="Santiago").click()
+    expect(page.locator(".balance-grid")).not_to_have_class(re.compile(r"\bsingle\b"))
     assert "*0005" not in investments.inner_text()
     assert not errors
 

@@ -748,7 +748,8 @@ aviso del formulario de configuración inicial no se puede cerrar.
     plegar la lista vuelve al total.
   - Tocar un mes de la gráfica muestra su saldo y abre ese mes.
   - Solo cuentan los productos con algún extracto en el año; en **Hogar** llevan
-    la etiqueta del titular.
+    la etiqueta del titular. Si un titular solo tiene uno de los dos grupos (por
+    ejemplo, inversiones sin créditos), su gráfica se muestra centrada.
 - **Resumen por mes:** Gasto, Personal, Familiar, Abonos, Ingresos, Balance (con
   signo y color), Inversiones, Efectivo, Pendiente y Cobertura, con fila de total.
   Un guion (—) significa que no hubo movimientos de ese tipo, nunca gasto cero; los
