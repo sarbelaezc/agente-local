@@ -270,6 +270,7 @@
     .decision-card .reason { margin: 6px 0 12px; color: var(--ink2); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
     .decision-category { max-width: 380px; margin: 10px 0; }
     .group-card details { margin-top: 8px; }
+    .decision-actions .button.proposed { outline: 2px solid var(--s1); outline-offset: 2px; }
     .group-card details > summary { color: var(--ink2); font-size: 13px; font-weight: 500; }
     .group-card details .decision-list { margin-top: 6px; }
     .check-line { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--ink2); font-size: 13px; }
@@ -2088,6 +2089,7 @@
 
       function renderDecisions() {
         loadSuggestions();
+        loadRuleProposals();
         renderCardQuestions();
         const failures = safeArray(state.data.extraction_failures);
         $("#extraction-review").hidden = failures.length === 0;
@@ -2221,6 +2223,27 @@
         categorySuggestions = Object.fromEntries(Object.entries(raw).filter(([, item]) =>
           item && typeof item.category === "string" && ["rule", "history", "ollama"].includes(item.source)));
       }
+      // Movement id -> {decision, category} a rule would take if the USD movement had a rate.
+      let ruleProposals = {};
+      function loadRuleProposals() {
+        const raw = state.data && typeof state.data.rule_proposals === "object" && state.data.rule_proposals
+          ? state.data.rule_proposals : {};
+        ruleProposals = Object.fromEntries(Object.entries(raw).filter(([, item]) =>
+          item && typeof item.decision === "string" && decidedValues.has(item.decision)));
+      }
+      // The rule's choice, shown on the card: the person only adds the rate and confirms.
+      function proposalNote(decision, options) {
+        const option = options.find(([value]) => value === decision);
+        if (!option) return null;
+        const note = el("p", "hint", `Tu regla elige «${option[1]}». Solo falta la tasa: escríbela y pulsa «${option[1]}».`);
+        note.dataset.ruleProposal = decision;
+        return note;
+      }
+      function markProposed(actions, decision) {
+        actions.querySelectorAll("button[data-decision]").forEach(button => {
+          if (button.dataset.decision === decision) button.classList.add("proposed");
+        });
+      }
       const suggestionNotes = {
         rule: "Sugerida por tu regla.",
         history: "Sugerida por tus decisiones anteriores.",
@@ -2339,9 +2362,15 @@
         // One category for every movement when the destination can be decided as an expense:
         // a suggestion shared by all of them, else the category they already share, else
         // "keep each one's" (sends no category). Investment-only choices set their own category.
+        // A rule's choice counts only when every movement of the destination has the same one.
+        const proposals = isPrevious ? [] : entry.rows.map(tx => ruleProposals[tx.id]);
+        const proposalKeys = new Set(proposals.map(item => item ? `${item.decision}|${item.category || ""}` : ""));
+        const proposal = proposals.length && proposals[0] && proposalKeys.size === 1 ? proposals[0] : null;
         let groupCategory = null;
         if (options.some(([decision]) => decision === "personal" || decision === "family")) {
-          const groupSuggestions = entry.rows.map(tx => categorySuggestions[tx.id]);
+          const groupSuggestions = proposal && proposal.category
+            ? entry.rows.map(() => ({ category: proposal.category, source: "rule" }))
+            : entry.rows.map(tx => categorySuggestions[tx.id]);
           const suggestedSet = new Set(groupSuggestions.map(item => item && item.category));
           const suggested = !isPrevious && suggestedSet.size === 1 ? [...suggestedSet][0] : undefined;
           const currentSet = new Set(entry.rows.map(tx => tx.category));
@@ -2366,10 +2395,38 @@
           if (typeof suggested === "string") field.append(suggestionNote(groupSuggestions[0].source));
           card.append(field);
         }
+        // One rate for every dollar movement of the destination; each one can still be changed below.
+        let groupRate = null;
+        const dollars = entry.rows.filter(tx => txCurrency(tx) === "USD");
+        if (state.data.config.currency === "COP" && dollars.length) {
+          const rates = new Set(dollars.map(tx => tx.exchange_rate || ""));
+          const field = el("div", "field decision-category");
+          const label = el("label", "", dollars.length === entry.rows.length
+            ? `Tasa estimada COP por USD para los ${dollars.length} movimientos`
+            : `Tasa estimada COP por USD para los ${dollars.length} movimientos en dólares`);
+          label.htmlFor = `group-rate-${decisionCardSequence++}`;
+          groupRate = document.createElement("input");
+          groupRate.id = label.htmlFor;
+          groupRate.name = "exchange_rate";
+          groupRate.type = "text";
+          groupRate.inputMode = "decimal";
+          groupRate.autocomplete = "off";
+          groupRate.placeholder = "4200,50…";
+          groupRate.value = rates.size === 1 ? [...rates][0] : "";
+          field.append(label, groupRate, el("p", "hint", rates.size > 1
+            ? "Tienen tasas distintas: déjala vacía para conservar la de cada uno. La pones tú; no se consulta ninguna tasa."
+            : "La pones tú; no se consulta ninguna tasa. «No cuenta» no la necesita."));
+          card.append(field);
+        }
+        if (proposal) {
+          const note = proposalNote(proposal.decision, options);
+          if (note) card.append(note);
+        }
         const actions = el("div", "decision-actions");
         options.forEach(([decision, label]) => {
           const button = el("button", `button small${decision === "exclude" ? " danger" : ""}`, label);
           button.type = "button";
+          button.dataset.decision = decision;
           button.setAttribute("aria-pressed", String(entry.rows.every(tx => tx.decision === decision)));
           button.setAttribute("aria-label", `${label}: ${entry.rows.length} movimientos a ${groupTitle(entry)}`);
           button.addEventListener("click", () => {
@@ -2380,10 +2437,12 @@
               scope: isPrevious ? "all" : "pending", remember: remember.checked
             };
             if (groupCategory && groupCategory.value && (decision === "personal" || decision === "family")) payload.category = groupCategory.value;
+            if (groupRate && groupRate.value.trim()) payload.exchange_rate = groupRate.value.trim();
             postJson("/api/decision-group", payload, `Decisión guardada para ${entry.rows.length} movimientos.`);
           });
           actions.append(button);
         });
+        if (proposal) markProposed(actions, proposal.decision);
         if (!options.length) card.append(el("p", "hint", "Estos movimientos no admiten la misma decisión; decide cada uno abajo."));
         const toggle = betweenToggle(entry);
         if (toggle) actions.append(toggle);
@@ -2590,7 +2649,9 @@
           categorySelect.append(option);
         });
         categoryField.append(categoryLabel, categorySelect);
-        const suggested = !isPrevious && !isIncome && tx.decision == null ? categorySuggestions[tx.id] : undefined;
+        const proposal = !isPrevious && tx.decision == null ? ruleProposals[tx.id] : undefined;
+        const suggested = proposal && proposal.category ? { category: proposal.category, source: "rule" }
+          : !isPrevious && !isIncome && tx.decision == null ? categorySuggestions[tx.id] : undefined;
         if (suggested && categories.includes(suggested.category)) {
           categorySelect.value = suggested.category;
           categoryField.append(suggestionNote(suggested.source));
@@ -2646,10 +2707,15 @@
         } else if (tx.kind === "own_transfer" || isExcludedAccount(tx)) {
           card.append(el("p", "hint", "Transferencia propia o cuenta excluida: no puede marcarse Personal."));
         }
+        if (proposal) {
+          const note = proposalNote(proposal.decision, options);
+          if (note) card.append(note);
+        }
         const actions = el("div", "decision-actions");
         options.forEach(([decision, label]) => {
           const button = el("button", `button small${decision === "exclude" ? " danger" : ""}`, label);
           button.type = "button";
+          button.dataset.decision = decision;
           button.setAttribute("aria-pressed", String(tx.decision === decision || (tx.decision === "cash_withdrawal" && decision === "personal")));
           button.addEventListener("click", async () => {
             const payload = { id: tx.id, decision, category: categorySelect.value };
@@ -2661,6 +2727,7 @@
           });
           actions.append(button);
         });
+        if (proposal) markProposed(actions, proposal.decision);
         card.append(actions);
         return card;
       }

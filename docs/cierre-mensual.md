@@ -135,13 +135,18 @@ el total y una pista, con botones que deciden todos sus movimientos a la vez.
   tarjeta que ocupa ahora su lugar, para seguir con el teclado o sin desplazarte.
 - **Todo o nada.** Si un movimiento no pasa la validación (por ejemplo, una compra
   en USD sin tasa), no cambia ninguno.
+- **Tasa del destino.** Si el destino tiene compras en USD, la tarjeta trae
+  «Tasa estimada COP por USD para los N movimientos»: la tasa que escribes se
+  aplica a todas sus compras en dólares al decidir, y las compras en pesos del
+  mismo destino no la usan (ver [Compras en dólares](#compras-en-dólares)).
 - **Pagos futuros.** «Aplicar también a pagos futuros a este destino, con la
   categoría elegida» crea una regla de destino que recuerda la decisión y, si
   elegiste una, la categoría. Decide lo que llegue a ese destino por aviso o por
   extracto (por ejemplo un «TRASLADO A NEQUI» como Retiro en efectivo y Gasto
   personal), salvo posibles duplicados y lo que no pase la validación, como una
-  compra en USD sin tasa. Se puede borrar en «Reglas por destino». Sin esa casilla
-  no se crea ninguna regla.
+  compra en USD sin tasa, que queda pendiente con la decisión de la regla
+  propuesta (ver [Compras en dólares](#compras-en-dólares)). Se puede borrar en
+  «Reglas por destino». Sin esa casilla no se crea ninguna regla.
 - **Categoría del destino.** Una tarjeta con varios movimientos que admiten Gasto
   personal o Familiar (compras, transferencias como un traslado a Nequi, cuotas
   de crédito o movimientos sin tipo) tiene el selector «Categoría para los N
@@ -178,6 +183,9 @@ las aplica ni decide nada por su cuenta.
   («si quien paga contiene `EMPRESA`, es Nómina»).
 - Deciden lo que llega por avisos y por extractos. Nunca deciden transferencias,
   inversiones, cuentas excluidas, compras en USD sin tasa ni posibles duplicados.
+  Una compra en USD sin tasa que coincide con una regla queda pendiente con la
+  decisión y la categoría de la regla ya elegidas (ver
+  [Compras en dólares](#compras-en-dólares)).
 - Se aplican al importar avisos o extractos y al guardar la regla. Nunca cambian una decisión ya
   tomada; cada decisión automática indica su regla y se puede corregir. Borrar una
   regla no deshace lo que ya decidió.
@@ -245,6 +253,21 @@ aviso con marcas de COP y USD a la vez se detiene por ambiguo.
 2. Confirma la decisión. El importe en USD queda intacto y se guarda su
    equivalente en COP, que es el que suman los totales. Sin tasa, el movimiento
    no suma a COP; «No cuenta» lo excluye sin tasa.
+
+**Varias compras del mismo destino.** La tarjeta del destino trae el campo
+«Tasa estimada COP por USD para los N movimientos». La tasa que escribes se
+aplica a todas sus compras en dólares al pulsar la decisión, con la misma
+validación todo o nada y una auditoría por movimiento. Las compras en pesos del
+mismo destino no la usan. Si las compras ya tienen tasas distintas, el campo
+viene vacío: déjalo así para conservar la de cada una, o decide cada compra en
+«Ver N movimientos».
+
+**Compras que coinciden con una regla.** Las reglas por comercio y por destino
+nunca deciden una compra en USD sin tasa, porque la tasa la pones tú. En cambio,
+la tarjeta muestra «Tu regla elige «Familiar». Solo falta la tasa», con la
+categoría de la regla ya elegida y su botón resaltado: escribe la tasa y pulsa ese
+botón. En la tarjeta de un destino, la propuesta aparece solo si todas sus compras
+tienen la misma.
 
 La tarjeta de un destino con varias compras muestra su total en la moneda de cada
 movimiento (por ejemplo `US$ 35,00`), nunca 0,00 COP por falta de tasa. Con COP
