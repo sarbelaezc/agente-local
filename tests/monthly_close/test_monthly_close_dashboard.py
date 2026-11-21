@@ -872,6 +872,37 @@ def test_open_detail_of_a_summary_card_keeps_small_amounts_and_scrolls_inside(da
     assert sizes["list"], sizes
 
 
+def test_tile_figures_go_right_of_the_name_unless_a_tile_of_the_row_has_no_room(dashboard):
+    page, _, _, _ = dashboard
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.evaluate("""() => {
+      const strip = document.createElement('div');
+      strip.className = 'metric-strip';
+      for (let index = 0; index < 2; index++) {  // one row on both screens
+        const tile = document.createElement('div');
+        tile.className = 'metric minor';
+        for (const [tag, cls, text] of [['span', 'label', 'Inversión neta'], ['strong', '', '-43.624.110,00 COP'], ['small', '', 'Fuera del gasto']]) {
+          const part = document.createElement(tag);
+          if (cls) part.className = cls;
+          part.textContent = text;
+          tile.append(part);
+        }
+        strip.append(tile);
+      }
+      document.querySelector('#month-metrics').append(strip);
+    }""")
+    # Wide: the figure beside the name. On a phone the row has no room: both below the name.
+    # The panel refits the tiles when their summary changes size.
+    for width, stacked in ((1440, False), (390, True)):
+        page.set_viewport_size({"width": width, "height": 1000})
+        page.wait_for_function("""stacked => {
+          const tiles = [...document.querySelectorAll('#month-metrics .metric-strip .metric.minor')];
+          const beside = tile => Math.abs(tile.querySelector('strong').getBoundingClientRect().top
+            - tile.querySelector('.label').getBoundingClientRect().top) < 8;
+          return tiles.length === 2 && tiles.every(tile => tile.classList.contains('stacked') === stacked && beside(tile) !== stacked);
+        }""", arg=stacked)
+
+
 def test_secondary_figures_fill_each_row_without_overflowing(dashboard):
     page, _, _, _ = dashboard
     # The longest figures and notes the month and year views show, seven of them.

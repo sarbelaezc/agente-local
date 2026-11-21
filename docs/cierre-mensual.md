@@ -730,8 +730,10 @@ aviso del formulario de configuración inicial no se puede cerrar.
   queda algo pendiente, y sin ella las otras tres van en una fila). Debajo, en
   fichas pequeñas y solo si existen: primero lo que toca el gasto (retiro en
   efectivo, abonos de terceros) y luego lo que queda fuera (pagos a tarjetas,
-  movimientos entre titulares, inversiones). Cada ficha lleva el nombre, la cifra
-  y una nota, una debajo de otra. Las filas se reparten parejas (siete fichas van
+  movimientos entre titulares, inversiones). Cada ficha lleva el nombre con la
+  cifra a la derecha y una nota debajo; si en una fila alguna ficha no tiene
+  espacio para eso (en el celular, por ejemplo), toda la fila pone la cifra
+  debajo del nombre. Las filas se reparten parejas (siete fichas van
   4 + 3, nunca 5 + 2) y llenan el ancho; en el celular van de a dos por fila.
   La ficha «Abonos de terceros» (en Mes y en Año) abre la lista de esos abonos;
   el Gasto solo muestra la resta en su nota. Con la lista abierta, la ficha ocupa
