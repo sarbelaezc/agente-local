@@ -99,7 +99,7 @@ def test_queued_notice_can_be_discarded_from_the_panel(dashboard):
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.locator("#tab-decisions").click()
     review = page.locator("#extraction-review")
-    assert "el monto que propuso Ollama no aparece en el aviso" in review.inner_text()
+    assert "El monto que propuso Ollama no aparece en el aviso" in review.inner_text()
     assert "12:00" in review.inner_text()  # the time, to find it among the same day's alerts
     # The queue and the movements to decide never overlap: the queue ends before the list starts.
     expect(page.locator("#pending-heading")).to_be_visible()
@@ -150,6 +150,62 @@ def test_decision_card_shows_the_hour_next_to_the_date(dashboard):
     detail = page.locator('#category-details details[data-category="Compras"]')
     detail.locator("summary").click()
     expect(detail.locator('button.detail-row[data-tx-id="hour"]')).to_contain_text(re.compile(r"5 \w+\.? \d{4} · 10:32 · TIENDA CON HORA"))
+
+
+# Weekday and month abbreviations on chart axes are the only texts that stay lowercase.
+AXIS_ABBREVIATIONS = {"lun", "mar", "mié", "jue", "vie", "sáb", "dom",
+                      "ene", "feb", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"}
+VISIBLE_TEXTS = """() => {
+  const texts = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const parent = node.parentElement;
+    const text = node.textContent.trim();
+    // A text right after a figure or a separator in the same element continues its sentence.
+    const before = node.previousSibling ? (node.previousSibling.textContent || "").trim() : "";
+    if (text && parent && parent.getClientRects().length && !before) texts.push(text);
+  }
+  document.querySelectorAll("[aria-label],[title],[placeholder],[data-tip]").forEach(element => {
+    for (const name of ["aria-label", "title", "placeholder", "data-tip"]) {
+      const value = (element.getAttribute(name) || "").trim();
+      if (value) texts.push(value);
+    }
+  });
+  return texts;
+}"""
+
+
+def test_every_text_of_the_panel_starts_in_uppercase(dashboard):
+    page, store, month, _ = dashboard
+    day = month + "-07"
+    store.import_message("x", [
+        movement("inc", "EMPRESA", message_id="x", day=day, kind="income", category="Otros ingresos", time="09:00"),
+        movement("card", "Pago tarjeta", message_id="x", day=day, kind="card_payment", category="Pago de tarjeta"),
+        movement("inv", "FONDO", message_id="x", day=day, kind="investment"),
+        movement("wd", "FONDO RETIRO", message_id="x", day=day, kind="unknown", group_key="fd:ab12"),
+        movement("usd", "AMAZON", message_id="x", day=day, currency="USD"),
+        movement("tr1", "PERSONA", message_id="x", day=day, kind="transfer", group_key="tr:1234"),
+        movement("tr2", "PERSONA", message_id="x", day=month + "-08", kind="transfer", group_key="tr:1234"),
+        movement("loan", "Cuota credito", message_id="x", day=day, kind="loan"),
+    ], owner="manuela")
+    store.decide("inc", "income", "Otros ingresos")
+    store.decide("inv", "investment")
+    store.decide("wd", "investment_withdrawal")
+    store.decide("card", "third_party_payment")
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    lowercase = set()
+    for owner in ["hogar", "santiago", "manuela"]:
+        page.locator(f'[data-owner="{owner}"]').first.click()
+        for tab in ["month", "year", "decisions"]:
+            page.locator("#tab-" + tab).click()
+            page.evaluate("() => document.querySelectorAll('details').forEach(detail => { detail.open = true; })")
+            lowercase.update(
+                text for text in page.evaluate(VISIBLE_TEXTS)
+                if text[0].islower() and text not in AXIS_ABBREVIATIONS
+            )
+    assert not lowercase, sorted(lowercase)
 
 
 def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):

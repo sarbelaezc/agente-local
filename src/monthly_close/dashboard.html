@@ -830,12 +830,12 @@
       }
       function failureReason(field) {
         const reasons = {
-          merchant: "el comercio que propuso Ollama no aparece en el aviso",
-          amount_text: "el monto que propuso Ollama no aparece en el aviso",
-          events: "el aviso dice que salió dinero, pero no se extrajo ningún movimiento",
-          correction: "la propuesta no coincidía con el aviso y la corrección cambió otros datos o quitó movimientos",
+          merchant: "El comercio que propuso Ollama no aparece en el aviso",
+          amount_text: "El monto que propuso Ollama no aparece en el aviso",
+          events: "El aviso dice que salió dinero, pero no se extrajo ningún movimiento",
+          correction: "La propuesta no coincidía con el aviso y la corrección cambió otros datos o quitó movimientos",
         };
-        return reasons[field] || `el campo ${field} no coincide con el aviso`;
+        return reasons[field] || `El campo ${field} no coincide con el aviso`;
       }
       // The date of a movement, with its hour when known: the same in every list and card.
       function movementWhen(tx) {
@@ -1282,7 +1282,7 @@
           if (index === 0 || months[index - 1].slice(0, 4) !== month.slice(0, 4)) button.append(el("span", "chip-year", month.slice(0, 4)));
           button.type = "button";
           button.dataset.month = month;
-          button.setAttribute("aria-label", monthLabel(month));
+          button.setAttribute("aria-label", capitalize(monthLabel(month)));
           button.setAttribute("aria-pressed", String(month === state.month));
           button.addEventListener("click", () => goToMonth(month));
           chips.append(button);
@@ -1291,7 +1291,7 @@
         const coverageSelect = $("#coverage-month");
         coverageSelect.replaceChildren();
         months.slice().reverse().forEach(month => {
-          const option = el("option", "", monthLabel(month));
+          const option = el("option", "", capitalize(monthLabel(month)));
           option.value = month;
           option.selected = month === state.month;
           coverageSelect.append(option);
@@ -1422,7 +1422,7 @@
         if (cardPayments.length) minor("Pagos a tarjetas", formatMoney(sum(cardPayments)), `${cardPayments.length} · no es gasto`);
         if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
         if (between.length) minor("Entre Santiago y Manuela", formatMoney(sum(between)), `${between.length} · no cuentan en Hogar`);
-        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "ya incluido en el gasto");
+        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
         $("#month-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
 
         $("#income-card").hidden = incomes.length === 0;
@@ -1566,7 +1566,7 @@
         for (let day = 1; day <= days; day++) {
           const date = new Date(year, month, day);
           const today = date.toDateString() === new Date().toDateString() ? " today" : "";
-          const label = `${weekdayNames[(date.getDay() + 6) % 7]}, ${day} ${monthLabel(state.month)}`;
+          const label = `${capitalize(weekdayNames[(date.getDay() + 6) % 7])}, ${day} de ${monthLabel(state.month)}`;
           if (!grouped.has(day)) {
             const cell = el("div", `day-cell${today}`);
             cell.setAttribute("aria-label", label);
@@ -1750,7 +1750,7 @@
       }
 
       // Name, proportional bar and amount, as in Manuela's rankings.
-      function barRow(name, amount, max, tipText = `${name}: ${formatMoney(amount)}`) {
+      function barRow(name, amount, max, tipText = `${capitalize(name)}: ${formatMoney(amount)}`) {
         const row = setTip(el("div", "bar-row"), tipText);
         const track = el("div", "bar-track");
         const fill = el("div", "bar-fill");
@@ -1989,15 +1989,15 @@
           chip.classList.add("minor");
           strip.append(chip);
         };
-        if (closed.length) minor("Promedio de gasto", formatMoney(average), `por mes cerrado · ${closed.length} ${closed.length === 1 ? "mes" : "meses"}`);
+        if (closed.length) minor("Promedio de gasto", formatMoney(average), `Por mes cerrado · ${closed.length} ${closed.length === 1 ? "mes" : "meses"}`);
         if (highest && bucketTotal(highest) > 0) minor("Mes de mayor gasto", formatMoney(bucketTotal(highest)), capitalize(monthLabel(highest.month)));
         if (investments.length || withdrawals.length) {
           minor("Inversión neta", formatMoney(netInvestments(items)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo · fuera del gasto`);
         }
-        if (withdrawals.length) minor("Retiros de inversión", formatMoney(sum(withdrawals)), "fuera del gasto");
-        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "ya incluido en el gasto");
+        if (withdrawals.length) minor("Retiros de inversión", formatMoney(sum(withdrawals)), "Fuera del gasto");
+        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
         if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
-        if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed}`, "meses transcurridos revisados o conciliados");
+        if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed} ${coverage.elapsed === 1 ? "mes" : "meses"}`, "Revisados o conciliados");
         $("#year-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
 
         const categoryHost = $("#year-categories");
@@ -2255,7 +2255,7 @@
               x: left + band * index + band * .12 + position * (barWidth + 2), y: top + chartHeight - barHeight,
               width: barWidth, height: barHeight, fill: colors[position], "fill-opacity": inProgress ? .45 : 1
             });
-            setTip(rect, `${monthLabel(bucket.month)}${inProgress ? " (en curso)" : ""} · ${name}: ${formatMoney(amount)}`);
+            setTip(rect, `${capitalize(monthLabel(bucket.month))}${inProgress ? " (en curso)" : ""} · ${name}: ${formatMoney(amount)}`);
             jumpToMonth(rect, bucket.month);
             svg.append(rect);
           });
@@ -2320,7 +2320,7 @@
                 x, y: top + chartHeight - stackedHeight - segmentHeight, width: barWidth, height: segmentHeight,
                 fill: categoryColor(category), "fill-opacity": inProgress ? .45 : 1
               });
-              setTip(rect, `${monthLabel(bucket.month)}${inProgress ? " (en curso)" : ""} · ${category}: ${formatMoney(amount)}`);
+              setTip(rect, `${capitalize(monthLabel(bucket.month))}${inProgress ? " (en curso)" : ""} · ${category}: ${formatMoney(amount)}`);
               jumpToMonth(rect, bucket.month);
               svg.append(rect);
             }
@@ -2562,7 +2562,7 @@
           el("span", "label", "Por decidir"),
           el("strong", "", String(pending.length)),
           el("small", "", pending.length
-            ? `${pending.length === 1 ? "destino" : "destinos"} por decidir · ${pendingMovements} ${pendingMovements === 1 ? "movimiento" : "movimientos"} · ${formatMoney(pendingAmount)} sin sumar al gasto`
+            ? `${pending.length === 1 ? "Destino" : "Destinos"} por decidir · ${pendingMovements} ${pendingMovements === 1 ? "movimiento" : "movimientos"} · ${formatMoney(pendingAmount)} sin sumar al gasto`
             : "No hay destinos por decidir.")
         );
         const host = $("#pending-list");
