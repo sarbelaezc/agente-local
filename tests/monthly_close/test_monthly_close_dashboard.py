@@ -138,13 +138,18 @@ def test_decision_persists_and_updates_totals(dashboard):
 
 
 def test_decision_card_shows_the_hour_next_to_the_date(dashboard):
-    page, store, _, _ = dashboard
-    store.import_message("m-hour", [movement("hour", "TIENDA CON HORA", message_id="m-hour", time="10:32")])
+    page, store, month, _ = dashboard
+    store.import_message("m-hour", [movement("hour", "TIENDA CON HORA", message_id="m-hour", day=f"{month}-05", time="10:32")])
     page.reload()
     page.get_by_role("tab", name=re.compile("Decisi")).click()
     card = page.locator("#panel-decisions .decision-card").filter(has_text="TIENDA CON HORA")
-    expect(card.locator(".decision-meta > span").first).to_have_text(re.compile(r"^5 oct 2026 · 10:32$"))
+    expect(card.locator(".decision-meta > span").first).to_have_text(re.compile(r"^5 \w+\.? \d{4} · 10:32$"))
     expect(card.locator("p.hint").filter(has_text="Hora")).to_have_count(0)
+    # The month's category detail shows the same date and hour.
+    page.get_by_role("tab", name="Mes").click()
+    detail = page.locator('#category-details details[data-category="Compras"]')
+    detail.locator("summary").click()
+    expect(detail.locator('button.detail-row[data-tx-id="hour"]')).to_contain_text(re.compile(r"5 \w+\.? \d{4} · 10:32 · TIENDA CON HORA"))
 
 
 def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):

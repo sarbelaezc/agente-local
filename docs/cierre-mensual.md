@@ -411,8 +411,10 @@ Vuelve a leer por Graph, en solo lectura y sin Ollama, los avisos de pagos
 salientes de Santiago sin destino. Solo completa destinos vacíos (auditados como
 `destination-backfill`); no cambia importes, categorías ni decisiones.
 
-**Hora de cada movimiento.** La tarjeta de la pestaña Decisión muestra la hora
-junto a la fecha para identificar el movimiento: la que escribe el aviso o, si no
+**Hora de cada movimiento.** El panel muestra la hora junto a la fecha en todas
+partes (tarjetas de la pestaña Decisión, detalle por categoría, ingresos, abonos de
+terceros y detalle de un día del calendario, ordenados por fecha y hora) para
+identificar el movimiento: la que escribe el aviso o, si no
 la escribe, la hora en que llegó el aviso. Solo se pone cuando el aviso trae un
 único movimiento del mismo día en que llegó; un aviso con varios movimientos o de
 otro día no da hora. Los movimientos de extractos, del Excel de créditos y de los

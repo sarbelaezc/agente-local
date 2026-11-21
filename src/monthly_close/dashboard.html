@@ -837,6 +837,14 @@
         };
         return reasons[field] || `el campo ${field} no coincide con el aviso`;
       }
+      // The date of a movement, with its hour when known: the same in every list and card.
+      function movementWhen(tx) {
+        if (!tx.day) return "Sin fecha";
+        return typeof tx.time === "string" && tx.time ? `${formatDate(tx.day)} · ${tx.time}` : formatDate(tx.day);
+      }
+      function byWhen(a, b) {
+        return `${a.day || ""} ${a.time || ""}`.localeCompare(`${b.day || ""} ${b.time || ""}`);
+      }
       function formatDate(value) {
         if (typeof value !== "string") return "Fecha no disponible";
         const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -940,9 +948,9 @@
         const detail = el("details", "inline-detail");
         detail.append(el("summary", "", summary));
         const body = el("div", "detail-rows");
-        rows.slice().sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
+        rows.slice().sort(byWhen).forEach(tx => {
           const row = el("div", "detail-row");
-          const text = el("span", "", `${tx.day ? formatDate(tx.day) : "Sin fecha"} · ${itemText(tx.merchant)} · ${itemText(tx.category)}`);
+          const text = el("span", "", `${movementWhen(tx)} · ${itemText(tx.merchant)} · ${itemText(tx.category)}`);
           appendFlags(text, tx);
           row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
           body.append(row);
@@ -1600,7 +1608,8 @@
         rows.forEach(tx => {
           const row = el("div", "detail-row");
           const scope = tx.decision === "family" ? "Familiar" : "Personal";
-          const text = el("span", "", `${itemText(tx.merchant)} · ${itemText(tx.category)} · ${scope}`);
+          const hour = typeof tx.time === "string" && tx.time ? `${tx.time} · ` : "";
+          const text = el("span", "", `${hour}${itemText(tx.merchant)} · ${itemText(tx.category)} · ${scope}`);
           appendFlags(text, tx);
           row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
           body.append(row);
@@ -1832,13 +1841,13 @@
             const pending = rows.filter(tx => tx.decision == null).length;
             detail.append(el("summary", "", `${category} · ${totalOf(rows)} · ${rows.length} movimientos${pending ? ` · ${pending} por decidir` : ""}`));
             const body = el("div", "detail-rows");
-            rows.sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
+            rows.sort(byWhen).forEach(tx => {
               const row = el("button", "detail-row");
               row.type = "button";
               row.dataset.txId = tx.id;
               row.setAttribute("aria-expanded", "false");
-              row.setAttribute("aria-label", `Cambiar ${itemText(tx.merchant)} del ${tx.day ? formatDate(tx.day) : "día sin fecha"}, ${formatMoney(tx.amount_minor)}, ${statusOf(tx)}`);
-              const text = el("span", "", `${tx.day ? formatDate(tx.day) : "Sin fecha"} · ${itemText(tx.merchant)} · ${statusOf(tx)}`);
+              row.setAttribute("aria-label", `Cambiar ${itemText(tx.merchant)} del ${tx.day ? movementWhen(tx) : "día sin fecha"}, ${formatMoney(tx.amount_minor)}, ${statusOf(tx)}`);
+              const text = el("span", "", `${movementWhen(tx)} · ${itemText(tx.merchant)} · ${statusOf(tx)}`);
               appendFlags(text, tx);
               const amount = el("span", "detail-amount");
               const chevron = el("span", "detail-chevron", "▾");
@@ -3007,8 +3016,7 @@
       function makeDecisionCard(tx, isPrevious, onSaved = null) {
         const card = el("article", "decision-card");
         const meta = el("div", "decision-meta");
-        const when = typeof tx.time === "string" && tx.time ? `${formatDate(tx.day)} · ${tx.time}` : formatDate(tx.day);
-        meta.append(el("span", "", when), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
+        meta.append(el("span", "", movementWhen(tx)), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
         const title = el("h3", "", itemText(tx.merchant));
         card.append(meta, title, el("strong", "", formatMoney(tx.amount_minor, txCurrency(tx))));
         const flags = el("p", "hint");
