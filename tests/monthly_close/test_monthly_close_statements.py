@@ -543,6 +543,14 @@ def test_year_view_shows_how_investments_and_credits_moved(store, start_panel, n
     expect(credits.locator(".statement-head strong")).to_have_text(re.compile(r"850[.\s]?000,00"))
     expect(credits.locator(".statement-head p")).to_contain_text(re.compile(r"bajó 50[.\s]?000,00"))
     assert "*0006" not in credits.inner_text()
+    # Each group has its own colour, apart from income blue and spending orange.
+    colours = page.evaluate("""() => {
+      const style = getComputedStyle(document.documentElement);
+      const line = id => document.querySelector(`${id} svg.balance-chart polyline`);
+      return [line('#investment-balances').getAttribute('stroke'), line('#credit-balances').getAttribute('stroke'),
+              style.getPropertyValue('--s3').trim(), style.getPropertyValue('--s7').trim()];
+    }""")
+    assert colours[0] == colours[2] and colours[1] == colours[3]
     # Only totals by default: the products are folded.
     products = investments.locator("details.balance-products")
     expect(products.locator("summary")).to_have_text("2 productos")

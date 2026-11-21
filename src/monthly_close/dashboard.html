@@ -317,7 +317,7 @@
     .balance-products > summary { color: var(--ink2); font-size: 13px; font-weight: 500; }
     button.balance-product { width: 100%; margin: 0; padding: 8px 6px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
     @media (hover: hover) { button.balance-product:hover { background: var(--soft); } }
-    button.balance-product[aria-pressed="true"] { background: var(--soft); box-shadow: inset 3px 0 0 var(--s1); }
+    button.balance-product[aria-pressed="true"] { background: var(--soft); box-shadow: inset 3px 0 0 var(--balance-color, var(--s1)); }
     /* Statements card: one block per kind of product, one two-line row per statement. */
     .statement-section + .statement-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
     .statement-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; }
@@ -2026,9 +2026,11 @@
         const checks = safeArray(state.data && state.data.statement_checks).filter(check =>
           check && typeof check.period_end === "string" && Number.isSafeInteger(check.balance_minor) && inOwnerView(check));
         const yearEnd = `${state.year}-12-31`;
+        // Each group has its own colour, apart from the blue (income) and orange (spending) of
+        // the chart above. Teal has less contrast on the light surface, so its line is thicker.
         const groups = [
-          ["investments", "#investment-balances", "Inversiones", investmentProducts],
-          ["credits", "#credit-balances", "Créditos", ["CREDITO", "HIPOTECARIO"]]
+          ["investments", "#investment-balances", "Inversiones", investmentProducts, "--s3", 3],
+          ["credits", "#credit-balances", "Créditos", ["CREDITO", "HIPOTECARIO"], "--s7", 2]
         ];
         const latestBy = (list, end) => list.filter(check => check.period_end <= end).pop();
         const nameOf = check => `${productNames[check.product] || check.product}${check.suffix ? ` *${check.suffix}` : ""}`;
@@ -2039,9 +2041,10 @@
           if (month <= current) months.push({ index, month });
         }
         let shown = 0;
-        groups.forEach(([group, selector, label, products]) => {
+        groups.forEach(([group, selector, label, products, colorName, stroke]) => {
           const host = $(selector);
           host.replaceChildren();
+          host.style.setProperty("--balance-color", `var(${colorName})`);
           const byProduct = new Map();
           checks.filter(check => products.includes(check.product) && check.period_end <= yearEnd).forEach(check => {
             const key = `${check.owner}|${check.product}|${check.suffix}`;
@@ -2087,7 +2090,7 @@
             points.push({ index, month, total: known.reduce((total, check) => total + check.balance_minor, 0), count: known.length, arrived: arrived.length > 0 });
             arrived.forEach(({ list }) => entries.push(`${monthNames[index].slice(0, 3)}: empieza a contar ${nameOf(endOf(list))}${state.owner === "hogar" ? ` (${ownerLabel(endOf(list).owner)})` : ""}`));
           });
-          host.append(balanceChart(points, chosen ? nameOf(endOf(chosen.list)) : label));
+          host.append(balanceChart(points, chosen ? nameOf(endOf(chosen.list)) : label, cssColor(colorName), stroke));
           if (entries.length) host.append(el("p", "balance-note", `${entries.join(" · ")}. Ese salto no es dinero que entró.`));
 
           // The products stay folded until asked for; folding them goes back to the total.
@@ -2138,7 +2141,7 @@
 
       // One series: the title above names it, so there is no legend. The scale starts at a round
       // value near the lowest balance, so monthly changes show; the axis says where it starts.
-      function balanceChart(points, name) {
+      function balanceChart(points, name, color, stroke) {
         const wrap = el("div", "chart-wrap");
         if (!points.length) { wrap.append(el("div", "empty-state", "Sin saldos este año.")); return wrap; }
         const width = 520, height = 200, left = 104, right = 12, top = 14, bottom = 30;
@@ -2158,10 +2161,9 @@
           axis.setAttribute("text-anchor", "end");
           svg.append(axis);
         });
-        const color = cssColor("--s1");
         svg.append(svgEl("polyline", {
           points: points.map(point => `${xOf(point.index)},${yOf(point.total)}`).join(" "),
-          fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round"
+          fill: "none", stroke: color, "stroke-width": stroke, "stroke-linejoin": "round", "stroke-linecap": "round"
         }));
         // A hollow point marks the month a product starts to count.
         points.forEach(point => svg.append(svgEl("circle", point.arrived
