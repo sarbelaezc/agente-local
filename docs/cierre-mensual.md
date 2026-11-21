@@ -68,8 +68,8 @@ la fecha local del aviso y la propuesta lo indica.
 **Cobertura.** Cada mes importado empieza **parcial**: contar correos no demuestra
 que estén todos. Se confirma de dos formas:
 
-- **Conciliado** (automático): el agente lo marca cuando los extractos de los dos
-  titulares cuadran. Ver [Conciliación automática del mes](#conciliación-automática-del-mes).
+- **Conciliado** (automático): el agente lo marca cuando los extractos de todos
+  los titulares cuadran. Ver [Conciliación automática del mes](#conciliación-automática-del-mes).
 - **Revisado** (manual): lo marcas tú en el panel, con una nota de conciliación.
 
 Un movimiento nuevo en un mes conciliado o revisado lo devuelve a parcial.
