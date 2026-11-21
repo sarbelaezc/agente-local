@@ -211,11 +211,11 @@ los más frecuentes primero). Usa el mismo historial y los mismos ejemplos que l
 ### Sugerencias de categoría para pendientes
 
 Las compras que solo muestra un extracto llegan ya con una **categoría sugerida**:
-al registrar extractos (`reconcile-statements`, no con `-ReadOnly`) se calcula como
+al conciliar extractos (en cada `scan` o `import`) se calcula como
 se explica abajo y la razón del movimiento dice su origen («Categoría sugerida por
 tus decisiones anteriores de este comercio; confírmala al decidir»). No decide nada:
 siguen pendientes. Si Ollama no responde, la importación sigue con solo tus reglas
-y decisiones anteriores, y lo demás queda en «Otros gastos»; el comando lo avisa.
+y decisiones anteriores, y lo demás queda en «Otros gastos»; la lectura lo avisa.
 
 En **Decisión**, el botón **Volver a sugerir categorías** recalcula la sugerencia
 para todas las compras pendientes, por ejemplo después de crear reglas o decidir
@@ -404,21 +404,8 @@ local):
   que admite Gasto personal. Al abrir el cierre se corrigen igual los ya guardados,
   sin cambiar su decisión, y cada cambio queda en la auditoría.
 
-**Completar destinos ya importados.** Los avisos nuevos guardan el destino del
-pago al importarse, con la cuenta o la llave Bre-B o QR completa. Para los
-importados antes:
-
-```powershell
-.\scripts\agente-local.ps1 backfill-destinations
-```
-
-Vuelve a leer, en solo lectura y sin Ollama, los avisos de pagos salientes de
-todos los buzones que no tienen destino o que guardaron una cuenta o una llave
-Bre-B o QR solo por sus últimos 4 dígitos. Completa el destino vacío o cambia la
-llave corta por
-la completa que termina en esos dígitos (auditado como `destination-backfill`);
-una regla del destino de la llave corta pasa a la llave completa
-(`group-rule-key-backfill`). No cambia importes, categorías ni decisiones.
+**Destino completo.** Cada aviso guarda el destino del pago al importarse, con
+la cuenta o la llave Bre-B o QR completa (o los dígitos que el aviso escriba).
 
 **Hora de cada movimiento.** El panel muestra la hora junto a la fecha en todas
 partes (tarjetas de la pestaña Decisión, detalle por categoría, ingresos, abonos de
@@ -429,31 +416,12 @@ la escribe, la hora en que llegó el aviso. Solo se pone cuando el aviso trae un
 otro día no da hora. Los movimientos de extractos, del Excel de créditos y de los
 descuentos de nómina no tienen hora.
 
-**Corregir la tarjeta de movimientos ya importados.** Aplica a los avisos de
-Santiago importados antes la misma regla que los nuevos: la tarjeta que nombran
-sus últimos 4 dígitos (ver [Validación de lo que propone
-Ollama](#validación-de-lo-que-propone-ollama)).
-
-```powershell
-.\scripts\agente-local.ps1 backfill-card-accounts -ReadOnly   # cuenta lo que cambiaría
-.\scripts\agente-local.ps1 backfill-card-accounts             # lo aplica
-```
-
-Vuelve a leer por Graph, en solo lectura y sin Ollama, los avisos que leyó el
-modelo; los de frases fijas e ingresos no cambian. Antes de escribir copia la base
-(`close.sqlite3.backup-…`) y audita cada cambio con la tarjeta anterior
-(`card-account-backfill`). Solo cambia la cuenta: importes, categorías, decisiones
-y totales quedan iguales; sí cambia el reparto por medio de pago.
-
 ## Conciliar extractos
 
 Requiere `statements.json` ([configuración](configuracion.md#6-extractos-y-créditos-opcional)).
-Se ejecuta solo con cada `scan` o `import`, o a mano:
-
-```powershell
-.\scripts\agente-local.ps1 reconcile-statements -Start 2026-01-01 -ReadOnly  # solo informa
-.\scripts\agente-local.ps1 reconcile-statements                               # importa faltantes
-```
+Se ejecuta con cada `scan` o `import` (sin `-ReadOnly`) y con la tarea programada,
+desde el 1 de enero del año en que empieza la lectura. No hay un comando aparte:
+para conciliar ahora, corre un `import`.
 
 **Extractos del banco** (cuenta de ahorros, tarjetas en pesos y dólares,
 Fiducuenta, crédito de consumo e hipotecario):
@@ -567,7 +535,7 @@ recuerda lo que abres o cierras en cada mes mientras sigue abierto.
 ## Conciliación automática del mes
 
 Después de cada lectura (`scan`, `import`, la tarea programada), de
-`reconcile-statements`, `import-manuela` e `import-credit-ledger`, y de cada
+`import-manuela` y de cada
 decisión en el panel, el agente revisa los meses ya cerrados (anteriores al mes en
 curso). Un mes queda **Conciliado** si se cumple todo:
 
@@ -634,11 +602,9 @@ y a las futuras.
 
 **Pagos desde tu registro en Excel.** El extracto de un crédito solo muestra el
 último pago de cada periodo. Si llevas tus pagos en Excel (configurado en
-`credit_ledgers.json`):
-
-```powershell
-.\scripts\agente-local.ps1 import-credit-ledger
-```
+`credit_ledgers.json`), cada `scan` o `import` (sin `-ReadOnly`) y la tarea
+programada los importan después de conciliar los extractos. No hay un comando
+aparte: para aplicar ahora un cambio del Excel, corre un `import`.
 
 - **Hoja.** Encabezados en cualquiera de las primeras 10 filas: «Fecha», «Pago
   Capital», «Pago Intereses», «Seguros y Cargos Adicionales» y «Pago Total»;
@@ -654,8 +620,8 @@ y a las futuras.
 - Cada pago entra **pendiente**, con capital, intereses y seguros en la nota, en el
   destino `cr:NNNN`.
 - **Correcciones en el Excel.** El registro manda sobre sus pagos desde el primer
-  extracto. Si corriges en el Excel la fecha o el total de un pago y vuelves a
-  correr `import-credit-ledger`:
+  extracto. Si corriges en el Excel la fecha o el total de un pago, en el
+  siguiente `import`:
   - El pago anterior se quita del panel, con su ingreso de nómina espejo
     (`ledger-row-removed`).
   - El pago corregido entra en su lugar. Si el anterior contaba como Gasto
@@ -979,11 +945,11 @@ etiquetas principales:
 | `statement-duplicate`, `decision-statement-twin` | Duplicado de una línea del extracto marcado No cuenta, y la decisión que esa línea tomó de él |
 | `category-suggestions` | Sugerencias de categoría guardadas o recalculadas (solo el número) |
 | `decision-statement-phrase` | Línea de extracto decidida por un texto fijo confirmado (ver «Conciliar extractos») |
-| `destination-backfill` | Destino completado, o llave corta cambiada por la completa, con `backfill-destinations` |
+| `destination-backfill` | Destino completado, o llave corta cambiada por la completa, al releer los avisos ya importados |
 | `group-rule-key-backfill` | Regla de un destino pasada de la llave corta a la completa |
 | `time-backfill` | Hora completada al releer los avisos ya importados |
 | `qr-not-own-transfer` | Pago por QR que Ollama propuso como transferencia propia, vuelto transferencia |
-| `card-account-backfill` | Tarjeta corregida con `backfill-card-accounts` (con la anterior) |
+| `card-account-backfill` | Tarjeta corregida por los dígitos del aviso al releer los avisos ya importados (con la anterior) |
 | `payroll-deduction-income` | Ingreso espejo de una cuota descontada de la nómina |
 | `mailbox-possible-duplicate` | Posible duplicado entre el Gmail de Manuela y su archivo |
 | `reprocess-replace-card-payments` | Pagos de tarjeta reemplazados por `-ReprocessEmpty` |
@@ -1026,8 +992,9 @@ tablas. No cambia importes, decisiones ni auditoría.
 - Extractos del banco de 2026: leídos sin errores; una segunda ejecución no
   importó nada. Extractos de Protección (2026-11-16): 10 de pensión voluntaria en
   los dos formatos y 2 de cesantías, encadenados sin diferencias mayores a $10.
-- `backfill-destinations`: guardó el destino de casi todos los pagos de Santiago
-  sin cambiar importes ni decisiones.
+- Destinos de pagos ya importados, releyendo los avisos de todos los buzones:
+  quedó guardado el destino de casi todos, con la llave completa, sin cambiar
+  importes ni decisiones.
 - Recuperación de avisos (2026-11-14/15): 9 ingresos y 8 gastos recuperados con
   `-ReprocessEmpty`, 9 pagos de tarjeta leídos, y la cola de 15 avisos quedó vacía
   (9 informativos, 2 inversiones y 4 movimientos recuperados, más 12
@@ -1038,7 +1005,7 @@ tablas. No cambia importes, decisiones ni auditoría.
 - Extractos del Gmail de Manuela (2026-11-18): el lector de Gmail descargó en
   solo lectura los PDF de extractos desde diciembre de 2025 (ahorros, Fiducuenta,
   Mastercard, Visa y cesantías).
-- Extractos por titular (2026-11-19), `reconcile-statements -ReadOnly`: 111
+- Extractos por titular (2026-11-19), en solo lectura: 111
   extractos de Santiago y 31 de Manuela, cada buzón con la contraseña de su
   titular, sin errores. El lector de ahorros solo leía la primera página de cada
   trimestre (33 líneas; se saltaban entre 88 y 151 por extracto). Corregido, los 20
@@ -1071,7 +1038,7 @@ tablas. No cambia importes, decisiones ni auditoría.
   otra tarjeta en unos 17 de 44 avisos (por ejemplo «Visa» para la Mastercard).
   Con la tarjeta por sus dígitos, la cuenta coincide con los dígitos del aviso en
   todos los que nombran una tarjeta conocida.
-- `backfill-card-accounts` (2026-11-20): de 547 avisos de Santiago, 234
+- Tarjeta por sus dígitos en avisos ya importados (2026-11-20): de 547 avisos de Santiago, 234
   movimientos de 2026 tenían otra tarjeta que la de sus dígitos (132 Amex que eran
   Mastercard, 51 Visa que eran Mastercard, 23 Mastercard que eran Amex…). En todos,
   los dígitos aparecían en la forma del banco («con tu T.Cred \*NNNN»). Corregidos

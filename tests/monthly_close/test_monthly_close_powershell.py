@@ -138,13 +138,10 @@ function Start-Process {
      ["summary", "--month", "2026-03", "--owner", "hogar"]),
     (["serve"], ["serve"]),
     (["login", "-Mailbox", "manuela"], ["login", "--mailbox", "manuela"]),
-    (["backfill-destinations"], ["backfill-destinations"]),
     (["merge-category", "-FromCategory", "Predial", "-ToCategory", "Vivienda"],
      ["merge-category", "--from", "Predial", "--to", "Vivienda"]),
     (["payroll-deduction", "-Owner", "santiago", "-Suffix", "1234"],
      ["payroll-deduction", "--owner", "santiago", "--suffix", "1234"]),
-    (["reconcile-statements", "-ReadOnly", "-Start", "2026-01-01"],
-     ["reconcile-statements", "--start", "2026-01-01"]),
 ])
 def test_household_commands_pass_arguments_without_ollama(tmp_path, arguments, expected):
     powershell = shutil.which("powershell.exe")

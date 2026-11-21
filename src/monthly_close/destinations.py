@@ -51,11 +51,6 @@ def _key(prefix: str, raw: str) -> str:
     return f"{prefix}:{re.sub(r'\W', '', raw)[-4:].lower()}"
 
 
-def is_short_key(key: str) -> bool:
-    """An account, Bre-B or QR key stored by its last four digits, before keys were kept whole."""
-    return key[:3] in {f"{prefix}:" for prefix in WHOLE_KEYS} and bool(re.fullmatch(r"\d{4}", key[3:]))
-
-
 def notice_destinations(source: str) -> list[tuple[int, str]]:
     """Every (amount in minor units, destination key) the notice states literally."""
     text = re.sub(r"\s+", " ", source)

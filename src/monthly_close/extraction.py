@@ -117,7 +117,7 @@ def extract(
     if mail.sender.lower() not in preferences.approved_senders:
         raise ValueError("Remitente no autorizado. No se envia contenido a Ollama.")
     if is_statement_notice(mail.sender, mail.subject):
-        # The attached statement is read by reconcile-statements; the mail moves no money.
+        # The attached statement is read when statements are reconciled; the mail moves no money.
         return []
     received = received_local(mail.received, preferences.timezone)
     source = _source(mail)
@@ -468,20 +468,6 @@ def _fixed_events(mail: Mail, preferences: Preferences, source: str) -> list[dic
         or _card_abonos(mail, preferences, source) or _key_transfers(mail, preferences, source)
         or _received_transfers(mail, preferences, source)
     )
-
-
-def card_named_in(mail: Mail, preferences: Preferences, card_accounts: dict[str, str]) -> str | None:
-    """The account extract() gives a notice's movements by the card digits it names.
-
-    None for statement notices and fixed sentences (which never use the digits) and when
-    the notice names no known card, or more than one.
-    """
-    if is_statement_notice(mail.sender, mail.subject):
-        return None
-    source = _source(mail)
-    if _fixed_events(mail, preferences, source):
-        return None
-    return _named_card(source, card_accounts)
 
 
 def _named_card(source: str, card_accounts: dict[str, str]) -> str | None:
