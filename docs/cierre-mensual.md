@@ -728,16 +728,19 @@ aviso del formulario de configuración inicial no se puede cerrar.
 - Gráfica de ingresos y gastos, categorías del año con barras y porcentaje, y
   columnas por categoría con los mismos colores que el mes. El mes en curso se ve
   más claro.
-- **Inversiones y créditos:** para cada grupo, el saldo total del último
-  extracto y cuánto subió o bajó en el año. Debajo, cada producto muestra su
-  saldo, una minigráfica con su saldo al cierre de cada mes hasta el mes en curso
-  y su variación en el año, o desde su primer extracto si empezó a mitad de año.
-  - La minigráfica tiene su propia escala, para que se note cómo se movió cada
-    producto aunque sea pequeño al lado de otros.
-  - Un mes sin extracto nuevo repite el saldo anterior, y un producto que empieza
-    a mitad de año empieza más a la derecha. Así, la entrada de un producto
-    nuevo no se ve como un salto.
-  - Tocar un mes de la minigráfica muestra su saldo y abre ese mes.
+- **Inversiones y créditos:** una gráfica de línea para cada grupo con el saldo
+  al cierre de cada mes, hasta el mes en curso. Arriba está el saldo total del
+  último extracto y cuánto subió o bajó en el año.
+  - El saldo de un mes suma el último extracto de cada producto hasta ese mes;
+    un mes sin extracto nuevo repite el saldo anterior.
+  - El mes en que un producto empieza a contarse lleva un punto hueco y una nota
+    debajo («abr: empieza a contar Fiducuenta *2553»): ese salto no es dinero que
+    entró.
+  - Debajo, cada producto muestra su saldo y su variación en el año, o desde su
+    primer extracto si empezó a mitad de año. Tocar un producto cambia la
+    gráfica a solo ese producto, con su propia escala. Tocarlo otra vez, o pulsar
+    «Ver total», vuelve al total.
+  - Tocar un mes de la gráfica muestra su saldo y abre ese mes.
   - Solo cuentan los productos con algún extracto en el año; en **Hogar** llevan
     la etiqueta del titular.
 - **Resumen por mes:** Gasto, Personal, Familiar, Abonos, Ingresos, Balance (con

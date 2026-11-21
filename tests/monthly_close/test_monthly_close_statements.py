@@ -545,15 +545,27 @@ def test_year_view_shows_how_investments_and_credits_moved(store, start_panel, n
     assert "*0006" not in credits.inner_text()
     fund = investments.locator(".statement-row").filter(has_text="*0003")
     expect(fund).to_contain_text(re.compile(r"subió 30[.\s]?000,00\sCOP en el año · al 28 feb 2026"))
-    # Each product has its own line: one point per month up to now, repeating the last balance.
-    tips = fund.locator("svg.sparkline rect[data-tip]").evaluate_all("rects => rects.map(rect => rect.dataset.tip)")
-    assert re.search(r"Enero de 2026: 100[.\s]?000,00", tips[0])
-    assert re.search(r"Marzo de 2026: 130[.\s]?000,00", tips[2])
-    # A product whose first statement comes later starts later: no jump in anyone's line.
     late = investments.locator(".statement-row").filter(has_text="*0005")
     expect(late).to_contain_text("desde el 28 feb 2026")
-    late_tips = late.locator("svg.sparkline rect[data-tip]").evaluate_all("rects => rects.map(rect => rect.dataset.tip)")
-    assert "Febrero de 2026" in late_tips[0]
+
+    def tips():
+        return investments.locator("svg.balance-chart rect[data-tip]").evaluate_all("rects => rects.map(rect => rect.dataset.tip)")
+
+    # The total: one point per month up to now, repeating the last balance. The month a
+    # product starts to count is marked, so its arrival does not read as money coming in.
+    total = tips()
+    assert re.search(r"Enero de 2026: 100[.\s]?000,00", total[0])
+    assert re.search(r"Febrero de 2026: 180[.\s]?000,00\sCOP · 2 productos · empieza a contar", total[1])
+    expect(investments.locator(".balance-note")).to_contain_text("feb: empieza a contar Fiducuenta *0005 (Manuela)")
+    # Choosing a product shows only its balance; choosing it again, or "Ver total", goes back.
+    fund.click()
+    expect(fund).to_have_attribute("aria-pressed", "true")
+    expect(investments.locator(".balance-focus")).to_contain_text("Mostrando Fiducuenta *0003")
+    assert re.search(r"Marzo de 2026: 130[.\s]?000,00\sCOP( · toca para ver el mes)?$", tips()[2])
+    expect(investments.locator(".balance-note")).to_have_count(0)
+    investments.get_by_role("button", name="Ver total").click()
+    expect(fund).to_have_attribute("aria-pressed", "false")
+    assert tips() == total
     page.locator("#owner-switch").get_by_role("button", name="Santiago").click()
     assert "*0005" not in investments.inner_text()
     assert not errors
