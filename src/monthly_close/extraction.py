@@ -261,8 +261,8 @@ def _account_transfers(mail: Mail, preferences: Preferences, source: str) -> lis
     """Transfers to an account number, read from the bank's fixed sentence without the model.
 
     The notice names nobody, so the model has no merchant to copy and may drop the
-    movement. Only the last four digits of the destination are kept, never the number.
-    They stay pending: a person decides whether it is an expense.
+    movement. The merchant shows the last four digits; the destination key keeps the
+    whole number, as Manuela's exported records do. They stay pending: a person decides whether it is an expense.
     """
     proposals = dict(
         _fixed_event(
@@ -284,10 +284,10 @@ def _mark_own_transfers(events: list[dict], own_accounts: list[str] | None) -> l
     own = set(own_accounts or [])
     for event in events:
         key = event.get("group_key") or ""
-        if event["kind"] == "transfer" and key.startswith("tr:") and key[3:] in own:
+        if event["kind"] == "transfer" and key.startswith("tr:") and key[-4:] in own:
             event["kind"] = "own_transfer"
             event["reason"] = "Transferencia a una cuenta tuya registrada: confirma que no cuenta."
-        elif event["kind"] == "own_transfer" and key.startswith("qr:") and key[3:] not in own:
+        elif event["kind"] == "own_transfer" and key.startswith("qr:") and key[-4:] not in own:
             event["kind"] = "transfer"
             event["reason"] = QR_NOT_OWN_REASON
     return events

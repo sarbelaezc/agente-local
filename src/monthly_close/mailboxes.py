@@ -118,7 +118,7 @@ def load_mailboxes(settings: dict) -> list[Mailbox]:
 
 
 def primary_graph(boxes: list[Mailbox]) -> Mailbox:
-    """Santiago's Outlook: statements, pilot and destination backfill read only this one."""
+    """Santiago's Outlook: the pilot and the card backfill read only this one."""
     for box in boxes:
         if box.provider == "graph" and box.owner == "santiago":
             return box

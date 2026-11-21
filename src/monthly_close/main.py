@@ -30,7 +30,7 @@ from monthly_close.extraction import EvidenceError, card_named_in, extract, inco
 from monthly_close.graph_client import (
     AUTHORITIES, CLIENT_ID, GraphClient, interactive_login, silent_token,
 )
-from monthly_close.destinations import assign_destinations
+from monthly_close.destinations import assign_destinations, is_short_key
 from monthly_close.graph_reader import GraphSourceReader
 from monthly_close import gmail_client
 from monthly_close.gmail_client import GmailClient
@@ -549,11 +549,14 @@ class _AllFound(Exception):
     """Every notice the backfill needed was read; the walk can stop."""
 
 
-def reread_notices(data_dir: Path, settings: dict, preferences: Preferences, rows: list, handle) -> int:
+def reread_notices(
+    data_dir: Path, settings: dict, preferences: Preferences, rows: list, handle, box: Mailbox | None = None,
+) -> int:
     """Read again (read-only, no Ollama) the notices behind rows; handle(mail, its rows) each one.
 
-    Folders are walked newest first and stop at notices older than the oldest row, or once
-    every notice was read. Returns how many notices were read.
+    box is the mailbox to read (Santiago's Outlook by default). Folders are walked newest
+    first and stop at notices older than the oldest row, or once every notice was read.
+    Returns how many notices were read.
     """
     if not rows:
         return 0
@@ -562,7 +565,7 @@ def reread_notices(data_dir: Path, settings: dict, preferences: Preferences, row
         by_notice.setdefault(row["message_id"], []).append(row)
     oldest = min(date.fromisoformat(row["day"]) for row in rows) - timedelta(days=10)
     remaining = set(by_notice)
-    with open_source(data_dir, settings, preferences.approved_senders) as reader:
+    with open_source(data_dir, settings, preferences.approved_senders, box) as reader:
 
         def visit(candidate: Candidate) -> bool | None:
             if candidate.sender not in preferences.approved_senders:
@@ -579,8 +582,13 @@ def reread_notices(data_dir: Path, settings: dict, preferences: Preferences, row
                 raise _AllFound
             return None
 
+        # Gmail lists every approved notice unless the listing is narrowed to the dates needed.
+        extra = (
+            {"since": datetime.combine(oldest, datetime.min.time(), ZoneInfo(preferences.timezone))}
+            if box is not None and box.provider == "gmail" else {}
+        )
         try:
-            reader.walk_folders(settings["max_messages"], visit)
+            reader.walk_folders(settings["max_messages"], visit, **extra)
         except _AllFound:
             pass
     return len(by_notice) - len(remaining)
@@ -589,29 +597,37 @@ def reread_notices(data_dir: Path, settings: dict, preferences: Preferences, row
 def backfill_destinations(
     store: Store, data_dir: Path, settings: dict, preferences: Preferences,
 ) -> dict[str, int]:
-    """Read Santiago's notices again (read-only, no Ollama) to store each payment's destination.
+    """Read every mailbox's notices again (read-only, no Ollama) to store whole destinations.
 
-    Only notices behind outgoing movements without a destination are read; folders are
-    walked newest first and stop at notices older than the oldest movement needed.
+    Only notices behind outgoing movements without a destination, or with an account,
+    Bre-B or QR key stored by its last four digits, are read; folders are walked newest first and
+    stop at notices older than the oldest movement needed.
     """
-    with store.connect() as db:
-        rows = db.execute(
-            "SELECT id,message_id,day,amount_minor FROM transactions WHERE owner='santiago' "
-            f"AND group_key IS NULL AND kind IN ({','.join('?' * len(OUTGOING_KINDS))})",
-            OUTGOING_KINDS,
-        ).fetchall()
-    found: dict[str, str] = {}
+    result = {"notices": 0, "read": 0, "updated": 0, "without_destination": 0}
+    for box in load_mailboxes(settings):
+        with store.connect() as db:
+            rows = [
+                row for row in db.execute(
+                    "SELECT id,message_id,day,amount_minor,group_key FROM transactions WHERE owner=? "
+                    f"AND instr(message_id, ':')=0 AND kind IN ({','.join('?' * len(OUTGOING_KINDS))})",
+                    (box.owner, *OUTGOING_KINDS),
+                ).fetchall()
+                if row["group_key"] is None or is_short_key(row["group_key"])
+            ]
+        found: dict[str, str] = {}
 
-    def destinations(mail, notice_rows) -> None:
-        events = [{"amount_minor": row["amount_minor"]} for row in notice_rows]
-        assign_destinations(events, mail.subject + "\n" + mail.body)
-        found.update({row["id"]: event["group_key"] for row, event in zip(notice_rows, events) if event.get("group_key")})
+        def destinations(mail, notice_rows) -> None:
+            events = [{"amount_minor": row["amount_minor"]} for row in notice_rows]
+            assign_destinations(events, mail.subject + "\n" + mail.body)
+            found.update({
+                row["id"]: event["group_key"] for row, event in zip(notice_rows, events) if event.get("group_key")
+            })
 
-    read = reread_notices(data_dir, settings, preferences, rows, destinations)
-    return {
-        "notices": len({row["message_id"] for row in rows}), "read": read,
-        "updated": store.set_destinations(found), "without_destination": len(rows) - len(found),
-    }
+        result["notices"] += len({row["message_id"] for row in rows})
+        result["read"] += reread_notices(data_dir, settings, box.preferences(preferences), rows, destinations, box)
+        result["updated"] += store.set_destinations(found)
+        result["without_destination"] += len(rows) - len(found)
+    return result
 
 
 def backfill_card_accounts(
@@ -962,7 +978,7 @@ def run(args: argparse.Namespace) -> None:
             f"Destinos: {result['notices']} avisos por revisar, {result['read']} leidos; "
             f"{result['updated']} movimientos con destino guardado, "
             f"{result['without_destination']} sin destino literal en el aviso. "
-            "Solo lectura del buzon; sin Ollama ni cambios de decisiones."
+            "Solo lectura de los buzones; sin Ollama ni cambios de decisiones."
         )
         return
     if args.command == "backfill-card-accounts":

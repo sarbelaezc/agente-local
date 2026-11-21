@@ -58,8 +58,8 @@ def test_transfer_to_an_account_number_is_read_without_the_model(preferences, ma
     assert [
         (e["kind"], e["merchant"], e["amount_minor"], e["day"], e["decision"]) for e in events
     ] == [("transfer", "cuenta *8901", 12000000, "2026-08-04", None)]
-    # The full account number is never stored.
-    assert "12345678901" not in json.dumps(events)
+    # The destination keeps the whole account number, as the exported records do.
+    assert events[0]["group_key"] == "tr:12345678901"
 
 
 def test_money_leaving_is_never_income_even_if_the_model_says_so(preferences, mail):
