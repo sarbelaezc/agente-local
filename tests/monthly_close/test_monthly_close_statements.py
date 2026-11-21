@@ -505,10 +505,102 @@ def test_panel_shows_statement_checks_and_balances(store, start_panel, new_page)
     text = page.locator("#statements-card").inner_text()
     assert "Visa *0002" in text and "Fiducuenta" not in text
     page.locator("#owner-switch").get_by_role("button", name="Hogar").click()
-    text = page.locator("#statements-card").inner_text()
-    assert "Visa *0002 · Manuela" in text and "Fiducuenta *0003 · Santiago" in text
+    card = page.locator("#statements-card")
+    text = card.inner_text()
+    assert "Tarjetas y cuentas" in text and "Inversiones" in text and "Créditos" in text
+    # In the household view each statement carries its owner's tag.
+    for name, owner in (("Visa *0002", "Manuela"), ("Fiducuenta *0003", "Santiago")):
+        expect(card.locator(".statement-name").filter(has_text=name).locator(".owner-tag")).to_have_text(owner)
+    assert "0/0" not in text
     assert not errors
 
+
+def test_year_view_shows_how_investments_and_credits_moved(store, start_panel, new_page):
+    # Month-end balances: a fund that grows, a credit that goes down, and one of Manuela's.
+    balances = [
+        ("santiago", "FIDUCUENTA", "0003", "2025-12-31", 100_000_00), ("santiago", "FIDUCUENTA", "0003", "2026-02-28", 130_000_00),
+        ("santiago", "CREDITO", "0004", "2026-01-31", 900_000_00), ("santiago", "CREDITO", "0004", "2026-03-31", 850_000_00),
+        ("manuela", "FIDUCUENTA", "0005", "2026-02-28", 50_000_00),
+        # A product with no statement in the year is left out.
+        ("santiago", "CREDITO", "0006", "2025-06-30", 10_000_00),
+    ]
+    with store.connect() as db:
+        for owner, product, suffix, end, balance in balances:
+            db.execute(
+                """INSERT INTO statement_checks (identity,owner,product,suffix,period_start,period_end,movements,
+                matched,missing,balance_minor,checked_at) VALUES (?,?,?,?,?,?,0,0,0,?,?)""",
+                (f"{owner}{product}{suffix}{end}", owner, product, suffix, end[:8] + "01", end, balance, "2026-04-01T00:00:00"),
+            )
+    url = start_panel(store)
+    page = new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(f"{url}/?tab=year&year=2026&owner=hogar")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    investments, credits = page.locator("#investment-balances"), page.locator("#credit-balances")
+    expect(page.locator("#balances-card")).to_be_visible()
+    expect(investments.locator(".statement-head strong")).to_have_text(re.compile(r"180[.\s]?000,00"))
+    expect(credits.locator(".statement-head strong")).to_have_text(re.compile(r"850[.\s]?000,00"))
+    expect(credits.locator(".statement-head p")).to_contain_text(re.compile(r"bajó 50[.\s]?000,00"))
+    assert "*0006" not in credits.inner_text()
+    # Each group has its own colour, apart from income blue and spending orange.
+    colours = page.evaluate("""() => {
+      const style = getComputedStyle(document.documentElement);
+      const line = id => document.querySelector(`${id} svg.balance-chart polyline`);
+      return [line('#investment-balances').getAttribute('stroke'), line('#credit-balances').getAttribute('stroke'),
+              style.getPropertyValue('--s3').trim(), style.getPropertyValue('--s7').trim()];
+    }""")
+    assert colours[0] == colours[2] and colours[1] == colours[3]
+    # Changes wear the year table's colours: investments up and debt down are good.
+    expect(investments.locator(".statement-head .balance-change")).to_have_class(re.compile(r"\bpositive\b"))
+    expect(credits.locator(".statement-head .balance-change")).to_have_class(re.compile(r"\bpositive\b"))
+    # Only totals by default: the products are folded.
+    products = investments.locator("details.balance-products")
+    expect(products.locator("summary")).to_have_text("2 productos")
+    expect(products).not_to_have_attribute("open", "")
+    products.locator("summary").click()
+    fund = investments.locator(".statement-row").filter(has_text="*0003")
+    expect(fund).to_contain_text(re.compile(r"Subió 30[.\s]?000,00\sCOP en el año · al 28 feb 2026"))
+    late = investments.locator(".statement-row").filter(has_text="*0005")
+    expect(late).to_contain_text("desde el 28 feb 2026")
+
+    def tips():
+        return investments.locator("svg.balance-chart rect[data-tip]").evaluate_all("rects => rects.map(rect => rect.dataset.tip)")
+
+    # The total: one point per month up to now, repeating the last balance. The month a
+    # product starts to count is marked, so its arrival does not read as money coming in.
+    total = tips()
+    assert re.search(r"Enero de 2026: 100[.\s]?000,00", total[0])
+    assert re.search(r"Febrero de 2026: 180[.\s]?000,00\sCOP · 2 productos · empieza a contar Fiducuenta \*0005", total[1])
+    expect(late.locator(".balance-note")).to_have_text("Se suma al total desde febrero de 2026; ese salto no es dinero que entró.")
+    expect(fund.locator(".balance-note")).to_have_count(0)
+    # Choosing a product shows only its balance; choosing it again, or "Ver total", goes back.
+    fund.click()
+    expect(fund).to_have_attribute("aria-pressed", "true")
+    expect(investments.locator(".balance-focus")).to_contain_text("Mostrando Fiducuenta *0003")
+    # The other product's note stays in the list while one product is shown.
+    expect(late.locator(".balance-note")).to_have_count(1)
+    assert re.search(r"Marzo de 2026: 130[.\s]?000,00\sCOP( · toca para ver el mes)?$", tips()[2])
+    investments.get_by_role("button", name="Ver total").click()
+    expect(fund).to_have_attribute("aria-pressed", "false")
+    assert tips() == total
+    # Folding the products while one is shown goes back to the total.
+    fund.click()
+    investments.locator("details.balance-products > summary").click()
+    expect(investments.locator("details.balance-products")).not_to_have_attribute("open", "")
+    expect(investments.locator(".balance-focus")).to_have_count(0)
+    assert tips() == total
+    investments.locator("details.balance-products > summary").click()
+    # Manuela has no credits: her investments are centred instead of leaving an empty column.
+    page.locator("#owner-switch").get_by_role("button", name="Manuela").click()
+    expect(credits).to_be_hidden()
+    expect(page.locator(".balance-grid")).to_have_class(re.compile(r"\bsingle\b"))
+    card, chart = page.locator("#balances-card").bounding_box(), investments.bounding_box()
+    assert abs((chart["x"] - card["x"]) - (card["x"] + card["width"] - chart["x"] - chart["width"])) < 4
+    page.locator("#owner-switch").get_by_role("button", name="Santiago").click()
+    expect(page.locator(".balance-grid")).not_to_have_class(re.compile(r"\bsingle\b"))
+    assert "*0005" not in investments.inner_text()
+    assert not errors
 
 def test_payroll_deducted_instalment_adds_matching_payroll_income(store):
     credit = st.parse("CREDITO", "202602", CREDIT)

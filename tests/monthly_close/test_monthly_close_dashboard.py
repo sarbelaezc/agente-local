@@ -274,6 +274,123 @@ def test_dashboard_mobile_and_desktop_screenshots(dashboard, tmp_path):
     page.screenshot(path=str(output / "mobile-dark.png"), full_page=True)
 
 
+def test_phone_controls_are_easy_to_tap_and_the_year_table_note_fits(dashboard):
+    page, _, _, _ = dashboard
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.locator("#tab-decisions").click()
+    # Every visible control is at least 44 px tall (checkboxes sit in a 44 px label row), and
+    # text fields use 16 px so a phone does not zoom in while typing.
+    sizes = page.evaluate("""() => [...document.querySelectorAll(
+        '#main-content button, #main-content select, #main-content input:not([type=checkbox]), #main-content summary, .top-actions button, .check-line'
+      )].filter(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden').map(e => ({
+        name: (e.textContent || e.getAttribute('aria-label') || e.id).trim().slice(0, 30),
+        height: e.getBoundingClientRect().height,
+        font: e.matches('select, input') ? parseFloat(getComputedStyle(e).fontSize) : 16,
+      }))""")
+    assert sizes
+    assert [item for item in sizes if item["height"] < 44 or item["font"] < 16] == []
+    page.locator("#tab-year").click()
+    note = page.locator("#year-table .table-note")
+    expect(note).to_be_visible()
+    box, screen = note.bounding_box(), page.viewport_size
+    assert box["x"] >= 0 and box["x"] + box["width"] <= screen["width"]
+
+
+def test_safety_note_can_be_closed_and_stays_closed_in_this_browser(dashboard):
+    page, _, _, _ = dashboard
+    note = page.locator("#safety-note")
+    expect(note).to_be_visible()
+    expect(note).to_contain_text("No introduzcas credenciales")
+    note.get_by_role("button", name=re.compile("^Cerrar este aviso")).click()
+    expect(note).to_be_hidden()
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    expect(note).to_be_hidden()
+
+
+def test_a_movement_of_the_category_detail_can_be_changed_in_place(dashboard):
+    page, store, _, _ = dashboard
+    detail = page.locator('#category-details details[data-category="Compras"]')
+    detail.locator("summary").click()
+    row = detail.locator("button.detail-row").filter(has_text="Personal")
+    expect(row).to_have_attribute("aria-expanded", "false")
+    row.click()
+    expect(row).to_have_attribute("aria-expanded", "true")
+    editor = detail.locator(".detail-editor .decision-card")
+    expect(editor).to_have_count(1)
+    with page.expect_response(lambda response: response.url.endswith("/api/decision")) as saved:
+        editor.get_by_role("button", name="Familiar", exact=True).click()
+    assert saved.value.status == 200
+    assert next(tx for tx in store.state()["transactions"] if tx["id"] == "1")["decision"] == "family"
+    # After the save the card closes, and the category stays open with the focus on that movement.
+    expect(detail).to_have_attribute("open", "")
+    expect(detail.locator(".detail-editor .decision-card")).to_have_count(0)
+    saved_row = detail.locator('button.detail-row[data-tx-id="1"]')
+    expect(saved_row).to_be_focused()
+    expect(saved_row).to_contain_text("Familiar")
+    expect(saved_row).to_have_attribute("aria-expanded", "false")
+
+    # Only one movement is open at a time.
+    rows = detail.locator("button.detail-row")
+    rows.nth(0).click()
+    rows.nth(1).click()
+    expect(detail.locator(".detail-editor .decision-card")).to_have_count(1)
+    expect(rows.nth(0)).to_have_attribute("aria-expanded", "false")
+    expect(rows.nth(1)).to_have_attribute("aria-expanded", "true")
+
+    # A movement saved into another category is followed there.
+    moved = detail.locator('button.detail-row[data-tx-id="1"]')
+    if moved.get_attribute("aria-expanded") != "true":
+        moved.click()
+    card = detail.locator(".detail-editor .decision-card")
+    card.get_by_label(re.compile("^Categoría para")).select_option("Transporte")
+    card.get_by_role("button", name="Familiar", exact=True).click()
+    target = page.locator('#category-details details[data-category="Transporte"]')
+    expect(target).to_have_attribute("open", "")
+    expect(target.locator('button.detail-row[data-tx-id="1"]')).to_be_focused()
+    with store.connect() as db:
+        assert db.execute("SELECT count(*) FROM audit WHERE target='1' AND action LIKE 'decision%'").fetchone()[0] >= 1
+
+
+def test_owner_switch_and_tabs_stay_at_the_top_while_scrolling(dashboard):
+    page, _, _, _ = dashboard
+    page.set_viewport_size({"width": 390, "height": 700})
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    for locator in (page.locator("#owner-switch"), page.locator(".tabs")):
+        box = locator.bounding_box()
+        assert box is not None and 0 <= box["y"] < 140
+
+
+
+def test_amounts_are_always_in_the_close_currency_without_a_currency_selector(dashboard):
+    page, store, month, _ = dashboard
+    # Dollars with a rate count in pesos; an old link asking for USD still shows pesos.
+    store.import_message("usd", [{
+        "id": "usd", "message_id": "usd", "day": month + "-07", "merchant": "TIENDA EN DOLARES",
+        "account": "Tarjeta A", "amount_minor": 1000, "currency": "USD", "category": "Compras",
+        "kind": "purchase", "decision": None, "reason": "Revisar.",
+    }])
+    store.decide("usd", "personal", exchange_rate="4000")
+    page.goto(f"{page.url.split('?')[0]}?month={month}&currency=USD")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    expect(page.locator("#currency-select")).to_have_count(0)
+    assert "COP" in page.locator("#month-metrics").inner_text()
+    assert "currency" not in page.evaluate("Object.fromEntries(new URLSearchParams(location.search))")
+    compras = page.locator('#category-details details[data-category="Compras"]')
+    compras.locator("summary").click()
+    row = compras.locator("button.detail-row").filter(has_text="TIENDA EN DOLARES")
+    expect(row).to_contain_text(re.compile(r"40[.\s]?000,00"))
+    # Its card edits the stored movement: in dollars, with its rate, and saving keeps both.
+    row.click()
+    card = compras.locator(".detail-editor .decision-card")
+    expect(card.get_by_label("Moneda original del aviso", exact=True)).to_have_value("USD")
+    expect(card.locator('input[name="exchange_rate"]')).to_have_value("4000")
+    card.get_by_role("button", name="Familiar", exact=True).click()
+    expect(compras.locator(".detail-editor .decision-card")).to_have_count(0)
+    saved = next(tx for tx in store.state()["transactions"] if tx["id"] == "usd")
+    assert (saved["currency"], saved["exchange_rate"], saved["decision"]) == ("USD", "4000", "family")
+
+
 def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(dashboard):
     page, _, month, _ = dashboard
     page.goto(f"{page.url.split('?')[0]}?tab=year&month={month}&year={month[:4]}&currency=COP")
@@ -287,7 +404,7 @@ def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(d
     assert page.locator("#year-select").input_value() == month[:4]
 
     params = page.evaluate("Object.fromEntries(new URLSearchParams(location.search))")
-    assert params == {"tab": "year", "month": month, "year": month[:4], "currency": "COP", "owner": "hogar"}
+    assert params == {"tab": "year", "month": month, "year": month[:4], "owner": "hogar"}
     page.locator("#tab-decisions").click()
     assert page.evaluate("new URLSearchParams(location.search).get('tab')") == "decisions"
 
@@ -358,6 +475,45 @@ def test_saving_blocks_duplicate_decisions_and_recovers_after_error(dashboard):
     assert "Fallo simulado" in page.locator("#global-message").inner_text()
     assert next(tx for tx in store.state()["transactions"] if tx["id"] == "0")["decision"] is None
     assert button.is_enabled()
+
+
+def test_save_and_error_messages_float_in_view_wherever_the_page_is_scrolled(dashboard):
+    page, store, month, _ = dashboard
+    store.import_message("otra", [{
+        "id": "otra", "message_id": "otra", "day": month + "-06", "merchant": "OTRA TIENDA",
+        "account": "Tarjeta A", "amount_minor": 1000, "currency": "COP", "category": "Compras",
+        "kind": "purchase", "decision": None, "reason": "Revisar.",
+    }])
+    page.set_viewport_size({"width": 390, "height": 600})
+    page.clock.install()
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.locator("#tab-decisions").click()
+    button = page.locator("#pending-list").get_by_role("button", name="Gasto personal", exact=True).first
+    button.scroll_into_view_if_needed()
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+
+    def in_view(locator) -> bool:
+        box = locator.bounding_box()
+        return box is not None and 0 <= box["y"] and box["y"] + box["height"] <= 600
+
+    button.click()
+    message = page.locator("#global-message")
+    expect(message).to_contain_text("Decisión guardada.")
+    assert in_view(message)
+    # A confirmation goes away by itself.
+    page.clock.run_for(5000)
+    expect(message).to_be_hidden()
+
+    # An error stays until it is closed.
+    page.route("**/api/decision", lambda route: route.fulfill(status=500, json={"error": "Fallo simulado."}))
+    page.locator("#pending-list").get_by_role("button", name="Familiar", exact=True).first.click()
+    expect(message).to_contain_text("Fallo simulado")
+    page.clock.run_for(10000)
+    expect(message).to_be_visible()
+    assert in_view(message)
+    message.get_by_role("button", name="Cerrar mensaje").click()
+    expect(message).to_be_hidden()
 
 
 def test_category_chart_uses_unique_consistent_colors_for_every_category(dashboard, categories):
@@ -716,7 +872,7 @@ def test_group_category_shows_for_transfers_but_not_for_investments(dashboard):
     assert saved["tr:1"] == saved["tr:2"] == ("family", "Retiro en efectivo")
 
 
-def test_saved_suggestions_survive_a_reload_and_owner_counts_filter_the_view(dashboard):
+def test_saved_suggestions_survive_a_reload_and_the_owner_switch_filters_the_view(dashboard):
     page, store, month, _ = dashboard
     def purchase(event_id, merchant, day):
         return movement(event_id, merchant, day=f"{month}-0{day}", amount_minor=1000000)
@@ -730,10 +886,8 @@ def test_saved_suggestions_survive_a_reload_and_owner_counts_filter_the_view(das
     expect(card.get_by_label(re.compile("Categoría para PEAJE NORTE"))).to_have_value("Transporte")
     expect(card.locator('[data-suggestion-source="history"]')).to_be_visible()
 
-    counts = page.get_by_role("group", name="Pendientes por titular")
-    expect(counts.get_by_role("button", name=re.compile("^Manuela: 1 movimiento"))).to_be_visible()
-    counts.get_by_role("button", name=re.compile("^Manuela:")).click()
-    expect(page.locator("#owner-switch button[data-owner='manuela']")).to_have_attribute("aria-pressed", "true")
+    # The decisions follow the owner chosen at the top of the panel.
+    page.locator("#owner-switch button[data-owner='manuela']").click()
     expect(page.locator("#pending-list").get_by_text("PEAJE NORTE")).to_have_count(0)
     expect(page.locator("#pending-list").get_by_text("TIENDA SOL")).to_be_visible()
 
@@ -756,16 +910,6 @@ def test_focus_moves_to_the_next_pending_card_after_a_decision(dashboard):
     assert focused == "COMERCIO DOS"
 
 
-def test_owner_count_buttons_are_readable_and_large_enough_in_both_themes(dashboard):
-    page, _, _, _ = dashboard
-    page.get_by_role("tab", name=re.compile("Decisi")).click()
-    page.locator("#owner-switch button[data-owner='santiago']").click()
-    chips = page.locator(".owner-progress .chip")
-    expect(chips).to_have_count(2)
-    for theme in in_both_themes(page):
-        assert_readable(chips, theme, at_least=2, min_height=38)
-
-
 def test_pending_destinations_are_ordered_oldest_first(dashboard):
     page, store, month, _ = dashboard
     store.import_message("o", [{
@@ -779,3 +923,23 @@ def test_pending_destinations_are_ordered_oldest_first(dashboard):
     titles = page.locator("#pending-list > article h3").all_inner_texts()
     order = [title for title in titles if title in {"RECIENTE GRANDE", "ANTIGUO PEQUENO", "MEDIO"}]
     assert order == ["ANTIGUO PEQUENO", "MEDIO", "RECIENTE GRANDE"]
+
+
+def test_income_and_spending_bars_use_colours_apart_for_colour_blindness(dashboard):
+    page, store, month, _ = dashboard
+    store.import_message("pay", [{
+        "id": "pay", "message_id": "pay", "day": month + "-03", "merchant": "EMPRESA", "account": "Cuenta A",
+        "amount_minor": 500000, "currency": "COP", "category": "Nómina", "kind": "income",
+        "decision": None, "reason": "Revisar.",
+    }])
+    store.decide("pay", "income")
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.locator("#tab-year").click()
+    fills = page.evaluate("""() => {
+      const style = getComputedStyle(document.documentElement);
+      const bars = [...document.querySelectorAll('#year-income-chart-svg rect[data-tip]')];
+      const fillOf = name => bars.find(bar => bar.dataset.tip.includes(name)).getAttribute('fill');
+      return [fillOf('Ingresos'), fillOf('Gastos'), style.getPropertyValue('--s1').trim(), style.getPropertyValue('--s2').trim()];
+    }""")
+    assert fills[0] == fills[2] and fills[1] == fills[3]

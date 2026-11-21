@@ -129,19 +129,23 @@ el total y una pista, con botones que deciden todos sus movimientos a la vez.
 «Decisiones anteriores» va del más reciente al más antiguo.
 
 - **Progreso.** Arriba, «Por decidir» muestra los destinos, los movimientos y el
-  importe pendientes de la vista, y un botón por titular con sus movimientos por
-  decidir («Santiago: 16», «Manuela: 68») que abre la vista de ese titular.
+  importe pendientes del titular elegido en «Titular».
 - **Siguiente tarjeta.** Al decidir un destino o un movimiento, el foco pasa a la
   tarjeta que ocupa ahora su lugar, para seguir con el teclado o sin desplazarte.
 - **Todo o nada.** Si un movimiento no pasa la validación (por ejemplo, una compra
   en USD sin tasa), no cambia ninguno.
+- **Tasa del destino.** Si el destino tiene compras en USD, la tarjeta trae
+  «Tasa estimada COP por USD para los N movimientos»: la tasa que escribes se
+  aplica a todas sus compras en dólares al decidir, y las compras en pesos del
+  mismo destino no la usan (ver [Compras en dólares](#compras-en-dólares)).
 - **Pagos futuros.** «Aplicar también a pagos futuros a este destino, con la
   categoría elegida» crea una regla de destino que recuerda la decisión y, si
   elegiste una, la categoría. Decide lo que llegue a ese destino por aviso o por
   extracto (por ejemplo un «TRASLADO A NEQUI» como Retiro en efectivo y Gasto
   personal), salvo posibles duplicados y lo que no pase la validación, como una
-  compra en USD sin tasa. Se puede borrar en «Reglas por destino». Sin esa casilla
-  no se crea ninguna regla.
+  compra en USD sin tasa, que queda pendiente con la decisión de la regla
+  propuesta (ver [Compras en dólares](#compras-en-dólares)). Se puede borrar en
+  «Reglas por destino». Sin esa casilla no se crea ninguna regla.
 - **Categoría del destino.** Una tarjeta con varios movimientos que admiten Gasto
   personal o Familiar (compras, transferencias como un traslado a Nequi, cuotas
   de crédito o movimientos sin tipo) tiene el selector «Categoría para los N
@@ -161,8 +165,8 @@ el total y una pista, con botones que deciden todos sus movimientos a la vez.
 - **Corregir.** «Decisiones anteriores» muestra el historial y permite cambiar
   una decisión. Para volver un movimiento a gasto, elige primero una categoría de
   consumo.
-- La pestaña muestra todos los meses de la moneda elegida (en COP también los
-  movimientos en USD, para ponerles tasa), en tandas de hasta 50.
+- La pestaña muestra todos los meses, también los movimientos en USD (para
+  ponerles tasa), en tandas de hasta 50.
 
 ## Reglas por comercio
 
@@ -178,6 +182,9 @@ las aplica ni decide nada por su cuenta.
   («si quien paga contiene `EMPRESA`, es Nómina»).
 - Deciden lo que llega por avisos y por extractos. Nunca deciden transferencias,
   inversiones, cuentas excluidas, compras en USD sin tasa ni posibles duplicados.
+  Una compra en USD sin tasa que coincide con una regla queda pendiente con la
+  decisión y la categoría de la regla ya elegidas (ver
+  [Compras en dólares](#compras-en-dólares)).
 - Se aplican al importar avisos o extractos y al guardar la regla. Nunca cambian una decisión ya
   tomada; cada decisión automática indica su regla y se puede corregir. Borrar una
   regla no deshace lo que ya decidió.
@@ -239,17 +246,31 @@ En un cierre en COP, un aviso que dice `USD` o `US$` se guarda en dólares; el
 nombre del comercio (por ejemplo, AMAZON MKTPLACE) nunca decide la moneda. Un
 aviso con marcas de COP y USD a la vez se detiene por ambiguo.
 
-1. En **Decisión** (con COP seleccionado también aparecen los USD), escribe la
+1. En **Decisión**, que también muestra los movimientos en USD, escribe la
    **tasa estimada COP por USD** de la fecha del movimiento, por ejemplo `4200,50`
    (punto o coma decimal, sin separador de miles, hasta seis decimales).
 2. Confirma la decisión. El importe en USD queda intacto y se guarda su
    equivalente en COP, que es el que suman los totales. Sin tasa, el movimiento
    no suma a COP; «No cuenta» lo excluye sin tasa.
 
+**Varias compras del mismo destino.** La tarjeta del destino trae el campo
+«Tasa estimada COP por USD para los N movimientos». La tasa que escribes se
+aplica a todas sus compras en dólares al pulsar la decisión, con la misma
+validación todo o nada y una auditoría por movimiento. Las compras en pesos del
+mismo destino no la usan. Si las compras ya tienen tasas distintas, el campo
+viene vacío: déjalo así para conservar la de cada una, o decide cada compra en
+«Ver N movimientos».
+
+**Compras que coinciden con una regla.** Las reglas por comercio y por destino
+nunca deciden una compra en USD sin tasa, porque la tasa la pones tú. En cambio,
+la tarjeta muestra «Tu regla elige «Familiar». Solo falta la tasa», con la
+categoría de la regla ya elegida y su botón resaltado: escribe la tasa y pulsa ese
+botón. En la tarjeta de un destino, la propuesta aparece solo si todas sus compras
+tienen la misma.
+
 La tarjeta de un destino con varias compras muestra su total en la moneda de cada
-movimiento (por ejemplo `US$ 35,00`), nunca 0,00 COP por falta de tasa. Con COP
-seleccionado, añade el estimado en COP solo si todos sus movimientos en dólares
-tienen tasa.
+movimiento (por ejemplo `US$ 35,00`), nunca 0,00 COP por falta de tasa. Añade
+el estimado en COP solo si todos sus movimientos en dólares tienen tasa.
 
 La tasa la pones tú: no se consulta una tasa externa ni la propone el modelo. Si
 un aviso en USD quedó guardado como COP, comprueba el correo original, cambia
@@ -485,10 +506,20 @@ de producto, así que el buzón dice de quién es cada uno:
 - Los correos de Protección no se envían a Ollama: se marcan como procesados sin
   movimientos, porque la información la aporta el PDF.
 
-En el panel, «Extractos y saldos» muestra el último saldo conocido y cuántos
-movimientos de cada extracto coinciden en el mes. Cada titular ve sus extractos;
-**Hogar** los ve todos, con el nombre del titular. El grupo **Inversiones** suma
-Fiducuenta, pensión voluntaria y cesantías.
+En el panel, la tarjeta «Extractos y saldos» de la pestaña Mes tiene un bloque
+por tipo de producto. Cada extracto con corte en el mes va en una fila con su
+nombre a la izquierda y su saldo o estado a la derecha.
+
+- **Tarjetas y cuentas:** la conciliación con los avisos. Una marca verde
+  («✓ 21/21») indica que todos los movimientos coinciden. Una naranja («⚠ 3
+  pendientes») indica que algunos solo venían en el extracto: entraron como
+  pendientes y debajo se indica cuántos coinciden.
+- **Inversiones** (Fiducuenta, pensión voluntaria y cesantías) y **Créditos**: el
+  total del último saldo conocido de cada producto hasta ese mes, con la fecha
+  del saldo. Protección muestra además aportes, retiros y rendimientos.
+
+Un extracto sin movimientos no muestra conciliación. Cada titular ve sus
+extractos; **Hogar** los ve todos, con la etiqueta del titular.
 
 ## Conciliación automática del mes
 
@@ -650,10 +681,20 @@ $env:PYTHONPATH = "src"
 Se abre con `.\scripts\agente-local.ps1` en `http://127.0.0.1:8766`, solo en tu
 equipo. Con `serve -Red` también se puede usar desde tus dispositivos emparejados
 de la red de casa, en `https://<dirección del equipo>:8767/` (ver
-[Paneles desde otros dispositivos](configuracion.md#11-paneles-desde-otros-dispositivos-opcional)). Arriba eliges el titular (**Santiago / Manuela / Hogar**, Hogar por
-defecto) y la moneda; debajo, las pestañas **Mes**, **Año** y **Decisión**. La
+[Paneles desde otros dispositivos](configuracion.md#11-paneles-desde-otros-dispositivos-opcional)). Arriba eliges el titular (**Santiago / Manuela / Hogar**, Hogar por defecto) y
+debajo las pestañas **Mes**, **Año** y **Decisión**; los dos siguen visibles al
+desplazarte. Todo se muestra en la moneda del cierre (COP): las compras en
+dólares cuentan con la tasa que les pusiste al decidirlas, y las que aún no la
+tienen esperan en **Decisión**, sin sumar a los totales. No hay selector de
+moneda: una vista en USD solo mostraría esas compras sin tasa. La
 vista se guarda en la URL, así que se puede volver a ella. El tema sigue el modo
 claro u oscuro del sistema y el botón «Tema» puede fijar uno.
+
+El aviso amarillo de arriba (datos que pueden estar incompletos, sugerencias del
+modelo que hay que revisar, no escribir credenciales) se cierra con **×**. Cada
+navegador recuerda que lo cerraste, igual que el tema; en otro dispositivo, o
+con otra dirección, como la de `-Red`, aparece de nuevo hasta cerrarlo allí. El
+aviso del formulario de configuración inicial no se puede cerrar.
 
 **Mes**
 
@@ -669,7 +710,13 @@ claro u oscuro del sistema y el botón «Tema» puede fijar uno.
   agrupa variantes del mismo comercio (por ejemplo `UBER RIDES` y `UBER *TRIP`
   como «Uber»); lo guardado conserva el texto del aviso.
 - **Detalle por categoría** separa gastos, inversiones, ingresos y pagos de
-  tarjeta, e indica cuántos movimientos faltan por decidir.
+  tarjeta, e indica cuántos movimientos faltan por decidir. Tocar un movimiento
+  abre debajo su tarjeta de decisión, la misma de la pestaña Decisión, para
+  cambiar la categoría, la moneda y la tasa o la decisión. Cada cambio queda
+  auditado igual que en Decisión. Solo hay un movimiento abierto a la vez: abrir
+  otro cierra el anterior. Al guardar, la tarjeta se cierra y la vista queda en
+  ese movimiento, resaltado un momento; si cambió de categoría, se abre su
+  categoría nueva.
 - Cada cifra muestra su valor al pasar el mouse, tocar o llegar con el teclado.
 
 **Año**
@@ -678,9 +725,31 @@ claro u oscuro del sistema y el botón «Tema» puede fijar uno.
   decidido) y chips con el promedio de gasto por mes cerrado (sin el mes en
   curso), el mes de mayor gasto, la inversión neta, retiros, efectivo, abonos y la
   cobertura («X de N» meses revisados a mano o conciliados con los extractos).
-- Gráfica de ingresos y gastos, categorías del año con barras y porcentaje, y
+- Gráfica de ingresos (azul) y gastos (naranja), dos colores que se distinguen
+  también con daltonismo rojo-verde; categorías del año con barras y porcentaje, y
   columnas por categoría con los mismos colores que el mes. El mes en curso se ve
   más claro.
+- **Inversiones y créditos:** una gráfica de línea para cada grupo con el saldo
+  al cierre de cada mes, hasta el mes en curso: verde azulado para inversiones y
+  morado para créditos, distintos del azul y el naranja de ingresos y gastos.
+  Cuánto subió o bajó cada saldo usa los colores del Balance del resumen por mes:
+  verde si favorece (inversiones que suben, créditos que bajan) y rojo si no. Arriba está el saldo total del
+  último extracto y cuánto subió o bajó en el año.
+  - El saldo de un mes suma el último extracto de cada producto hasta ese mes;
+    un mes sin extracto nuevo repite el saldo anterior.
+  - El mes en que un producto empieza a contarse lleva un punto hueco; al pasar
+    el cursor o tocarlo dice qué producto empieza. En la lista de productos,
+    ese producto dice «Se suma al total desde abril de 2026; ese salto no es
+    dinero que entró.»
+  - Por defecto solo se ven los totales. Debajo, «N productos» despliega cada
+    producto con su saldo y su variación en el año, o desde su primer extracto
+    si empezó a mitad de año. Tocar un producto cambia la gráfica a solo ese
+    producto, con su propia escala. Tocarlo otra vez, pulsar «Ver total» o
+    plegar la lista vuelve al total.
+  - Tocar un mes de la gráfica muestra su saldo y abre ese mes.
+  - Solo cuentan los productos con algún extracto en el año; en **Hogar** llevan
+    la etiqueta del titular. Si un titular solo tiene uno de los dos grupos (por
+    ejemplo, inversiones sin créditos), su gráfica se muestra centrada.
 - **Resumen por mes:** Gasto, Personal, Familiar, Abonos, Ingresos, Balance (con
   signo y color), Inversiones, Efectivo, Pendiente y Cobertura, con fila de total.
   Un guion (—) significa que no hubo movimientos de ese tipo, nunca gasto cero; los
@@ -689,13 +758,30 @@ claro u oscuro del sistema y el botón «Tema» puede fijar uno.
   muestra como «X/Y» (el detalle completo aparece al pasar el cursor).
 - Tocar un mes de la tabla o una barra abre ese mes.
 
+**En el celular**
+
+- El encabezado queda en una fila: el subtítulo se oculta y «Tema» queda como un
+  icono.
+- Los botones, selectores y campos tienen al menos 44 px de alto para tocarlos
+  sin errores, y los campos usan letra de 16 px para que el teléfono no acerque
+  la vista al escribir.
+- El titular y las pestañas siguen visibles al desplazarte.
+- Los botones de una decisión van en dos columnas; si sobra uno, ocupa la fila
+  completa.
+- Las listas con barras muestran el nombre completo en su propia línea.
+- En **Resumen por mes**, la nota de importes queda fuera de la tabla, que se
+  desplaza de lado con el mes siempre visible.
+
 **Decisión:** ver [Decidir movimientos](#decidir-movimientos),
 [Reglas por comercio](#reglas-por-comercio) y
 [Avisos sin extraer](#avisos-sin-extraer).
 
 **Comportamiento seguro.** Durante una carga o un guardado se bloquean los
-controles para evitar envíos dobles; si algo falla, se muestra el error y se
-puede reintentar con **Actualizar**. Borrar una regla o descartar un aviso pide
+controles para evitar envíos dobles. Los mensajes de guardado y de error flotan
+abajo de la pantalla, así se ven aunque estés al final de la lista: una
+confirmación se oculta sola a los pocos segundos y un error queda visible, con
+su motivo, hasta que lo cierras con **×**; se puede reintentar con
+**Actualizar**. Borrar una regla o descartar un aviso pide
 confirmación. Nada se decide sin pulsar un botón de aprobación. El panel
 responde solo a sí mismo (Host, Origin y token por ejecución) y, con `-Red`, solo a
 dispositivos emparejados con su sesión vigente.
