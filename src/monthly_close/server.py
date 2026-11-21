@@ -84,6 +84,7 @@ def create_server(store: Store, port: int = 8766, model: CategoryModel | None = 
                     store.decide_group(
                         owner, group, decision, pending_only=scope == "pending", remember=remember,
                         category=optional_text(raw, "category", "Categoria invalida."),
+                        exchange_rate=optional_text(raw, "exchange_rate", "Tasa invalida: debe enviarse como texto decimal."),
                     )
                 elif self.route == "/api/between-owners":
                     owner, group = required_texts(raw, "owner", "group", error="Marca entre titulares invalida.")

@@ -197,6 +197,7 @@ privacy, human-approval, and data-handling rules.
 - Write comments only for non-obvious logic.
 - Add docstrings to important public functions.
 - Keep UI-related functions separate from domain logic.
+- Write every user-facing text of the panels in Spanish sentence case: a text that stands on its own (heading, button, label, hint, message, list line) starts with an uppercase letter and the rest stays lowercase except proper nouns. Never use Title Case. Text that continues a sentence on the same line (after ` · `, `:` or a figure it completes) stays lowercase, and so do axis abbreviations such as weekdays and months. A text that starts with a number or code keeps it as is. Uppercase headings come from CSS, not from the text.
 
 ## Version control (GitFlow)
 

@@ -60,10 +60,10 @@
     .brand-mark { display: none; }
     h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -.2px; }
     .eyebrow { margin: 2px 0 0; color: var(--ink2); font-size: 13px; }
-    .top-actions, .toolbar, .inline-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+    .top-actions, .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 
     /* Buttons: soft pills; the active or primary one turns ink */
-    .button, .select-button {
+    .button {
       display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       min-height: 40px; padding: 9px 13px; border: 1px solid var(--line); border-radius: 12px;
       background: var(--surf); color: var(--ink); font-weight: 600;
@@ -84,11 +84,30 @@
     .alert.warning { background: color-mix(in srgb, var(--s4) 16%, transparent); color: var(--ink); }
     .alert.error { background: var(--red-soft); color: var(--bad); }
     .alert.success { background: var(--green-soft); color: var(--ink); }
-    main[aria-busy="true"] #global-message { display: flex; align-items: center; gap: 10px; }
-    main[aria-busy="true"] #global-message::before { width: 14px; height: 14px; flex: 0 0 auto; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; content: ""; animation: spin .8s linear infinite; }
+    #global-message[aria-busy="true"]::before { width: 14px; height: 14px; flex: 0 0 auto; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; content: ""; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) { main[aria-busy="true"] #global-message::before { animation: none; } }
-    #global-message, #load-error, #dashboard-area > .alert, #sender-warning { margin: 6px 0 10px; }
+    @media (prefers-reduced-motion: reduce) { #global-message[aria-busy="true"]::before { animation: none; } }
+    #dashboard-area > .alert, #sender-warning { margin: 6px 0 10px; }
+    #safety-note { display: flex; align-items: flex-start; gap: 10px; }
+    #safety-note[hidden] { display: none; }
+    .note-close { flex: none; min-width: 44px; min-height: 44px; margin: -10px -8px -10px 0; border: 0; border-radius: 10px; background: transparent; color: inherit; font-size: 20px; line-height: 1; }
+    .note-close:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+    /* Save and error messages float at the bottom of the screen, wherever the page is scrolled. */
+    .toast-region {
+      position: fixed; z-index: 30; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom));
+      display: flex; flex-direction: column; gap: 8px; width: min(560px, calc(100% - 28px));
+      transform: translateX(-50%); pointer-events: none;
+    }
+    .toast-region .alert {
+      display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 14px;
+      box-shadow: 0 8px 24px #0000002e;
+      pointer-events: auto; animation: toast-in .18s ease-out;
+    }
+    .toast-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .toast-close { flex: none; min-width: 44px; min-height: 44px; margin: -8px -6px -8px 0; border: 0; border-radius: 10px; background: transparent; color: inherit; font-size: 20px; line-height: 1; }
+    .toast-close:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+    @media (prefers-reduced-motion: reduce) { .toast-region .alert { animation: none; } }
 
     /* Cards */
     .intro { max-width: 70ch; margin: 10px 0 18px; color: var(--ink2); line-height: 1.5; }
@@ -108,7 +127,7 @@
     /* Forms */
     .config-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
     .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-    .field > label, .field-label { font-weight: 600; font-size: 13.5px; }
+    .field > label { font-weight: 600; font-size: 13.5px; }
     .field input, .field select, .field textarea, .control {
       width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line);
       border-radius: 12px; background: var(--surf); color: var(--ink);
@@ -120,15 +139,22 @@
     .form-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 
     /* Navigation: sticky tabs and month chips, as in Manuela's dashboard */
-    .tabs { position: sticky; top: 0; z-index: 5; display: flex; gap: 6px; margin: 4px 0 12px; padding: 8px 0; background: var(--bg); }
+    /* The owner switch and the tabs stay at the top while scrolling. */
+    .sticky-nav { position: sticky; top: 0; z-index: 5; display: grid; gap: 8px; margin: 4px 0 12px; padding: 8px 0; background: var(--bg); }
+    html { scroll-padding-top: 124px; }
+    .tabs { display: flex; gap: 6px; }
     .tab { flex: 1; min-height: 42px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 6px; background: var(--surf); color: var(--ink2); font-weight: 600; }
     .tab:hover { border-color: var(--ink2); }
     .tab[aria-selected="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
     .toolbar { justify-content: space-between; margin: 10px 0 6px; }
     .toolbar-group { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
     .control-label { color: var(--mut); font-size: 12.5px; font-weight: 600; }
-    .select-button { min-height: 38px; padding: 4px 10px; border-radius: 999px; }
-    .select-button select { min-width: 90px; border: 0; background: transparent; color: var(--ink); font-weight: 600; }
+    /* The year select looks like every other select on the page. */
+    .select-button { display: inline-flex; }
+    .select-button select {
+      min-width: 110px; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line);
+      border-radius: 12px; background: var(--surf); color: var(--ink);
+    }
     .owner-switch { display: inline-flex; gap: 6px; }
     .owner-switch button { min-height: 38px; border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; background: var(--surf); color: var(--ink2); font-size: 14px; }
     .owner-switch button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
@@ -172,24 +198,21 @@
     .decision-summary { margin-bottom: 12px; }
     /* Year view: monthly table with the month always visible while scrolling sideways. */
     #year-table table { min-width: 860px; }
-    #year-table caption { caption-side: top; padding: 0 0 6px; color: var(--mut); font-size: 12px; text-align: left; }
+    #year-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .table-note { margin: 0 0 6px; color: var(--mut); font-size: 12px; line-height: 1.45; }
     #year-table th:first-child, #year-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surf); }
     #year-table tfoot td { border-top: 2px solid var(--line); color: var(--ink); font-weight: 700; }
     #year-table td.spend { font-weight: 700; }
-    td.positive { color: var(--good); }
-    td.negative { color: var(--bad); }
+    td.positive, .balance-change.positive { color: var(--good); }
+    td.negative, .balance-change.negative { color: var(--bad); }
     tr.current-month > td:first-child { box-shadow: inset 3px 0 0 var(--accent); background: var(--accent-soft); font-weight: 600; }
     #year-categories .bar-row { grid-template-columns: minmax(0, 170px) minmax(0, 1fr) auto; }
     .axis-label.current { fill: var(--ink); font-weight: 700; }
     .decision-summary strong { font-size: 30px; }
     .currency-fix > summary { color: var(--ink2); font-size: 13px; font-weight: 500; cursor: pointer; margin: 6px 0; }
-    .owner-progress { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-    .owner-progress .chip { min-height: 38px; }
-    .owner-progress .chip[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
 
     /* Charts and lists */
     .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
     .calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
     .weekday, .day-cell { text-align: center; }
     .weekday { padding: 2px 0; color: var(--mut); font-size: 11px; }
@@ -202,14 +225,12 @@
     /* Legend under a chart, flowing in rows like in Manuela's yearly view. */
     .legend-inline { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; color: var(--ink2); font-size: 12.5px; }
     .legend-inline .legend-label { color: var(--ink2); gap: 6px; }
-    .legend-row, .rank-row, .account-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 14px; }
+    .legend-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 14px; }
     .legend-label { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
-    .rank-row progress { height: 10px; accent-color: var(--s1); }
     .legend-value { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
     .legend-value small { color: var(--mut); min-width: 2.6em; text-align: right; font-size: 12px; }
-    .metric strong, .legend-value, td.numeric, .rank-row strong, .account-row strong, .detail-row strong,
+    .metric strong, .legend-value, td.numeric, .detail-row strong,
     .day-amount, .split-legend, .group-amount { font-variant-numeric: tabular-nums; }
-    .rank-row strong { font-weight: 600; }
     .swatch { width: 11px; height: 11px; flex: 0 0 auto; border-radius: 3px; background: var(--s1); }
     .chart-wrap { width: 100%; overflow-x: auto; }
     svg.chart { display: block; width: 100%; min-width: 280px; height: auto; overflow: visible; }
@@ -252,6 +273,15 @@
     .detail-rows { display: grid; gap: 2px; padding-bottom: 8px; }
     .detail-row { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; color: var(--ink2); font-size: 13px; }
     .detail-row strong { color: var(--ink); font-weight: 600; }
+    /* A movement of the category detail opens its decision card right below it. */
+    button.detail-row { width: 100%; align-items: center; margin: 0; padding: 7px 6px; border: 0; border-radius: 8px; background: none; font: inherit; text-align: left; cursor: pointer; }
+    button.detail-row:hover, button.detail-row[aria-expanded="true"] { background: var(--soft); }
+    .detail-row .detail-amount { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+    .detail-row .detail-chevron { color: var(--mut); font-size: 12px; transition: transform .15s ease-out; }
+    button.detail-row[aria-expanded="true"] .detail-chevron { transform: rotate(180deg); }
+    @media (prefers-reduced-motion: reduce) { .detail-row .detail-chevron { transition: none; } }
+    .detail-editor { margin: 2px 0 10px; }
+    button.detail-row.just-saved { background: color-mix(in srgb, var(--good) 16%, var(--surf)); }
 
     /* Decision cards, after Manuela's destination cards */
     .decision-list { display: grid; gap: 10px; }
@@ -270,6 +300,7 @@
     .decision-card .reason { margin: 6px 0 12px; color: var(--ink2); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
     .decision-category { max-width: 380px; margin: 10px 0; }
     .group-card details { margin-top: 8px; }
+    .decision-actions .button.proposed { outline: 2px solid var(--s1); outline-offset: 2px; }
     .group-card details > summary { color: var(--ink2); font-size: 13px; font-weight: 500; }
     .group-card details .decision-list { margin-top: 6px; }
     .check-line { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--ink2); font-size: 13px; }
@@ -279,13 +310,34 @@
     .owner-tag.owner-manuela { background: var(--owner-manuela-soft); color: var(--owner-manuela); }
     .flag-tag { display: inline-flex; padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--ink2); font-size: 11px; font-weight: 600; }
     .empty-state { padding: 10px 0; color: var(--mut); font-size: 13px; }
+    /* Year balances: one line chart and one list of products per kind. */
+    .balance-section .statement-head { margin-bottom: 4px; }
+    .balance-grid.single { grid-template-columns: minmax(0, 560px); justify-content: center; }
+    .balance-focus { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; color: var(--ink2); font-size: 12.5px; }
+    .balance-note { grid-column: 1 / -1; color: var(--mut); font-size: 12.5px; line-height: 1.45; }
+    .balance-products > summary { color: var(--ink2); font-size: 13px; font-weight: 500; }
+    button.balance-product { width: 100%; margin: 0; padding: 8px 6px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+    @media (hover: hover) { button.balance-product:hover { background: var(--soft); } }
+    button.balance-product[aria-pressed="true"] { background: var(--soft); box-shadow: inset 3px 0 0 var(--balance-color, var(--s1)); }
+    /* Statements card: one block per kind of product, one two-line row per statement. */
+    .statement-section + .statement-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+    .statement-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; }
+    .statement-head h4 { margin: 0; color: var(--ink); font-size: 14px; }
+    .statement-head strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+    .statement-head p { flex-basis: 100%; margin: 2px 0 0; color: var(--mut); font-size: 12.5px; }
+    .statement-rows { display: grid; margin-top: 6px; }
+    .statement-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; padding: 8px 0; }
+    .statement-row + .statement-row { border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+    .statement-name { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; color: var(--ink); font-size: 14px; font-weight: 600; }
+    .statement-row > strong { font-size: 14px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .statement-detail { grid-column: 1 / -1; color: var(--ink2); font-size: 12.5px; line-height: 1.45; font-variant-numeric: tabular-nums; }
+    .statement-row .status-pill { justify-self: end; white-space: nowrap; }
     .coverage-form { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(0, 2fr) auto; align-items: end; gap: 10px; }
-    .notice-line { display: flex; align-items: flex-start; gap: 9px; color: var(--ink2); font-size: 13px; line-height: 1.45; }
     .footer-note { margin-top: 20px; color: var(--mut); font-size: 12.5px; line-height: 1.5; }
     #panel-month > .card, #panel-month > section, #panel-year > article { margin-top: 12px; }
 
     @media (max-width: 860px) {
-      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .grid-2 { grid-template-columns: 1fr; }
       .legend-value { white-space: normal; justify-content: flex-end; }
     }
     @media (max-width: 600px) {
@@ -299,16 +351,49 @@
       .day-cell { min-height: 46px; padding: 3px; }
       /* Wide charts shrink to about half on a phone: double their axis text so it stays readable. */
       #year-chart-svg .axis-label, #year-income-chart-svg .axis-label, #cumulative-chart-svg .axis-label { font-size: 22px; }
+      /* The balance charts are narrower, so they shrink less on a phone. */
+      svg.balance-chart .axis-label { font-size: 17px; }
+      button.balance-product { min-height: 44px; }
       .day-amount { font-size: 9.5px; }
       .coverage-form { grid-template-columns: 1fr; }
       .coverage-form .button { width: 100%; }
       th, td { padding: 8px 3px; }
+
+      /* Phone comfort: one-row header, 44 px touch targets, 16 px fields (no zoom while typing). */
+      .topbar { align-items: center; }
+      .topbar .eyebrow, .top-actions .theme-label { display: none; }
+      .top-actions { flex-wrap: nowrap; }
+      .button, .top-actions .button, .owner-switch button, .tab, .chip, .decision-actions .button { min-height: 44px; }
+      .select-button select { min-height: 44px; }
+      .top-actions .button { min-width: 44px; }
+      .field input, .field select, .field textarea, .control, .select-button select { font-size: 16px; }
+      .field input, .field select, .control { min-height: 44px; }
+      details summary { min-height: 44px; padding: 12px 0; }
+      .check-line { min-height: 44px; margin-top: 6px; }
+      .check-line input { width: 22px; height: 22px; flex: none; }
+      .owner-tag, .status-pill, .flag-tag, .tab-badge { font-size: 12px; }
+
+      /* Decisions: two even columns, so labels fit on one line; a lone last button takes the row. */
+      .decision-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .decision-actions > .button:last-child:nth-child(odd) { grid-column: 1 / -1; }
+      #category-suggest { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+      #category-suggest .button { width: 100%; }
+      .decision-card, .group-card { padding: 12px; }
+      .decision-category { max-width: none; }
+
+      /* Bar rankings: the full name on its own line, the bar and amount below. */
+      .bar-row, #year-categories .bar-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
+      .bar-row .bar-name { grid-column: 1 / -1; white-space: normal; }
+      button.detail-row { min-height: 44px; }
     }
     @media (max-width: 390px) {
       .top-actions { gap: 5px; }
       .top-actions .button { font-size: 12px; }
       .top-actions .refresh-label { display: none; }
       .owner-switch button { padding: 7px 10px; }
+      /* The pending count stays beside «Decisión» instead of dropping to a second line. */
+      .tab { padding: 10px 2px; white-space: nowrap; }
+      .tab-badge { margin-left: 3px; }
     }
   </style>
 </head>
@@ -324,14 +409,16 @@
         </div>
       </div>
       <div class="top-actions">
-        <button class="button" id="theme-toggle" type="button" aria-pressed="false" aria-label="Cambiar tema claro u oscuro"><span aria-hidden="true">◐</span> <span>Tema</span></button>
+        <button class="button" id="theme-toggle" type="button" aria-pressed="false" aria-label="Cambiar tema claro u oscuro"><span aria-hidden="true">◐</span> <span class="theme-label">Tema</span></button>
         <button class="button" id="refresh-button" type="button" aria-label="Actualizar" hidden><span aria-hidden="true">↻</span> <span class="refresh-label">Actualizar</span></button>
         <button class="button" id="edit-config-button" type="button" hidden>Configuración</button>
       </div>
     </header>
 
-    <div id="global-message" class="alert" role="status" aria-live="polite" hidden></div>
-    <div id="load-error" class="alert error" role="alert" hidden></div>
+    <div class="toast-region">
+      <div id="global-message" class="alert" role="status" aria-live="polite" hidden></div>
+      <div id="load-error" class="alert error" role="alert" hidden></div>
+    </div>
 
     <main id="main-content" tabindex="-1">
       <section id="setup-area" class="panel" hidden aria-labelledby="setup-title">
@@ -343,8 +430,9 @@
       </section>
 
       <section id="dashboard-area" hidden aria-label="Panel de cierre mensual">
-        <div class="alert warning" role="note">
-          Los datos importados pueden estar incompletos; las sugerencias del modelo son texto no confiable y requieren revisión. No introduzcas credenciales bancarias. No hay escaneo desde esta página: las importaciones se ejecutan por CLI.
+        <div id="safety-note" class="alert warning" role="note">
+          <span class="toast-text">Los datos importados pueden estar incompletos; las sugerencias del modelo son texto no confiable y requieren revisión. No introduzcas credenciales bancarias. No hay escaneo desde esta página: las importaciones se ejecutan por CLI.</span>
+          <button type="button" id="safety-note-close" class="note-close" aria-label="Cerrar este aviso; no volverá a aparecer en este navegador">×</button>
         </div>
         <p id="sender-warning" class="alert warning" role="note" hidden>No hay remitentes aprobados. La importación debe permanecer bloqueada hasta que añadas direcciones exactas en Configuración.</p>
         <div id="config-area" class="panel" hidden aria-labelledby="config-title">
@@ -358,7 +446,8 @@
           </div>
           <div id="config-form-host"></div>
         </div>
-        <div class="toolbar">
+        <p id="extraction-warning" class="hint" role="status" hidden></p>
+        <div class="sticky-nav">
           <div class="toolbar-group">
             <span class="control-label" id="owner-label">Titular</span>
             <div id="owner-switch" class="owner-switch" role="group" aria-labelledby="owner-label">
@@ -367,16 +456,11 @@
               <button type="button" data-owner="hogar" aria-pressed="false">Hogar</button>
             </div>
           </div>
-          <div class="toolbar-group">
-            <label class="control-label" for="currency-select">Moneda</label>
-            <span class="select-button"><select id="currency-select" aria-label="Moneda para mostrar"></select></span>
+          <div class="tabs" role="tablist" aria-label="Vista del cierre">
+            <button class="tab" id="tab-month" type="button" role="tab" aria-selected="true" aria-controls="panel-month" tabindex="0">Mes</button>
+            <button class="tab" id="tab-year" type="button" role="tab" aria-selected="false" aria-controls="panel-year" tabindex="-1">Año</button>
+            <button class="tab" id="tab-decisions" type="button" role="tab" aria-selected="false" aria-controls="panel-decisions" tabindex="-1">Decisión<span id="decision-badge" class="tab-badge" aria-hidden="true" hidden></span></button>
           </div>
-        </div>
-        <p id="extraction-warning" class="hint" role="status" hidden></p>
-        <div class="tabs" role="tablist" aria-label="Vista del cierre">
-          <button class="tab" id="tab-month" type="button" role="tab" aria-selected="true" aria-controls="panel-month" tabindex="0">Mes</button>
-          <button class="tab" id="tab-year" type="button" role="tab" aria-selected="false" aria-controls="panel-year" tabindex="-1">Año</button>
-          <button class="tab" id="tab-decisions" type="button" role="tab" aria-selected="false" aria-controls="panel-decisions" tabindex="-1">Decisión<span id="decision-badge" class="tab-badge" aria-hidden="true" hidden></span></button>
         </div>
 
         <section id="panel-month" role="tabpanel" aria-labelledby="tab-month">
@@ -412,8 +496,7 @@
             </article>
             <article class="card" id="statements-card" hidden>
               <div class="card-header"><div><h3>Extractos y saldos</h3><p>Conciliación con los extractos del banco y último saldo conocido de inversiones y créditos</p></div></div>
-              <div id="statement-balances" class="rank-list"></div>
-              <div id="statement-checks" class="rank-list" style="margin-top:12px"></div>
+              <div id="statement-sections"></div>
             </article>
             <article class="card">
               <div class="card-header"><div><h3>Cuentas de pago</h3><p>Según los datos disponibles en la importación</p></div></div>
@@ -449,6 +532,13 @@
           <article class="card">
             <div class="card-header"><div><h3>Ingresos y gastos</h3><p>Ingresos confirmados frente al gasto decidido de cada mes. El mes en curso se ve más claro: aún pueden llegar avisos.</p></div></div>
             <div id="year-income-chart" class="chart-wrap"></div>
+          </article>
+          <article class="card" id="balances-card" hidden>
+            <div class="card-header"><div><h3>Inversiones y créditos</h3><p>Saldo al cierre de cada mes según el último extracto de cada producto; un mes sin extracto nuevo repite el saldo anterior.</p></div></div>
+            <div class="grid-2 balance-grid">
+              <section id="investment-balances" class="balance-section"></section>
+              <section id="credit-balances" class="balance-section"></section>
+            </div>
           </article>
           <article class="card">
             <div class="card-header"><div><h3>Categorías del año</h3><p>Gasto personal y familiar decidido; el porcentaje es sobre el total de categorías.</p></div></div>
@@ -508,7 +598,7 @@
             <div id="history-list" class="decision-list" style="margin-top:12px"></div>
           </details>
         </section>
-        <p class="footer-note">Importes en unidades de la moneda seleccionada. No se combinan monedas. Un mes queda verificado cuando lo revisas a mano o cuando cuadra con los extractos de Santiago.</p>
+        <p class="footer-note">Importes en la moneda del cierre; las compras en dólares cuentan con la tasa que les pones al decidirlas. Un mes queda verificado cuando lo revisas a mano o cuando cuadra con los extractos de Santiago.</p>
       </section>
     </main>
   </div>
@@ -540,14 +630,19 @@
       const initialTab = initialParams.get("tab");
       const state = {
         data: null,
+        openCategories: new Set(),
+        balanceFocus: { investments: null, credits: null },
+        balanceListOpen: { investments: false, credits: false },
+        editingTx: null,
         month: initialMonth && monthPattern.test(initialMonth) ? initialMonth : currentMonth(),
         year: initialYear && /^\d{4}$/.test(initialYear) ? initialYear : String(new Date().getFullYear()),
-        currency: initialParams.get("currency") || "",
+        // Set from the close's configuration; an old link's ?currency= is ignored.
+        currency: "",
         activeTab: ["month", "year", "decisions"].includes(initialTab) ? initialTab : "month",
         owner: ["santiago", "manuela", "hogar"].includes(initialParams.get("owner")) ? initialParams.get("owner") : "hogar",
         busy: false,
         months: [],
-        selectedDay: null, // { key: "month|owner|currency", day }
+        selectedDay: null, // { key: "month|owner", day }
         categoryColors: new Map(),
         pendingLimit: 50,
         historyLimit: 50,
@@ -598,17 +693,37 @@
       }
       let decisionCardSequence = 0;
 
+      // A floating message: a confirmation goes away by itself after a few seconds (unless
+      // the panel is still working, or the pointer or focus is on it); an error stays until
+      // it is closed or solved.
+      let messageTimer = null;
+      function fillToast(box, message, closable) {
+        box.replaceChildren(el("span", "toast-text", message));
+        box.hidden = !message;
+        if (!message || !closable) return;
+        const close = el("button", "toast-close", "×");
+        close.type = "button";
+        close.setAttribute("aria-label", "Cerrar mensaje");
+        close.addEventListener("click", () => { box.hidden = true; });
+        box.append(close);
+      }
       function showMessage(message, type = "success") {
         const box = $("#global-message");
         box.className = `alert ${type}`;
-        box.textContent = message;
-        box.hidden = !message;
+        clearTimeout(messageTimer);
+        fillToast(box, message, type === "error");
+        if (!message || type === "error" || message.endsWith("…")) return;
+        const hideLater = () => {
+          messageTimer = setTimeout(() => {
+            if (state.busy || box.matches(":hover, :focus-within")) hideLater();
+            else box.hidden = true;
+          }, 4000);
+        };
+        hideLater();
       }
 
       function setError(message) {
-        const box = $("#load-error");
-        box.textContent = message;
-        box.hidden = !message;
+        fillToast($("#load-error"), message, true);
       }
 
       function formatMoney(minor, currency = state.currency) {
@@ -695,7 +810,6 @@
       function sum(items) { return items.reduce((total, tx) => total + tx.amount_minor, 0); }
       // Third parties paying a member's card reduce that member's spending.
       function thirdParty(items) { return items.filter(tx => tx.decision === "third_party_payment" && !hiddenInView(tx)); }
-      function netSpend(items) { return sum(counted(items)) - sum(thirdParty(items)); }
       function monthOf(tx) { return typeof tx.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(tx.day) ? tx.day.slice(0, 7) : ""; }
       function monthLabel(key) {
         if (!monthPattern.test(key)) return key;
@@ -735,8 +849,7 @@
         url.searchParams.set("month", state.month);
         url.searchParams.set("year", state.year);
         url.searchParams.set("owner", state.owner);
-        if (state.currency) url.searchParams.set("currency", state.currency);
-        else url.searchParams.delete("currency");
+        url.searchParams.delete("currency");
         history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
       }
       function appendMoreButton(host, remaining, label, onClick) {
@@ -1085,7 +1198,8 @@
         const body = await response.json().catch(() => null);
         if (!response.ok) {
           const reason = body && typeof body.detail === "string" ? body.detail : body && typeof body.error === "string" ? body.error : "";
-          throw new Error(`El servidor respondió ${response.status} ${response.statusText || ""}${reason ? `: ${reason}` : ""}`.trim());
+          // The server's own reason says what to fix; the status code only when there is none.
+          throw new Error(reason ? reason.replace(/\.+$/, "") : `El servidor respondió ${response.status} ${response.statusText || ""}`.trim());
         }
         return body || {};
       }
@@ -1107,7 +1221,7 @@
           }
           return false;
         } catch (error) {
-          showMessage(`No se guardó el cambio: ${error.message}. Tus datos no se han confirmado.`, "error");
+          showMessage(`No se guardó el cambio: ${error.message}. Nada cambió: revisa el motivo y vuelve a intentar.`, "error");
           return false;
         } finally {
           setBusy(false);
@@ -1139,18 +1253,9 @@
         const failures = safeArray(data.extraction_failures);
         $("#extraction-warning").hidden = failures.length === 0;
         $("#extraction-warning").textContent = `${failures.length} aviso(s) sin extraer: faltan movimientos en los totales. Revisa Decisión; la cobertura sigue parcial.`;
-        const currencies = Array.from(new Set(safeArray(data.transactions).map(tx => tx && tx.currency).filter(currency => typeof currency === "string" && currency)));
-        if (typeof data.config.currency === "string" && data.config.currency && !currencies.includes(data.config.currency)) currencies.unshift(data.config.currency);
-        if (!currencies.length) currencies.push(typeof data.config.currency === "string" && data.config.currency ? data.config.currency : "MXN");
-        if (!currencies.includes(state.currency)) state.currency = currencies.includes(data.config.currency) ? data.config.currency : currencies[0];
-        const currencySelect = $("#currency-select");
-        currencySelect.replaceChildren();
-        currencies.forEach(currency => {
-          const option = el("option", "", currency);
-          option.value = currency;
-          option.selected = currency === state.currency;
-          currencySelect.append(option);
-        });
+        // Everything is shown in the close's currency: dollar movements count with the rate the
+        // person set, and those still without one wait in Decisión.
+        state.currency = typeof data.config.currency === "string" && data.config.currency ? data.config.currency : "COP";
         const monthKeys = new Set([currentMonth()]);
         safeArray(data.transactions).forEach(tx => { const month = tx && monthOf(tx); if (month && monthPattern.test(month)) monthKeys.add(month); });
         safeArray(data.coverage).forEach(entry => { if (entry && monthPattern.test(entry.month)) monthKeys.add(entry.month); });
@@ -1340,7 +1445,41 @@
           figure("rendimientos", check.returns_minor)
         ].filter(Boolean).join(" · ");
       }
+      // Conciliation against the notices, as a pill: green when every movement matched,
+      // orange when some only came in the statement. Nothing for a statement without movements.
+      function conciliationPill(check) {
+        if (!Number.isSafeInteger(check.movements) || check.movements <= 0) return null;
+        const missing = Number.isSafeInteger(check.missing) ? check.missing : 0;
+        const pill = el("span", `status-pill ${missing ? "partial" : "reconciled"}`,
+          missing ? `⚠ ${missing} ${missing === 1 ? "pendiente" : "pendientes"}` : `✓ ${check.matched}/${check.movements}`);
+        pill.setAttribute("aria-label", missing
+          ? `${missing} de ${check.movements} movimientos no llegaron por aviso`
+          : `Los ${check.movements} movimientos coinciden con los avisos`);
+        return pill;
+      }
+      function statementRow(check) {
+        const row = el("div", "statement-row");
+        const name = el("span", "statement-name", `${productNames[check.product] || check.product}${check.suffix ? ` *${check.suffix}` : ""}`);
+        if (state.owner === "hogar") name.append(ownerTag(check.owner));
+        row.append(name);
+        const pill = conciliationPill(check);
+        const hasBalance = Number.isSafeInteger(check.balance_minor);
+        if (hasBalance) row.append(el("strong", "", formatMoney(check.balance_minor, "COP")));
+        else if (pill) row.append(pill);
+        const details = [];
+        const figures = investmentFigures(check);
+        if (figures) details.push(figures);
+        if (check.missing) details.push(`${check.matched} de ${check.movements} coinciden con los avisos; ${check.missing} ${check.missing === 1 ? "entró" : "entraron"} como ${check.missing === 1 ? "pendiente" : "pendientes"}`);
+        if (details.length || (hasBalance && pill)) {
+          const detail = el("div", "statement-detail", details.join(" · "));
+          if (hasBalance && pill && !check.missing) detail.prepend(pill, document.createTextNode(details.length ? " " : ""));
+          row.append(detail);
+        }
+        return row;
+      }
       // Each owner sees the statements of their own mailbox; the household view sees them all.
+      // One block per kind: cards and accounts (reconciled against the notices), investments
+      // and credits (each with the total of the latest known balances up to this month).
       function renderStatements() {
         const checks = safeArray(state.data && state.data.statement_checks).filter(check => check && typeof check.period_end === "string" && inOwnerView(check));
         const card = $("#statements-card");
@@ -1351,31 +1490,35 @@
         checks.filter(check => check.period_end <= monthEnd && Number.isSafeInteger(check.balance_minor)).forEach(check => {
           latest.set(`${check.owner}|${check.product}|${check.suffix}`, check);
         });
-        const balances = $("#statement-balances");
-        balances.replaceChildren();
-        const groups = [["Inversiones", investmentProducts], ["Créditos", ["CREDITO", "HIPOTECARIO"]]];
-        groups.forEach(([label, products]) => {
-          const rows = Array.from(latest.values()).filter(check => products.includes(check.product));
-          if (!rows.length) return;
-          const total = rows.reduce((sumValue, check) => sumValue + check.balance_minor, 0);
-          const row = el("div", "rank-row");
-          row.append(el("span", "legend-label", `${label} · ${rows.length} ${rows.length === 1 ? "producto" : "productos"} · saldo al ${formatDate(rows.map(check => check.period_end).sort().pop())}`), el("strong", "", formatMoney(total, "COP")));
-          balances.append(row);
-        });
-        if (!balances.childElementCount) balances.append(el("div", "empty-state", "Sin saldos de extractos hasta este mes."));
         const inMonth = checks.filter(check => check.period_end.slice(0, 7) === state.month);
-        const host = $("#statement-checks");
+        const credits = ["CREDITO", "HIPOTECARIO"];
+        const sections = [
+          ["Tarjetas y cuentas", "Conciliación de los extractos del mes con los avisos", check => !investmentProducts.includes(check.product) && !credits.includes(check.product), false],
+          ["Inversiones", "", check => investmentProducts.includes(check.product), true],
+          ["Créditos", "", check => credits.includes(check.product), true]
+        ];
+        const host = $("#statement-sections");
         host.replaceChildren();
-        if (!inMonth.length) { host.append(el("p", "hint", "No hay extractos con corte en este mes.")); return; }
-        inMonth.forEach(check => {
-          const row = el("div", "rank-row");
-          const name = `${productNames[check.product] || check.product}${check.suffix ? ` *${check.suffix}` : ""}${state.owner === "hogar" ? ` · ${ownerLabel(check.owner)}` : ""}`;
-          const figures = investmentFigures(check);
-          const status = check.missing ? `${check.missing} no llegaron por aviso (importados como pendientes)` : "todo coincide con los avisos";
-          row.append(el("span", "legend-label", figures ? `${name} · ${figures}` : `${name} · ${check.matched}/${check.movements} coinciden · ${status}`));
-          if (Number.isSafeInteger(check.balance_minor)) row.append(el("strong", "", formatMoney(check.balance_minor, "COP")));
-          host.append(row);
+        sections.forEach(([label, note, belongs, withTotal]) => {
+          const rows = inMonth.filter(belongs);
+          const known = withTotal ? Array.from(latest.values()).filter(belongs) : [];
+          if (!rows.length && !known.length) return;
+          const section = el("section", "statement-section");
+          const head = el("div", "statement-head");
+          head.append(el("h4", "", label));
+          if (known.length) {
+            const total = known.reduce((sumValue, check) => sumValue + check.balance_minor, 0);
+            head.append(el("strong", "", formatMoney(total, "COP")),
+              el("p", "", `${known.length} ${known.length === 1 ? "producto" : "productos"} · saldo al ${formatDate(known.map(check => check.period_end).sort().pop())}`));
+          } else if (note) head.append(el("p", "", note));
+          section.append(head);
+          const list = el("div", "statement-rows");
+          rows.forEach(check => list.append(statementRow(check)));
+          if (!rows.length) list.append(el("p", "hint", "Sin extractos con corte en este mes."));
+          section.append(list);
+          host.append(section);
         });
+        if (!host.childElementCount) host.append(el("p", "hint", "No hay extractos con corte en este mes."));
       }
 
       // Manuela's short amounts: 950, 62k, 1,5M.
@@ -1409,8 +1552,8 @@
           if (date >= 1 && date <= days) grouped.set(date, (grouped.get(date) || 0) + tx.amount_minor);
         }
         const busiest = Math.max(1, ...grouped.values());
-        // A selected day belongs to one month, owner and currency; any change closes it.
-        const key = `${state.month}|${state.owner}|${state.currency}`;
+        // A selected day belongs to one month and owner; any change closes it.
+        const key = `${state.month}|${state.owner}`;
         if (!state.selectedDay || state.selectedDay.key !== key || !grouped.has(state.selectedDay.day)) state.selectedDay = null;
         for (let day = 1; day <= days; day++) {
           const date = new Date(year, month, day);
@@ -1679,20 +1822,81 @@
           Array.from(groups).sort((a, b) => a[0].localeCompare(b[0], "es")).forEach(([category, rows]) => {
             const detail = el("details", "category-detail");
             detail.dataset.category = category;
+            // Categories stay open, and the movement being edited stays open, after a save reloads the panel.
+            const openKey = `${heading}|${category}`;
+            detail.open = state.openCategories.has(openKey);
+            detail.addEventListener("toggle", () => {
+              if (detail.open) state.openCategories.add(openKey);
+              else state.openCategories.delete(openKey);
+            });
             const pending = rows.filter(tx => tx.decision == null).length;
             detail.append(el("summary", "", `${category} · ${totalOf(rows)} · ${rows.length} movimientos${pending ? ` · ${pending} por decidir` : ""}`));
             const body = el("div", "detail-rows");
             rows.sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
-                const row = el("div", "detail-row");
-                const text = el("span", "", `${tx.day ? formatDate(tx.day) : "Sin fecha"} · ${itemText(tx.merchant)} · ${statusOf(tx)}`);
-                appendFlags(text, tx);
-                row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
-              body.append(row);
+              const row = el("button", "detail-row");
+              row.type = "button";
+              row.dataset.txId = tx.id;
+              row.setAttribute("aria-expanded", "false");
+              row.setAttribute("aria-label", `Cambiar ${itemText(tx.merchant)} del ${tx.day ? formatDate(tx.day) : "día sin fecha"}, ${formatMoney(tx.amount_minor)}, ${statusOf(tx)}`);
+              const text = el("span", "", `${tx.day ? formatDate(tx.day) : "Sin fecha"} · ${itemText(tx.merchant)} · ${statusOf(tx)}`);
+              appendFlags(text, tx);
+              const amount = el("span", "detail-amount");
+              const chevron = el("span", "detail-chevron", "▾");
+              chevron.setAttribute("aria-hidden", "true");
+              amount.append(el("strong", "", formatMoney(tx.amount_minor)), chevron);
+              row.append(text, amount);
+              const editor = el("div", "detail-editor");
+              editor.hidden = true;
+              const open = () => {
+                // The month views work on a copy converted to pesos; the card edits the stored
+                // movement, so a dollar purchase keeps its currency and rate.
+                const stored = safeArray(state.data.transactions).find(item => item && item.id === tx.id) || tx;
+                editor.replaceChildren(makeDecisionCard(stored, stored.decision != null, () => focusSavedMovement(tx.id)));
+                editor.hidden = false;
+                row.setAttribute("aria-expanded", "true");
+              };
+              row.addEventListener("click", () => {
+                if (editor.hidden) {
+                  // One movement at a time: opening this one closes the one that was open.
+                  document.querySelectorAll('#category-details button.detail-row[aria-expanded="true"]')
+                    .forEach(other => { if (other !== row) other.click(); });
+                  open();
+                  state.editingTx = tx.id;
+                } else {
+                  editor.hidden = true;
+                  editor.replaceChildren();
+                  row.setAttribute("aria-expanded", "false");
+                  if (state.editingTx === tx.id) state.editingTx = null;
+                }
+              });
+              if (state.editingTx === tx.id) open();
+              body.append(row, editor);
             });
             detail.append(body);
             host.append(detail);
           });
         });
+      }
+
+      // After a save from the category detail: close the card and keep the view on that
+      // movement, in its category even if the save moved it to another one.
+      function focusSavedMovement(id) {
+        state.editingTx = null;
+        const row = Array.from(document.querySelectorAll("#category-details button.detail-row"))
+          .find(candidate => candidate.dataset.txId === id);
+        if (!row) return;
+        const editor = row.nextElementSibling;
+        if (editor && editor.classList.contains("detail-editor")) {
+          editor.hidden = true;
+          editor.replaceChildren();
+        }
+        row.setAttribute("aria-expanded", "false");
+        const detail = row.closest("details");
+        if (detail) detail.open = true;
+        row.classList.add("just-saved");
+        setTimeout(() => row.classList.remove("just-saved"), 2500);
+        row.focus({ preventScroll: true });
+        row.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
       }
 
       function renderYear() {
@@ -1738,6 +1942,7 @@
         const pendingIncomes = items.filter(tx => tx.decision == null && tx.kind === "income");
         const coverage = renderYearTable(buckets, bucketTotal);
         renderYearIncomeChart(buckets, bucketTotal);
+        renderYearBalances();
         renderYearChart(buckets);
 
         // Same four headline figures as the month; everything else goes in the slim row below.
@@ -1808,6 +2013,207 @@
       }
 
       // Income next to spending for each month, as in Manuela's yearly view.
+      // How a balance moved, in words: the sign alone is easy to miss.
+      // Coloured like the year table's balance: green when it helps (investments up, debt
+      // down), red when it hurts. The words carry the direction too, not only the colour.
+      // A line that starts with it begins in uppercase; after « · » it continues a sentence.
+      function balanceChange(amount, upIsGood, startsLine = false) {
+        const text = !amount ? "sin cambio" : `${amount > 0 ? "subió" : "bajó"} ${formatMoney(Math.abs(amount), "COP")}`;
+        const shown = startsLine ? capitalize(text) : text;
+        if (!amount) return el("span", "balance-change", shown);
+        return el("span", `balance-change ${amount > 0 === upIsGood ? "positive" : "negative"}`, shown);
+      }
+
+      // Investments and credits over the year. Each group has one chart: its total by default,
+      // or the product chosen in its list. A product's month-end balance is its latest statement
+      // up to that month; only products with a statement in the year count.
+      function renderYearBalances() {
+        const card = $("#balances-card");
+        const checks = safeArray(state.data && state.data.statement_checks).filter(check =>
+          check && typeof check.period_end === "string" && Number.isSafeInteger(check.balance_minor) && inOwnerView(check));
+        const yearEnd = `${state.year}-12-31`;
+        // Each group has its own colour, apart from the blue (income) and orange (spending) of
+        // the chart above. Teal has less contrast on the light surface, so its line is thicker.
+        const groups = [
+          ["investments", "#investment-balances", "Inversiones", investmentProducts, "--s3", 3, true],
+          ["credits", "#credit-balances", "Créditos", ["CREDITO", "HIPOTECARIO"], "--s7", 2, false]
+        ];
+        const latestBy = (list, end) => list.filter(check => check.period_end <= end).pop();
+        const nameOf = check => `${productNames[check.product] || check.product}${check.suffix ? ` *${check.suffix}` : ""}`;
+        const current = currentMonth();
+        const months = [];
+        for (let index = 0; index < 12; index++) {
+          const month = `${state.year}-${String(index + 1).padStart(2, "0")}`;
+          if (month <= current) months.push({ index, month });
+        }
+        let shown = 0;
+        groups.forEach(([group, selector, label, products, colorName, stroke, upIsGood]) => {
+          const host = $(selector);
+          host.replaceChildren();
+          host.hidden = true;
+          host.style.setProperty("--balance-color", `var(${colorName})`);
+          const byProduct = new Map();
+          checks.filter(check => products.includes(check.product) && check.period_end <= yearEnd).forEach(check => {
+            const key = `${check.owner}|${check.product}|${check.suffix}`;
+            if (!byProduct.has(key)) byProduct.set(key, []);
+            byProduct.get(key).push(check);
+          });
+          const series = Array.from(byProduct, ([key, list]) => ({ key, list: list.sort((a, b) => a.period_end.localeCompare(b.period_end)) }))
+            .filter(({ list }) => list[list.length - 1].period_end.startsWith(`${state.year}-`));
+          if (!series.length) return;
+          shown++;
+          host.hidden = false;
+          const startOf = list => latestBy(list, `${Number(state.year) - 1}-12-31`) || list.find(check => check.period_end.startsWith(`${state.year}-`));
+          const endOf = list => list[list.length - 1];
+          const start = series.reduce((total, { list }) => total + startOf(list).balance_minor, 0);
+          const end = series.reduce((total, { list }) => total + endOf(list).balance_minor, 0);
+          const lastDate = series.map(({ list }) => endOf(list).period_end).sort().pop();
+          const head = el("div", "statement-head");
+          head.append(el("h4", "", label), el("strong", "", formatMoney(end, "COP")),
+            el("p", ""));
+          head.lastChild.append(`Saldo al ${formatDate(lastDate)} · `, balanceChange(end - start, upIsGood), " en el año");
+          host.append(head);
+
+          const chosen = series.find(({ key }) => key === state.balanceFocus[group]);
+          if (!chosen) state.balanceFocus[group] = null;
+          const focus = el("div", "balance-focus");
+          if (chosen) {
+            const back = el("button", "link-button", "Ver total");
+            back.type = "button";
+            back.addEventListener("click", () => { state.balanceFocus[group] = null; renderYearBalances(); });
+            focus.append(el("span", "", `Mostrando ${nameOf(endOf(chosen.list))}`), back);
+          } else if (state.balanceListOpen[group]) {
+            focus.append(el("span", "", `Total de ${label.toLowerCase()} · toca un producto para ver solo el suyo`));
+          }
+          if (focus.childElementCount) host.append(focus);
+          // Total: a month counts the products known by then. The month a product starts to
+          // count is marked, so its arrival is not read as money moving.
+          // The month each product starts to count in the total, when the total already had
+          // other products: that month's jump is its arrival, not money coming in.
+          const firstKnown = ({ list }) => months.find(({ month }) => latestBy(list, `${month}-31`));
+          const totalStart = series.map(firstKnown).filter(Boolean).map(({ index }) => index).sort((a, b) => a - b)[0];
+          const arrivals = new Map();
+          series.forEach(item => {
+            const known = firstKnown(item);
+            if (known && known.index > totalStart) arrivals.set(item.key, known.month);
+          });
+          const points = [];
+          months.forEach(({ index, month }) => {
+            const included = chosen ? [chosen] : series;
+            const known = included.map(({ list }) => latestBy(list, `${month}-31`)).filter(Boolean);
+            if (!known.length) return;
+            points.push({
+              index, month, total: known.reduce((total, check) => total + check.balance_minor, 0), count: known.length,
+              arrived: chosen ? [] : series.filter(({ key }) => arrivals.get(key) === month).map(({ list }) => nameOf(endOf(list)))
+            });
+          });
+          host.append(balanceChart(points, chosen ? nameOf(endOf(chosen.list)) : label, cssColor(colorName), stroke));
+
+          // The products stay folded until asked for; folding them goes back to the total.
+          const details = el("details", "balance-products");
+          details.open = state.balanceListOpen[group];
+          details.append(el("summary", "", `${series.length} ${series.length === 1 ? "producto" : "productos"}`));
+          details.addEventListener("toggle", () => {
+            if (details.open === state.balanceListOpen[group]) return;
+            state.balanceListOpen[group] = details.open;
+            if (!details.open) state.balanceFocus[group] = null;
+            renderYearBalances();
+          });
+          const list = el("div", "statement-rows");
+          series.forEach(({ key, list: items }) => {
+            const first = startOf(items), last = endOf(items);
+            const row = el("button", "statement-row balance-product");
+            row.type = "button";
+            row.setAttribute("aria-pressed", String(chosen != null && chosen.key === key));
+            const name = el("span", "statement-name", nameOf(last));
+            if (state.owner === "hogar") name.append(ownerTag(last.owner));
+            const since = first.period_end < `${state.year}-01-01` ? "en el año" : `desde el ${formatDate(first.period_end)}`;
+            row.append(name, el("strong", "", formatMoney(last.balance_minor, "COP")),
+              el("span", "statement-detail"));
+            row.lastChild.append(balanceChange(last.balance_minor - first.balance_minor, upIsGood, true), ` ${since} · al ${formatDate(last.period_end)}`);
+            // Its arrival is the hollow point of the total: say so where the product is.
+            if (arrivals.has(key)) row.append(el("span", "balance-note", `Se suma al total desde ${monthLabel(arrivals.get(key))}; ese salto no es dinero que entró.`));
+            row.addEventListener("click", () => {
+              state.balanceFocus[group] = state.balanceFocus[group] === key ? null : key;
+              renderYearBalances();
+            });
+            list.append(row);
+          });
+          details.append(list);
+          host.append(details);
+        });
+        card.hidden = state.currency !== "COP" || shown === 0;
+        // With one group (for example Manuela, without credits) it is centred, not left half-empty.
+        card.querySelector(".balance-grid").classList.toggle("single", shown === 1);
+      }
+
+      // Round axis steps (1, 2 or 5 times a power of ten) that cover the values.
+      function niceTicks(low, high, count = 4) {
+        const span = Math.max(high - low, Math.abs(high) * .02, 100);
+        const raw = span / count;
+        const power = 10 ** Math.floor(Math.log10(raw));
+        const step = [1, 2, 5, 10].map(factor => factor * power).find(candidate => candidate >= raw);
+        const first = Math.floor(low / step) * step;
+        const last = Math.ceil(high / step) * step;
+        const ticks = [];
+        for (let value = first; value <= last + step / 2; value += step) ticks.push(value);
+        return ticks.length > 1 ? ticks : [first, first + step];
+      }
+
+      // One series: the title above names it, so there is no legend. The scale starts at a round
+      // value near the lowest balance, so monthly changes show; the axis says where it starts.
+      function balanceChart(points, name, color, stroke) {
+        const wrap = el("div", "chart-wrap");
+        if (!points.length) { wrap.append(el("div", "empty-state", "Sin saldos este año.")); return wrap; }
+        const width = 520, height = 200, left = 104, right = 12, top = 14, bottom = 30;
+        const chartWidth = width - left - right, chartHeight = height - top - bottom;
+        const ticks = niceTicks(Math.min(...points.map(point => point.total)), Math.max(...points.map(point => point.total)));
+        const min = ticks[0], max = ticks[ticks.length - 1];
+        const yOf = value => top + chartHeight * (1 - (value - min) / (max - min));
+        const xOf = index => left + chartWidth * (index + .5) / 12;
+        const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, class: "chart balance-chart", role: "img", "aria-label": `Línea del saldo mensual de ${name} en ${state.year}` });
+        const title = svgEl("title"); title.textContent = `${name}: saldo al cierre de cada mes de ${state.year}`; svg.append(title);
+        ticks.forEach(value => {
+          const y = yOf(value);
+          svg.append(svgEl("line", { x1: left, y1: y, x2: width - right, y2: y, class: "chart-grid" }));
+          const axis = axisAmount(Math.round(value));
+          axis.setAttribute("x", String(left - 8));
+          axis.setAttribute("y", String(y + 4));
+          axis.setAttribute("text-anchor", "end");
+          svg.append(axis);
+        });
+        svg.append(svgEl("polyline", {
+          points: points.map(point => `${xOf(point.index)},${yOf(point.total)}`).join(" "),
+          fill: "none", stroke: color, "stroke-width": stroke, "stroke-linejoin": "round", "stroke-linecap": "round"
+        }));
+        // A hollow point marks the month a product starts to count.
+        points.forEach(point => svg.append(svgEl("circle", point.arrived.length
+          ? { cx: xOf(point.index), cy: yOf(point.total), r: 5, fill: cssColor("--surf"), stroke: color, "stroke-width": 2 }
+          : { cx: xOf(point.index), cy: yOf(point.total), r: 4, fill: color, stroke: cssColor("--surf"), "stroke-width": 2 })));
+        const current = currentMonth();
+        for (let index = 0; index < 12; index++) {
+          const month = `${state.year}-${String(index + 1).padStart(2, "0")}`;
+          const axis = svgEl("text", { x: xOf(index), y: height - 10, "text-anchor": "middle", class: month === current ? "axis-label current" : "axis-label" });
+          axis.textContent = monthNames[index].slice(0, 3);
+          svg.append(axis);
+        }
+        // One column per month with a point: a guide line and its balance on hover, touch or focus.
+        const guide = svgEl("line", { x1: 0, y1: top, x2: 0, y2: top + chartHeight, stroke: cssColor("--mut"), "stroke-width": 1, visibility: "hidden" });
+        svg.append(guide);
+        points.forEach(point => {
+          const hit = svgEl("rect", { x: left + chartWidth * point.index / 12, y: top, width: chartWidth / 12, height: chartHeight, fill: "transparent" });
+          const products = point.count > 1 ? ` · ${point.count} productos` : "";
+          setTip(hit, `${capitalize(monthLabel(point.month))}: ${formatMoney(point.total, "COP")}${products}${point.arrived.length ? ` · empieza a contar ${point.arrived.join(" y ")}` : ""}`);
+          const show = () => { guide.setAttribute("x1", xOf(point.index)); guide.setAttribute("x2", xOf(point.index)); guide.setAttribute("visibility", "visible"); };
+          hit.addEventListener("pointerenter", show);
+          hit.addEventListener("pointerleave", () => guide.setAttribute("visibility", "hidden"));
+          jumpToMonth(hit, point.month);
+          svg.append(hit);
+        });
+        wrap.append(svg);
+        return wrap;
+      }
+
       function renderYearIncomeChart(buckets, spendOf) {
         const host = $("#year-income-chart");
         host.replaceChildren();
@@ -1827,7 +2233,8 @@
           svg.append(label);
         }
         const band = chartWidth / 12;
-        const colors = [cssColor("--s6"), cssColor("--s2")];
+        // Blue for income and orange for spending: a pair that stays apart with red-green colour blindness.
+        const colors = [cssColor("--s1"), cssColor("--s2")];
         const current = currentMonth();
         buckets.forEach((bucket, index) => {
           const barWidth = band * .34;
@@ -1926,7 +2333,13 @@
         const coverageByMonth = new Map(safeArray(state.data.coverage).filter(entry => entry && typeof entry.month === "string").map(entry => [entry.month, entry]));
         const importedMonths = new Set(transactions().map(monthOf).filter(Boolean));
         const table = document.createElement("table");
-        table.append(el("caption", "", `Importes en ${state.currency}. Un guion (—) significa que no hubo movimientos de ese tipo, nunca gasto cero.`));
+        const tableNote = `Importes en ${state.currency}. Un guion (—) significa que no hubo movimientos de ese tipo, nunca gasto cero.`;
+        // The caption names the table for screen readers; the visible note stays outside the
+        // sideways scroll, so a phone shows it whole.
+        table.append(el("caption", "", tableNote));
+        const visibleNote = el("p", "table-note", tableNote);
+        visibleNote.setAttribute("aria-hidden", "true");
+        host.append(visibleNote);
         const head = document.createElement("thead");
         const header = document.createElement("tr");
         const columns = ["Mes", "Gasto", "Personal", "Familiar", "Abonos", "Ingresos", "Balance", "Inversiones", "Efectivo", "Pendiente", "Cobertura"];
@@ -2088,6 +2501,7 @@
 
       function renderDecisions() {
         loadSuggestions();
+        loadRuleProposals();
         renderCardQuestions();
         const failures = safeArray(state.data.extraction_failures);
         $("#extraction-review").hidden = failures.length === 0;
@@ -2140,12 +2554,11 @@
           el("strong", "", String(pending.length)),
           el("small", "", pending.length
             ? `${pending.length === 1 ? "destino" : "destinos"} por decidir · ${pendingMovements} ${pendingMovements === 1 ? "movimiento" : "movimientos"} · ${formatMoney(pendingAmount)} sin sumar al gasto`
-            : "No hay destinos por decidir."),
-          ownerProgress()
+            : "No hay destinos por decidir.")
         );
         const host = $("#pending-list");
         host.replaceChildren();
-        if (!pending.length) host.append(el("div", "empty-state", "No hay movimientos pendientes para esta moneda."));
+        if (!pending.length) host.append(el("div", "empty-state", "No hay movimientos pendientes."));
         pending.slice(0, state.pendingLimit).forEach(entry => host.append(makeGroupCard(entry, false)));
         focusNextPending(host, pending.length);
         appendMoreButton(
@@ -2162,31 +2575,6 @@
           () => { state.historyLimit += decisionPageSize; renderDecisions(); }
         );
         renderRules();
-      }
-
-      // Pending movements of each owner in the selected currency, as buttons that open that owner's view.
-      function ownerProgress() {
-        const counts = { santiago: 0, manuela: 0 };
-        safeArray(state.data.transactions).forEach(tx => {
-          if (tx && tx.decision == null && tx.owner in counts && (
-            txCurrency(tx) === state.currency || (state.currency === "COP" && txCurrency(tx) === "USD")
-          )) counts[tx.owner] += 1;
-        });
-        const line = el("div", "owner-progress");
-        line.setAttribute("role", "group");
-        line.setAttribute("aria-label", "Pendientes por titular");
-        Object.entries(counts).forEach(([owner, count]) => {
-          const button = el("button", "chip", `${ownerLabel(owner)}: ${count}`);
-          button.type = "button";
-          button.setAttribute("aria-pressed", String(state.owner === owner));
-          button.setAttribute("aria-label", `${ownerLabel(owner)}: ${count} ${count === 1 ? "movimiento" : "movimientos"} por decidir. Ver solo los suyos.`);
-          button.addEventListener("click", () => {
-            const target = document.querySelector(`#owner-switch button[data-owner="${owner}"]`);
-            if (target) target.click();
-          });
-          line.append(button);
-        });
-        return line;
       }
 
       // After a decision, keyboard and screen focus move to the card now in the same place.
@@ -2220,6 +2608,27 @@
           ? state.data.category_suggestions : {};
         categorySuggestions = Object.fromEntries(Object.entries(raw).filter(([, item]) =>
           item && typeof item.category === "string" && ["rule", "history", "ollama"].includes(item.source)));
+      }
+      // Movement id -> {decision, category} a rule would take if the USD movement had a rate.
+      let ruleProposals = {};
+      function loadRuleProposals() {
+        const raw = state.data && typeof state.data.rule_proposals === "object" && state.data.rule_proposals
+          ? state.data.rule_proposals : {};
+        ruleProposals = Object.fromEntries(Object.entries(raw).filter(([, item]) =>
+          item && typeof item.decision === "string" && decidedValues.has(item.decision)));
+      }
+      // The rule's choice, shown on the card: the person only adds the rate and confirms.
+      function proposalNote(decision, options) {
+        const option = options.find(([value]) => value === decision);
+        if (!option) return null;
+        const note = el("p", "hint", `Tu regla elige «${option[1]}». Solo falta la tasa: escríbela y pulsa «${option[1]}».`);
+        note.dataset.ruleProposal = decision;
+        return note;
+      }
+      function markProposed(actions, decision) {
+        actions.querySelectorAll("button[data-decision]").forEach(button => {
+          if (button.dataset.decision === decision) button.classList.add("proposed");
+        });
       }
       const suggestionNotes = {
         rule: "Sugerida por tu regla.",
@@ -2339,9 +2748,15 @@
         // One category for every movement when the destination can be decided as an expense:
         // a suggestion shared by all of them, else the category they already share, else
         // "keep each one's" (sends no category). Investment-only choices set their own category.
+        // A rule's choice counts only when every movement of the destination has the same one.
+        const proposals = isPrevious ? [] : entry.rows.map(tx => ruleProposals[tx.id]);
+        const proposalKeys = new Set(proposals.map(item => item ? `${item.decision}|${item.category || ""}` : ""));
+        const proposal = proposals.length && proposals[0] && proposalKeys.size === 1 ? proposals[0] : null;
         let groupCategory = null;
         if (options.some(([decision]) => decision === "personal" || decision === "family")) {
-          const groupSuggestions = entry.rows.map(tx => categorySuggestions[tx.id]);
+          const groupSuggestions = proposal && proposal.category
+            ? entry.rows.map(() => ({ category: proposal.category, source: "rule" }))
+            : entry.rows.map(tx => categorySuggestions[tx.id]);
           const suggestedSet = new Set(groupSuggestions.map(item => item && item.category));
           const suggested = !isPrevious && suggestedSet.size === 1 ? [...suggestedSet][0] : undefined;
           const currentSet = new Set(entry.rows.map(tx => tx.category));
@@ -2366,10 +2781,38 @@
           if (typeof suggested === "string") field.append(suggestionNote(groupSuggestions[0].source));
           card.append(field);
         }
+        // One rate for every dollar movement of the destination; each one can still be changed below.
+        let groupRate = null;
+        const dollars = entry.rows.filter(tx => txCurrency(tx) === "USD");
+        if (state.data.config.currency === "COP" && dollars.length) {
+          const rates = new Set(dollars.map(tx => tx.exchange_rate || ""));
+          const field = el("div", "field decision-category");
+          const label = el("label", "", dollars.length === entry.rows.length
+            ? `Tasa estimada COP por USD para los ${dollars.length} movimientos`
+            : `Tasa estimada COP por USD para los ${dollars.length} movimientos en dólares`);
+          label.htmlFor = `group-rate-${decisionCardSequence++}`;
+          groupRate = document.createElement("input");
+          groupRate.id = label.htmlFor;
+          groupRate.name = "exchange_rate";
+          groupRate.type = "text";
+          groupRate.inputMode = "decimal";
+          groupRate.autocomplete = "off";
+          groupRate.placeholder = "4200,50…";
+          groupRate.value = rates.size === 1 ? [...rates][0] : "";
+          field.append(label, groupRate, el("p", "hint", rates.size > 1
+            ? "Tienen tasas distintas: déjala vacía para conservar la de cada uno. La pones tú; no se consulta ninguna tasa."
+            : "La pones tú; no se consulta ninguna tasa. «No cuenta» no la necesita."));
+          card.append(field);
+        }
+        if (proposal) {
+          const note = proposalNote(proposal.decision, options);
+          if (note) card.append(note);
+        }
         const actions = el("div", "decision-actions");
         options.forEach(([decision, label]) => {
           const button = el("button", `button small${decision === "exclude" ? " danger" : ""}`, label);
           button.type = "button";
+          button.dataset.decision = decision;
           button.setAttribute("aria-pressed", String(entry.rows.every(tx => tx.decision === decision)));
           button.setAttribute("aria-label", `${label}: ${entry.rows.length} movimientos a ${groupTitle(entry)}`);
           button.addEventListener("click", () => {
@@ -2380,10 +2823,12 @@
               scope: isPrevious ? "all" : "pending", remember: remember.checked
             };
             if (groupCategory && groupCategory.value && (decision === "personal" || decision === "family")) payload.category = groupCategory.value;
+            if (groupRate && groupRate.value.trim()) payload.exchange_rate = groupRate.value.trim();
             postJson("/api/decision-group", payload, `Decisión guardada para ${entry.rows.length} movimientos.`);
           });
           actions.append(button);
         });
+        if (proposal) markProposed(actions, proposal.decision);
         if (!options.length) card.append(el("p", "hint", "Estos movimientos no admiten la misma decisión; decide cada uno abajo."));
         const toggle = betweenToggle(entry);
         if (toggle) actions.append(toggle);
@@ -2559,7 +3004,7 @@
         return el("p", "reason", reason);
       }
 
-      function makeDecisionCard(tx, isPrevious) {
+      function makeDecisionCard(tx, isPrevious, onSaved = null) {
         const card = el("article", "decision-card");
         const meta = el("div", "decision-meta");
         meta.append(el("span", "", formatDate(tx.day)), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
@@ -2590,7 +3035,9 @@
           categorySelect.append(option);
         });
         categoryField.append(categoryLabel, categorySelect);
-        const suggested = !isPrevious && !isIncome && tx.decision == null ? categorySuggestions[tx.id] : undefined;
+        const proposal = !isPrevious && tx.decision == null ? ruleProposals[tx.id] : undefined;
+        const suggested = proposal && proposal.category ? { category: proposal.category, source: "rule" }
+          : !isPrevious && !isIncome && tx.decision == null ? categorySuggestions[tx.id] : undefined;
         if (suggested && categories.includes(suggested.category)) {
           categorySelect.value = suggested.category;
           categoryField.append(suggestionNote(suggested.source));
@@ -2646,10 +3093,15 @@
         } else if (tx.kind === "own_transfer" || isExcludedAccount(tx)) {
           card.append(el("p", "hint", "Transferencia propia o cuenta excluida: no puede marcarse Personal."));
         }
+        if (proposal) {
+          const note = proposalNote(proposal.decision, options);
+          if (note) card.append(note);
+        }
         const actions = el("div", "decision-actions");
         options.forEach(([decision, label]) => {
           const button = el("button", `button small${decision === "exclude" ? " danger" : ""}`, label);
           button.type = "button";
+          button.dataset.decision = decision;
           button.setAttribute("aria-pressed", String(tx.decision === decision || (tx.decision === "cash_withdrawal" && decision === "personal")));
           button.addEventListener("click", async () => {
             const payload = { id: tx.id, decision, category: categorySelect.value };
@@ -2657,10 +3109,12 @@
               payload.currency = currencySelect.value;
               payload.exchange_rate = currencySelect.value === "USD" ? rateInput.value.trim() : "";
             }
-            await postJson("/api/decision", payload, isPrevious ? "Decisión actualizada." : "Decisión guardada.");
+            const saved = await postJson("/api/decision", payload, isPrevious ? "Decisión actualizada." : "Decisión guardada.");
+            if (saved && onSaved) onSaved();
           });
           actions.append(button);
         });
+        if (proposal) markProposed(actions, proposal.decision);
         card.append(actions);
         return card;
       }
@@ -2704,13 +3158,6 @@
         renderDecisions();
         syncUrl();
       }));
-      $("#currency-select").addEventListener("change", event => {
-        state.currency = event.target.value;
-        renderDashboard();
-        renderYear();
-        renderDecisions();
-        syncUrl();
-      });
       $("#year-select").addEventListener("change", event => {
         state.year = event.target.value;
         renderYear();
@@ -2764,6 +3211,16 @@
         if (saved === "dark" || saved === "light") document.documentElement.dataset.theme = saved;
       } catch { /* la preferencia del tema es opcional */ }
       applyTheme();
+      // The safety note shows until it is closed once; this browser remembers it.
+      const noteKey = "monthly-close-safety-note-closed";
+      try {
+        if (localStorage.getItem(noteKey) === "1") $("#safety-note").hidden = true;
+      } catch { /* sin almacenamiento local el aviso sigue visible */ }
+      $("#safety-note-close").addEventListener("click", () => {
+        $("#safety-note").hidden = true;
+        try { localStorage.setItem(noteKey, "1"); } catch { /* se oculta solo en esta visita */ }
+        $("#main-content").focus({ preventScroll: true });
+      });
       loadState();
     })();
   </script>

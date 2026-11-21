@@ -157,6 +157,19 @@ def group_of(row: sqlite3.Row | dict) -> str:
     return row["group_key"] or "com:" + merchant_words(row["merchant"]).strip()
 
 
+def merchant_rule_for(row: sqlite3.Row | dict, rules: list[dict]) -> dict | None:
+    """Most specific merchant rule for a pending movement, if any.
+
+    Income rules only match money received and the others only purchases.
+    """
+    words = merchant_words(row["merchant"])
+    matches = [
+        rule for rule in rules if f" {rule['pattern']} " in words
+        and (rule["decision"] == "income") == (row["kind"] == "income")
+    ]
+    return max(matches, key=lambda item: len(item["pattern"])) if matches else None
+
+
 def counterpart_owner(row: sqlite3.Row | dict, accounts: dict[str, str]) -> str | None:
     """Other household member whose account (by its last digits) the movement names."""
     if row["kind"] not in COUNTERPART_KINDS:
@@ -493,16 +506,9 @@ class Store:
             ).fetchall()
         decided = 0
         for row in pending:
-            words = merchant_words(row["merchant"])
-            # The longest matching pattern is the most specific one.
-            # Income rules only decide money received; expense rules only decide purchases.
-            matches = [
-                rule for rule in rules if f" {rule['pattern']} " in words
-                and (rule["decision"] == "income") == (row["kind"] == "income")
-            ]
-            if not matches:
+            rule = merchant_rule_for(row, rules)
+            if rule is None:
                 continue
-            rule = max(matches, key=lambda item: len(item["pattern"]))
             try:
                 self.decide(row["id"], rule["decision"], rule["category"], rule=rule["pattern"])
             except ValueError:
@@ -747,24 +753,31 @@ class Store:
     def decide_group(
         self, owner: str, group: str, decision: str, *,
         pending_only: bool = True, remember: bool = False, category: str | None = None,
+        exchange_rate: str | None = None,
     ) -> int:
         """Apply one person's decision to every movement to a destination, all or nothing.
 
         Each movement passes the same validation as a single decision and gets its own
         audit row. remember also decides later movements to the same destination.
         category, chosen by the person, applies only to Personal or Familiar decisions.
+        exchange_rate, typed by the person, applies to the destination's USD movements;
+        those without it keep their own rate, if they have one.
         """
         if category is not None and decision not in {"personal", "family"}:
             raise ValueError("Solo Gasto personal o Familiar admiten una categoria para todo el destino.")
         owner = owner_id(owner)
         group = clean_text(group, 200)
+        rate = exchange_rate or None
         with self.connect() as db:
             rows = self._group_rows(db, owner, group, pending_only)
             if not rows:
                 raise ValueError("Destino sin movimientos por decidir.")
+            if rate is not None and not any(row["currency"] == "USD" for row in rows):
+                raise ValueError("La tasa solo aplica a movimientos USD en un cierre en COP.")
             for row in rows:
                 self._decide(
                     db, row["id"], decision, category,
+                    exchange_rate=rate if row["currency"] == "USD" else None,
                     audit=("decision-group-local-user", f"{decision}: {group}"),
                 )
             if remember:
@@ -1635,6 +1648,7 @@ class Store:
                 "rules": [
                     dict(row) for row in db.execute("SELECT * FROM merchant_rules ORDER BY pattern")
                 ],
+                "rule_proposals": self._rule_proposals(db),
                 "extraction_failures": [
                     dict(row) for row in db.execute(
                         "SELECT * FROM extraction_failures ORDER BY day,received,message_id",
@@ -1642,6 +1656,40 @@ class Store:
                 ],
                 "card_questions": self.card_questions(),
             }
+
+    @staticmethod
+    def _rule_proposals(db: sqlite3.Connection) -> dict[str, dict]:
+        """Decision a rule would take on pending USD movements that only lack a rate.
+
+        Rules never decide those (the rate is the person's), so the panel shows the
+        rule's decision and category ready for the person to add the rate. A
+        destination rule comes first, as when rules are applied.
+        """
+        pending = db.execute(
+            """SELECT * FROM transactions WHERE decision IS NULL AND currency='USD'
+            AND exchange_rate IS NULL AND """ + NOT_DUPLICATE,
+        ).fetchall()
+        if not pending:
+            return {}
+        group_rules = {
+            (row["owner"], row["group_key"]): row
+            for row in db.execute("SELECT * FROM group_rules WHERE decision IS NOT NULL")
+        }
+        merchant_rules = [dict(row) for row in db.execute("SELECT * FROM merchant_rules")]
+        proposals = {}
+        for row in pending:
+            group_rule = group_rules.get((row["owner"], group_of(row)))
+            if group_rule is not None:
+                proposals[row["id"]] = {
+                    "decision": group_rule["decision"], "category": group_rule["category"], "rule": "destination",
+                }
+            elif row["kind"] in {"purchase", "income"}:
+                rule = merchant_rule_for(row, merchant_rules)
+                if rule is not None:
+                    proposals[row["id"]] = {
+                        "decision": rule["decision"], "category": rule["category"], "rule": rule["pattern"],
+                    }
+        return proposals
 
     def summary(self, month: str, owner: str = "santiago") -> str:
         """Plain-text close of one member, or of the household without money between members."""
