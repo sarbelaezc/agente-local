@@ -653,6 +653,21 @@ y a las futuras.
   eliminan (con auditoría) y la conciliación deja de importarlas.
 - Cada pago entra **pendiente**, con capital, intereses y seguros en la nota, en el
   destino `cr:NNNN`.
+- **Correcciones en el Excel.** El registro manda sobre sus pagos desde el primer
+  extracto. Si corriges en el Excel la fecha o el total de un pago y vuelves a
+  correr `import-credit-ledger`:
+  - El pago anterior se quita del panel, con su ingreso de nómina espejo
+    (`ledger-row-removed`).
+  - El pago corregido entra en su lugar. Si el anterior contaba como Gasto
+    personal o Familiar, el pago pendiente del mismo crédito más cercano en fecha
+    (hasta 10 días) toma esa decisión y categoría (`ledger-correction`).
+  - Si el anterior estaba en «No cuenta», solo se quita.
+  - Un pago que borras del Excel también se quita.
+  - Si solo cambias cómo se reparte un pago (capital, intereses o seguros) sin
+    cambiar su fecha ni su total, conserva su decisión y su nota se actualiza
+    (`ledger-update`).
+  - El resultado dice cuántos pagos se quitaron. El corregido igual debe cuadrar
+    con el banco: si no cuadra, no cambia nada.
 - **Origen del dinero.** Las cuotas quincenales son descuento de nómina; un abono
   a capital en un mes de `bonus_months` es descuento de prima y queda como ingreso
   pendiente; fuera de esos meses salió de tu cuenta y no suma ingreso.

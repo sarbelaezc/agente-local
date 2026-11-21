@@ -844,10 +844,12 @@ def import_credit_ledgers(store: Store, data_dir: Path, preferences: Preferences
         category = config.category if config.category in preferences.categories else preferences.categories[-1]
         result = store.import_credit_ledger(
             config.owner, config.suffix, credit_ledger.events(config, payments, category), config.product,
+            first.replace(day=1).isoformat(),
         )
         lines.append(
             f"Credito *{config.suffix}: {len(payments)} pagos leidos; cuadra con {len(balances) - 1} periodos del banco; "
-            f"{result['imported']} nuevos, {result['replaced']} cuotas del extracto reemplazadas, "
+            f"{result['imported']} nuevos, {result['corrected']} pagos que ya no estan en el registro quitados, "
+            f"{result['replaced']} cuotas del extracto reemplazadas, "
             f"{result['possible_duplicates']} posibles duplicados anotados."
         )
     return lines
