@@ -165,8 +165,8 @@ el total y una pista, con botones que deciden todos sus movimientos a la vez.
 - **Corregir.** «Decisiones anteriores» muestra el historial y permite cambiar
   una decisión. Para volver un movimiento a gasto, elige primero una categoría de
   consumo.
-- La pestaña muestra todos los meses de la moneda elegida (en COP también los
-  movimientos en USD, para ponerles tasa), en tandas de hasta 50.
+- La pestaña muestra todos los meses, también los movimientos en USD (para
+  ponerles tasa), en tandas de hasta 50.
 
 ## Reglas por comercio
 
@@ -246,7 +246,7 @@ En un cierre en COP, un aviso que dice `USD` o `US$` se guarda en dólares; el
 nombre del comercio (por ejemplo, AMAZON MKTPLACE) nunca decide la moneda. Un
 aviso con marcas de COP y USD a la vez se detiene por ambiguo.
 
-1. En **Decisión** (con COP seleccionado también aparecen los USD), escribe la
+1. En **Decisión**, que también muestra los movimientos en USD, escribe la
    **tasa estimada COP por USD** de la fecha del movimiento, por ejemplo `4200,50`
    (punto o coma decimal, sin separador de miles, hasta seis decimales).
 2. Confirma la decisión. El importe en USD queda intacto y se guarda su
@@ -269,9 +269,8 @@ botón. En la tarjeta de un destino, la propuesta aparece solo si todas sus comp
 tienen la misma.
 
 La tarjeta de un destino con varias compras muestra su total en la moneda de cada
-movimiento (por ejemplo `US$ 35,00`), nunca 0,00 COP por falta de tasa. Con COP
-seleccionado, añade el estimado en COP solo si todos sus movimientos en dólares
-tienen tasa.
+movimiento (por ejemplo `US$ 35,00`), nunca 0,00 COP por falta de tasa. Añade
+el estimado en COP solo si todos sus movimientos en dólares tienen tasa.
 
 La tasa la pones tú: no se consulta una tasa externa ni la propone el modelo. Si
 un aviso en USD quedó guardado como COP, comprueba el correo original, cambia
@@ -682,9 +681,12 @@ $env:PYTHONPATH = "src"
 Se abre con `.\scripts\agente-local.ps1` en `http://127.0.0.1:8766`, solo en tu
 equipo. Con `serve -Red` también se puede usar desde tus dispositivos emparejados
 de la red de casa, en `https://<dirección del equipo>:8767/` (ver
-[Paneles desde otros dispositivos](configuracion.md#11-paneles-desde-otros-dispositivos-opcional)). Arriba eliges el titular (**Santiago / Manuela / Hogar**, Hogar por defecto),
-con la moneda al final de la misma fila, y debajo las pestañas **Mes**, **Año** y
-**Decisión**. Esa fila y las pestañas siguen visibles al desplazarte. La
+[Paneles desde otros dispositivos](configuracion.md#11-paneles-desde-otros-dispositivos-opcional)). Arriba eliges el titular (**Santiago / Manuela / Hogar**, Hogar por defecto) y
+debajo las pestañas **Mes**, **Año** y **Decisión**; los dos siguen visibles al
+desplazarte. Todo se muestra en la moneda del cierre (COP): las compras en
+dólares cuentan con la tasa que les pusiste al decidirlas, y las que aún no la
+tienen esperan en **Decisión**, sin sumar a los totales. No hay selector de
+moneda: una vista en USD solo mostraría esas compras sin tasa. La
 vista se guarda en la URL, así que se puede volver a ella. El tema sigue el modo
 claro u oscuro del sistema y el botón «Tema» puede fijar uno.
 
@@ -741,8 +743,7 @@ aviso del formulario de configuración inicial no se puede cerrar.
 - Los botones, selectores y campos tienen al menos 44 px de alto para tocarlos
   sin errores, y los campos usan letra de 16 px para que el teléfono no acerque
   la vista al escribir.
-- La moneda pasa arriba del titular y se va con la página al desplazarte; el
-  titular y las pestañas siguen visibles.
+- El titular y las pestañas siguen visibles al desplazarte.
 - Los botones de una decisión van en dos columnas; si sobra uno, ocupa la fila
   completa.
 - Las listas con barras muestran el nombre completo en su propia línea.

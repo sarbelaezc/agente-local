@@ -359,15 +359,36 @@ def test_owner_switch_and_tabs_stay_at_the_top_while_scrolling(dashboard):
     for locator in (page.locator("#owner-switch"), page.locator(".tabs")):
         box = locator.bounding_box()
         assert box is not None and 0 <= box["y"] < 140
-    # On a phone the currency sits above and scrolls away with the page.
-    assert page.locator("#currency-select").bounding_box()["y"] < 0
-    # On a wide screen it sits at the end of the owner row, which stays at the top.
-    page.set_viewport_size({"width": 1280, "height": 800})
-    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-    owners, currency = page.locator("#owner-switch").bounding_box(), page.locator("#currency-select").bounding_box()
-    assert 0 <= currency["y"] < 140 and abs(currency["y"] + currency["height"] / 2 - owners["y"] - owners["height"] / 2) < 4
-    row = page.locator(".nav-row").bounding_box()
-    assert currency["x"] + currency["width"] >= row["x"] + row["width"] - 2
+
+
+
+def test_amounts_are_always_in_the_close_currency_without_a_currency_selector(dashboard):
+    page, store, month, _ = dashboard
+    # Dollars with a rate count in pesos; an old link asking for USD still shows pesos.
+    store.import_message("usd", [{
+        "id": "usd", "message_id": "usd", "day": month + "-07", "merchant": "TIENDA EN DOLARES",
+        "account": "Tarjeta A", "amount_minor": 1000, "currency": "USD", "category": "Compras",
+        "kind": "purchase", "decision": None, "reason": "Revisar.",
+    }])
+    store.decide("usd", "personal", exchange_rate="4000")
+    page.goto(f"{page.url.split('?')[0]}?month={month}&currency=USD")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    expect(page.locator("#currency-select")).to_have_count(0)
+    assert "COP" in page.locator("#month-metrics").inner_text()
+    assert "currency" not in page.evaluate("Object.fromEntries(new URLSearchParams(location.search))")
+    compras = page.locator('#category-details details[data-category="Compras"]')
+    compras.locator("summary").click()
+    row = compras.locator("button.detail-row").filter(has_text="TIENDA EN DOLARES")
+    expect(row).to_contain_text(re.compile(r"40[.\s]?000,00"))
+    # Its card edits the stored movement: in dollars, with its rate, and saving keeps both.
+    row.click()
+    card = compras.locator(".detail-editor .decision-card")
+    expect(card.get_by_label("Moneda original del aviso", exact=True)).to_have_value("USD")
+    expect(card.locator('input[name="exchange_rate"]')).to_have_value("4000")
+    card.get_by_role("button", name="Familiar", exact=True).click()
+    expect(compras.locator(".detail-editor .decision-card")).to_have_count(0)
+    saved = next(tx for tx in store.state()["transactions"] if tx["id"] == "usd")
+    assert (saved["currency"], saved["exchange_rate"], saved["decision"]) == ("USD", "4000", "family")
 
 
 def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(dashboard):
@@ -383,7 +404,7 @@ def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(d
     assert page.locator("#year-select").input_value() == month[:4]
 
     params = page.evaluate("Object.fromEntries(new URLSearchParams(location.search))")
-    assert params == {"tab": "year", "month": month, "year": month[:4], "currency": "COP", "owner": "hogar"}
+    assert params == {"tab": "year", "month": month, "year": month[:4], "owner": "hogar"}
     page.locator("#tab-decisions").click()
     assert page.evaluate("new URLSearchParams(location.search).get('tab')") == "decisions"
 

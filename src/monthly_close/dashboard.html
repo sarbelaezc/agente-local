@@ -439,15 +439,9 @@
           </div>
           <div id="config-form-host"></div>
         </div>
-        <div class="toolbar" id="currency-slot-narrow">
-          <div class="toolbar-group" id="currency-group">
-            <label class="control-label" for="currency-select">Moneda</label>
-            <span class="select-button"><select id="currency-select" aria-label="Moneda para mostrar"></select></span>
-          </div>
-        </div>
         <p id="extraction-warning" class="hint" role="status" hidden></p>
         <div class="sticky-nav">
-          <div class="nav-row" id="currency-slot-wide">
+          <div class="nav-row">
             <div class="toolbar-group">
               <span class="control-label" id="owner-label">Titular</span>
               <div id="owner-switch" class="owner-switch" role="group" aria-labelledby="owner-label">
@@ -592,7 +586,7 @@
             <div id="history-list" class="decision-list" style="margin-top:12px"></div>
           </details>
         </section>
-        <p class="footer-note">Importes en unidades de la moneda seleccionada. No se combinan monedas. Un mes queda verificado cuando lo revisas a mano o cuando cuadra con los extractos de Santiago.</p>
+        <p class="footer-note">Importes en la moneda del cierre; las compras en dólares cuentan con la tasa que les pones al decidirlas. Un mes queda verificado cuando lo revisas a mano o cuando cuadra con los extractos de Santiago.</p>
       </section>
     </main>
   </div>
@@ -628,7 +622,8 @@
         editingTx: null,
         month: initialMonth && monthPattern.test(initialMonth) ? initialMonth : currentMonth(),
         year: initialYear && /^\d{4}$/.test(initialYear) ? initialYear : String(new Date().getFullYear()),
-        currency: initialParams.get("currency") || "",
+        // Set from the close's configuration; an old link's ?currency= is ignored.
+        currency: "",
         activeTab: ["month", "year", "decisions"].includes(initialTab) ? initialTab : "month",
         owner: ["santiago", "manuela", "hogar"].includes(initialParams.get("owner")) ? initialParams.get("owner") : "hogar",
         busy: false,
@@ -841,8 +836,7 @@
         url.searchParams.set("month", state.month);
         url.searchParams.set("year", state.year);
         url.searchParams.set("owner", state.owner);
-        if (state.currency) url.searchParams.set("currency", state.currency);
-        else url.searchParams.delete("currency");
+        url.searchParams.delete("currency");
         history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
       }
       function appendMoreButton(host, remaining, label, onClick) {
@@ -1246,18 +1240,9 @@
         const failures = safeArray(data.extraction_failures);
         $("#extraction-warning").hidden = failures.length === 0;
         $("#extraction-warning").textContent = `${failures.length} aviso(s) sin extraer: faltan movimientos en los totales. Revisa Decisión; la cobertura sigue parcial.`;
-        const currencies = Array.from(new Set(safeArray(data.transactions).map(tx => tx && tx.currency).filter(currency => typeof currency === "string" && currency)));
-        if (typeof data.config.currency === "string" && data.config.currency && !currencies.includes(data.config.currency)) currencies.unshift(data.config.currency);
-        if (!currencies.length) currencies.push(typeof data.config.currency === "string" && data.config.currency ? data.config.currency : "MXN");
-        if (!currencies.includes(state.currency)) state.currency = currencies.includes(data.config.currency) ? data.config.currency : currencies[0];
-        const currencySelect = $("#currency-select");
-        currencySelect.replaceChildren();
-        currencies.forEach(currency => {
-          const option = el("option", "", currency);
-          option.value = currency;
-          option.selected = currency === state.currency;
-          currencySelect.append(option);
-        });
+        // Everything is shown in the close's currency: dollar movements count with the rate the
+        // person set, and those still without one wait in Decisión.
+        state.currency = typeof data.config.currency === "string" && data.config.currency ? data.config.currency : "COP";
         const monthKeys = new Set([currentMonth()]);
         safeArray(data.transactions).forEach(tx => { const month = tx && monthOf(tx); if (month && monthPattern.test(month)) monthKeys.add(month); });
         safeArray(data.coverage).forEach(entry => { if (entry && monthPattern.test(entry.month)) monthKeys.add(entry.month); });
@@ -1850,7 +1835,10 @@
               const editor = el("div", "detail-editor");
               editor.hidden = true;
               const open = () => {
-                editor.replaceChildren(makeDecisionCard(tx, tx.decision != null, () => focusSavedMovement(tx.id)));
+                // The month views work on a copy converted to pesos; the card edits the stored
+                // movement, so a dollar purchase keeps its currency and rate.
+                const stored = safeArray(state.data.transactions).find(item => item && item.id === tx.id) || tx;
+                editor.replaceChildren(makeDecisionCard(stored, stored.decision != null, () => focusSavedMovement(tx.id)));
                 editor.hidden = false;
                 row.setAttribute("aria-expanded", "true");
               };
@@ -2354,7 +2342,7 @@
         );
         const host = $("#pending-list");
         host.replaceChildren();
-        if (!pending.length) host.append(el("div", "empty-state", "No hay movimientos pendientes para esta moneda."));
+        if (!pending.length) host.append(el("div", "empty-state", "No hay movimientos pendientes."));
         pending.slice(0, state.pendingLimit).forEach(entry => host.append(makeGroupCard(entry, false)));
         focusNextPending(host, pending.length);
         appendMoreButton(
@@ -2954,13 +2942,6 @@
         renderDecisions();
         syncUrl();
       }));
-      $("#currency-select").addEventListener("change", event => {
-        state.currency = event.target.value;
-        renderDashboard();
-        renderYear();
-        renderDecisions();
-        syncUrl();
-      });
       $("#year-select").addEventListener("change", event => {
         state.year = event.target.value;
         renderYear();
@@ -3014,16 +2995,6 @@
         if (saved === "dark" || saved === "light") document.documentElement.dataset.theme = saved;
       } catch { /* la preferencia del tema es opcional */ }
       applyTheme();
-      // Wide screens show the currency at the end of the owner row, which stays at the top;
-      // a phone shows it above, scrolling away, so the fixed bar stays short.
-      const wideNav = window.matchMedia("(min-width: 601px)");
-      const placeCurrency = () => {
-        const slot = $(wideNav.matches ? "#currency-slot-wide" : "#currency-slot-narrow");
-        if ($("#currency-group").parentElement !== slot) slot.append($("#currency-group"));
-        $("#currency-slot-narrow").hidden = wideNav.matches;
-      };
-      if (wideNav.addEventListener) wideNav.addEventListener("change", placeCurrency);
-      placeCurrency();
       // The safety note shows until it is closed once; this browser remembers it.
       const noteKey = "monthly-close-safety-note-closed";
       try {
