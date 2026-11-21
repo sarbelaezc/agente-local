@@ -599,8 +599,8 @@ def backfill_destinations(
 ) -> dict[str, int]:
     """Read every mailbox's notices again (read-only, no Ollama) to store whole destinations.
 
-    Only notices behind outgoing movements without a destination, or with a Bre-B or QR
-    key stored by its last four digits, are read; folders are walked newest first and
+    Only notices behind outgoing movements without a destination, or with an account,
+    Bre-B or QR key stored by its last four digits, are read; folders are walked newest first and
     stop at notices older than the oldest movement needed.
     """
     result = {"notices": 0, "read": 0, "updated": 0, "without_destination": 0}

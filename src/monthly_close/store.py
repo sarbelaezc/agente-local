@@ -1220,8 +1220,8 @@ class Store:
     def set_destinations(self, destinations: dict[str, str]) -> int:
         """Record destinations read again from the original notices.
 
-        Movements without a destination get one, and a Bre-B or QR key stored by its last
-        four digits gets the whole key that ends in them; a destination rule of the short
+        Movements without a destination get one, and an account, Bre-B or QR key stored by
+        its last four digits gets the whole key that ends in them; a destination rule of the short
         key moves to the whole one. Amounts, decisions and categories stay as they are.
         Each change is audited, and transfers to a registered account of the other member
         are then marked as money between members.

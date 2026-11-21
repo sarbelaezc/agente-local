@@ -401,15 +401,17 @@ local):
   sin cambiar su decisión, y cada cambio queda en la auditoría.
 
 **Completar destinos ya importados.** Los avisos nuevos guardan el destino del
-pago al importarse, con la llave Bre-B o QR completa. Para los importados antes:
+pago al importarse, con la cuenta o la llave Bre-B o QR completa. Para los
+importados antes:
 
 ```powershell
 .\scripts\agente-local.ps1 backfill-destinations
 ```
 
 Vuelve a leer, en solo lectura y sin Ollama, los avisos de pagos salientes de
-todos los buzones que no tienen destino o que guardaron una llave Bre-B o QR solo
-por sus últimos 4 dígitos. Completa el destino vacío o cambia la llave corta por
+todos los buzones que no tienen destino o que guardaron una cuenta o una llave
+Bre-B o QR solo por sus últimos 4 dígitos. Completa el destino vacío o cambia la
+llave corta por
 la completa que termina en esos dígitos (auditado como `destination-backfill`);
 una regla del destino de la llave corta pasa a la llave completa
 (`group-rule-key-backfill`). No cambia importes, categorías ni decisiones.
@@ -868,7 +870,7 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 | Frase del aviso | Resultado |
 |---|---|
 | «Pagaste $X en la tarjeta de credito *NNNN desde la cuenta *NNNN, el DD/MM/AAAA» | Pago de tarjeta decidido «No cuenta» (no es gasto: el gasto son las compras). La cuenta queda `Desconocida` |
-| «Transferiste $X [por QR] desde tu cuenta *NNNN a la cuenta *NNNN, el …» | Transferencia pendiente a `cuenta *NNNN`, destino `tr:NNNN` |
+| «Transferiste $X [por QR] desde tu cuenta *NNNN a la cuenta *NNNN, el …» | Transferencia pendiente a `cuenta *NNNN`, destino `tr:` con el número completo que escribe el aviso |
 | «Transferiste $X a la llave @alias o número desde tu cuenta …» (Bre-B) | Destino `bb:@alias` o `bb:` con el número completo de la llave |
 | «Pagaste $X por código QR desde tu cuenta … a la llave …» | Destino `qr:` con la llave completa |
 | «Retiraste $X de tu cuenta de inversión *XXXX …» | Destino `fd:XXXX` |
@@ -879,10 +881,11 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 Las tres últimas frases se reconocen aunque el correo las parta en varias líneas
 (por ejemplo «…hizo» al final de una línea y «un abono por…» en la siguiente).
 
-De las cuentas se guardan solo los últimos 4 dígitos; las llaves Bre-B y QR se
-guardan completas, como en lo importado del panel de Manuela, para que un mismo
-destino tenga la misma llave en avisos e importaciones. Una transferencia propia
-por QR se reconoce por los últimos 4 dígitos de la llave. Si la
+Las cuentas y las llaves Bre-B y QR de destino se guardan completas, como las
+escribe el aviso y como en lo importado del panel de Manuela, para que un mismo
+destino tenga la misma llave en avisos e importaciones. Si el aviso solo escribe
+los últimos dígitos, se guardan esos. Una cuenta propia o del otro titular se
+reconoce por los últimos 4 dígitos. Si la
 frase no dice el destino o es ambigua, no se asigna; no se adivinan formatos. Al
 modelo se le indica además que «transferiste» o «pagaste» nunca es ingreso y que
 el comercio es el destinatario nombrado, no el banco.

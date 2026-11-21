@@ -2,8 +2,8 @@
 
 The key groups payments to the same destination, like Manuela's exported keys:
 ``tr:`` account, ``bb:`` Bre-B key, ``qr:`` QR payment key and ``fd:`` investment fund.
-Account numbers keep only their last four digits; Bre-B and QR keys are kept whole, as
-the bank writes them, so a key is the same destination in every import.
+Account numbers and Bre-B and QR keys are kept whole, as the bank writes them, so a
+destination has the same key in notices and in Manuela's exported records.
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ PATTERNS = (
 )
 
 
-WHOLE_KEYS = {"bb", "qr"}
+WHOLE_KEYS = {"tr", "bb", "qr"}
 
 
 def _key(prefix: str, raw: str) -> str:
@@ -52,7 +52,7 @@ def _key(prefix: str, raw: str) -> str:
 
 
 def is_short_key(key: str) -> bool:
-    """A Bre-B or QR key stored by its last four digits only, before keys were kept whole."""
+    """An account, Bre-B or QR key stored by its last four digits, before keys were kept whole."""
     return key[:3] in {f"{prefix}:" for prefix in WHOLE_KEYS} and bool(re.fullmatch(r"\d{4}", key[3:]))
 
 

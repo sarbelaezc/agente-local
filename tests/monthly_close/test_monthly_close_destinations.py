@@ -23,7 +23,7 @@ def preferences(make_preferences) -> Preferences:
 
 @pytest.mark.parametrize(("text", "expected"), [
     ("Bancolombia: Transferiste $120,000\ndesde tu cuenta *0001 a la cuenta * 12345670007 el 04/08/2026",
-     [(12000000, "tr:0007")]),
+     [(12000000, "tr:12345670007")]),
     ("Transferiste $38,700.00 por QR desde tu cuenta 0001 a la cuenta 7433, el 2026/08/04 10:00",
      [(3870000, "tr:7433")]),
     ("Bancolombia: Transferiste $45,000 a la llave @Tienda.Ficticia desde tu cuenta *0001 a PERSONA FICTICIA el 01/03/2026",
@@ -148,11 +148,13 @@ def test_backfill_turns_short_keys_into_whole_keys_and_moves_their_rule(preferen
     store.configure(preferences.to_dict())
     store.import_message("msg-q", [{**santiago_row("q", 1250000), "message_id": "msg-q", "group_key": "qr:0099"}])
     store.import_message("msg-o", [{**santiago_row("o", 4500000), "message_id": "msg-o", "group_key": "bb:1111"}])
+    store.import_message("msg-t", [{**santiago_row("t", 12000000), "message_id": "msg-t", "group_key": "tr:0007"}])
     store.decide_group("santiago", "qr:0099", "personal", remember=True, category="Compras")
     bodies = {
         "msg-q": "Pagaste $12,500 por codigo QR desde tu cuenta *0001 a la llave 3000000099 el 01/03/2026",
         # The whole key must end in the stored digits: another key is never taken for it.
         "msg-o": "Transferiste $45,000 a la llave 3000002222 desde tu cuenta *0001 a PERSONA el 01/03/2026",
+        "msg-t": "Transferiste $120,000 desde tu cuenta *0001 a la cuenta * 12345670007 el 01/03/2026",
     }
 
     class Reader:
@@ -172,13 +174,14 @@ def test_backfill_turns_short_keys_into_whole_keys_and_moves_their_rule(preferen
 
     monkeypatch.setattr(app, "open_source", fake_source)
     result = app.backfill_destinations(store, tmp_path, {"max_messages": 100}, preferences)
-    assert (result["notices"], result["updated"]) == (2, 1)
+    assert (result["notices"], result["updated"]) == (3, 2)
     rows = {row["id"]: row for row in store.state()["transactions"]}
     assert (rows["q"]["group_key"], rows["q"]["decision"], rows["q"]["category"]) == ("qr:3000000099", "personal", "Compras")
     assert rows["o"]["group_key"] == "bb:1111"
+    assert rows["t"]["group_key"] == "tr:12345670007"  # accounts are kept whole too
     with store.connect() as db:
         rules = [tuple(row) for row in db.execute("SELECT group_key, decision, category FROM group_rules")]
-        audit = db.execute("SELECT value FROM audit WHERE action='destination-backfill'").fetchone()[0]
+        audit = db.execute("SELECT value FROM audit WHERE action='destination-backfill' AND target='q'").fetchone()[0]
     assert rules == [("qr:3000000099", "personal", "Compras")]
     assert audit == "qr:0099 -> qr:3000000099"
     # A later payment to the whole key follows the moved rule.
@@ -244,7 +247,7 @@ def test_transfer_to_an_own_registered_account_is_an_own_transfer(preferences):
     mail = notice("Transferiste $800,000.00 desde tu cuenta 0001 a la cuenta *3000005586 el 09/07/2026 a las 16:50.")
     assert extract(mail, preferences, NoModel())[0]["kind"] == "transfer"
     event = extract(mail, preferences, NoModel(), ["5586"])[0]
-    assert (event["kind"], event["group_key"]) == ("own_transfer", "tr:5586")
+    assert (event["kind"], event["group_key"]) == ("own_transfer", "tr:3000005586")
 
 
 def test_qr_payment_to_a_key_that_is_not_own_is_never_an_own_transfer(preferences):
