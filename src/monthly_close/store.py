@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterator
 
 from shared.local_panel import remote_device
+from monthly_close.destinations import QR_NOT_OWN_REASON
 from monthly_close.domain import (
     COUNTERPART_KINDS, DECISIONS, HOUSEHOLD, INCOME_CATEGORIES, INCOME_KINDS, LOAN_DECISIONS, NON_EXPENSES,
     OWNERS, Preferences, clean_text, owner_id,
@@ -107,6 +108,9 @@ SPECIAL_CATEGORIES = {
 
 # A mailbox movement that may repeat one the same member already brought by file import.
 # It stays pending, and no rule decides it: a person compares both.
+# A corrected payment of a credit register is looked for this many days around the old one,
+# less than a fortnight so it never reaches the next instalment.
+CORRECTION_DAYS = 10
 DUPLICATE_NOTE = "Posible duplicado"
 NOT_DUPLICATE = f"(note IS NULL OR note NOT LIKE '{DUPLICATE_NOTE}%')"
 
@@ -226,6 +230,26 @@ class Store:
                 db.execute("ALTER TABLE audit ADD COLUMN device TEXT")
             if backup is not None:
                 self._audit(db, "migrate-household", self.path.name, backup.name)
+            self._reclassify_qr_own_transfers(db)
+
+    def _reclassify_qr_own_transfers(self, db: sqlite3.Connection) -> int:
+        """Turn QR payments the model called own transfers back into transfers.
+
+        Only a QR key that is not a registered account of the same owner changes; the
+        decision, amount and category stay, and each change is audited.
+        """
+        rows = db.execute(
+            """SELECT id FROM transactions t WHERE kind='own_transfer' AND group_key LIKE 'qr:%'
+            AND NOT EXISTS (SELECT 1 FROM owner_accounts a
+                WHERE a.owner=t.owner AND a.suffix=substr(t.group_key, -4))""",
+        ).fetchall()
+        for row in rows:
+            db.execute(
+                "UPDATE transactions SET kind='transfer', reason=? WHERE id=?",
+                (QR_NOT_OWN_REASON, row["id"]),
+            )
+            self._audit(db, "qr-not-own-transfer", row["id"], "own_transfer -> transfer")
+        return len(rows)
 
     def _backup(self, db: sqlite3.Connection) -> Path:
         """Copy the database next to it before a schema change; never overwrite a copy."""
@@ -889,6 +913,7 @@ class Store:
 
     def import_credit_ledger(
         self, owner: str, suffix: str, events: list[dict], product: str = "CREDITO",
+        since: str | None = None,
     ) -> dict[str, int]:
         """Import a credit's payments from the person's register, in one transaction.
 
@@ -896,6 +921,12 @@ class Store:
         show the last payment of each period. Payments enter pending; account movements
         with the same amount within three days get a note, so a person can mark the
         duplicate as «No cuenta». Repeating the import changes nothing.
+
+        The register is the source of its payments from since on: a payment no longer in
+        it (its date or total was corrected, or the row was removed) is removed from the
+        panel, and the corrected payment takes its decision and category (see
+        _replace_corrected_payments). A payment whose date and total did not change keeps
+        its decision and takes the register's current split and wording.
         """
         owner = owner_id(owner)
         with self.connect() as db:
@@ -911,6 +942,16 @@ class Store:
                 ).rowcount:
                     inserted.append(event)
                     self._audit(db, "ledger-import", event["id"], event["message_id"])
+                elif db.execute(
+                    """UPDATE transactions SET message_id=:message_id, merchant=:merchant, note=:note,
+                    reason=:reason WHERE id=:id AND owner=:owner AND (message_id IS NOT :message_id
+                    OR merchant IS NOT :merchant OR note IS NOT :note OR reason IS NOT :reason)""",
+                    {**event, "owner": owner},
+                ).rowcount:
+                    self._audit(db, "ledger-update", event["id"], event["note"])
+            corrected = self._replace_corrected_payments(
+                db, owner, product, suffix, {event["id"] for event in events}, since,
+            )
             replaced = 0
             for loan in db.execute(
                 "SELECT id FROM transactions WHERE owner=? AND message_id LIKE ?",
@@ -937,7 +978,45 @@ class Store:
                     linked += 1
             self._sync_payroll_income(db)
         self.apply_rules()
-        return {"imported": len(inserted), "replaced": replaced, "possible_duplicates": linked}
+        return {
+            "imported": len(inserted), "replaced": replaced, "possible_duplicates": linked,
+            "corrected": corrected,
+        }
+
+    def _replace_corrected_payments(
+        self, db: sqlite3.Connection, owner: str, product: str, suffix: str, current: set[str],
+        since: str | None,
+    ) -> int:
+        """Remove the register's payments it no longer lists; the corrected one inherits its decision.
+
+        A payment's id comes from its date and total, so correcting either one in the
+        workbook gives a new id. The old payment (and the payroll income mirroring it) is
+        removed with an audit record. If it counted as personal or family spending, the
+        pending payment of the same credit closest in date (up to CORRECTION_DAYS away)
+        takes that decision and category, audited as a correction. A payment the person
+        had marked «No cuenta» is just removed. Returns the number of removed payments.
+        """
+        stale = [
+            row for row in db.execute(
+                "SELECT * FROM transactions WHERE owner=? AND message_id LIKE ? AND day>=? ORDER BY day",
+                (owner, f"ledger:{product}:{suffix}:%", since or ""),
+            ).fetchall()
+            if row["id"] not in current
+        ]
+        for old in stale:
+            for twin in ("payroll:" + old["id"], "payroll-extra:" + old["id"], old["id"]):
+                if db.execute("DELETE FROM transactions WHERE id=?", (twin,)).rowcount:
+                    self._audit(db, "ledger-row-removed", twin, f"{old['day']} {old['amount_minor']}")
+            if old["decision"] not in {"personal", "family"}:
+                continue
+            heir = db.execute(
+                """SELECT id FROM transactions WHERE owner=? AND message_id LIKE ? AND decision IS NULL
+                AND abs(julianday(day) - julianday(?)) <= ? ORDER BY abs(julianday(day) - julianday(?)), day LIMIT 1""",
+                (owner, f"ledger:{product}:{suffix}:%", old["day"], CORRECTION_DAYS, old["day"]),
+            ).fetchone()
+            if heir is not None:
+                self._decide(db, heir["id"], old["decision"], old["category"], audit=("ledger-correction", old["id"]))
+        return len(stale)
 
     def _sync_ledger_payroll(self, db: sqlite3.Connection, owner: str, suffix: str) -> int:
         """Payroll income for payments read from a register: one per fortnight, pending for bonus extras."""
@@ -1039,31 +1118,6 @@ class Store:
                         changes += 1
         return changes
 
-    def set_card_accounts(self, changes: dict[str, str]) -> tuple[int, Path | None]:
-        """Correct the card of movements whose notice names its digits; returns (count, backup).
-
-        Only the account changes: amounts, categories and decisions stay. A copy of the
-        database is made first, and every change is audited with the previous account.
-        Accounts outside the configuration, or excluded ones, are refused.
-        """
-        preferences = self.preferences()
-        if any(account not in preferences.accounts for account in changes.values()):
-            raise ValueError("Solo se asigna una tarjeta configurada y no excluida.")
-        if not changes:
-            return 0, None
-        changed = 0
-        with self.connect() as db:
-            backup = self._backup(db)
-            for event_id, account in changes.items():
-                row = db.execute("SELECT account FROM transactions WHERE id=?", (event_id,)).fetchone()
-                if row is None or row["account"] == account:
-                    continue
-                db.execute("UPDATE transactions SET account=? WHERE id=?", (account, event_id))
-                self._audit(db, "card-account-backfill", event_id, f"{row['account']} -> {account}")
-                changed += 1
-            self._audit(db, "card-account-backfill-local-user", self.path.name, f"{changed} / {backup.name}")
-        return changed, backup
-
     def card_statement_suffixes(self, owner: str) -> list[tuple[str, str]]:
         """(product, last four digits) of every credit card a member's statements showed."""
         with self.connect() as db:
@@ -1093,13 +1147,16 @@ class Store:
             self._audit(db, "owner-account-local-user", "*" + suffix, owner)
             return self._flag_between_owners(db, None)
 
-    def record_statements(self, checks: list[dict], events: list[dict]) -> int:
+    def record_statements(
+        self, checks: list[dict], events: list[dict], twins: list[tuple[str, str]] | None = None,
+    ) -> int:
         """Store each statement's reconciliation and import the movements it alone shows.
 
         Imported movements stay pending unless a fixed wording the owners confirmed or one
         of the person's own rules decides them (never possible duplicates). Repeating the
         reconciliation imports nothing twice, because every imported id is derived from the
-        statement line and existing ids are skipped.
+        statement line and existing ids are skipped. twins pairs a statement line's id with
+        another movement that duplicates it: the statement prevails (see _settle_twin).
         """
         now = datetime.now(timezone.utc).isoformat()
         inserted: list[str] = []
@@ -1143,11 +1200,49 @@ class Store:
                     inserted.append(event["id"])
                     self._audit(db, "statement-import", event["id"], event["message_id"])
             self._flag_between_owners(db, inserted)
+            for line_id, twin_id in twins or []:
+                self._settle_twin(db, line_id, twin_id)
             # Fixed wordings the owners confirmed first; then the person's own rules, with the
             # same safeguards as for notices. Ollama never decides.
             self._decide_fixed_statement_lines(db)
         self.apply_rules()
         return len(inserted)
+
+    def _settle_twin(self, db: sqlite3.Connection, line_id: str, twin_id: str) -> None:
+        """The statement shows a purchase once and the panel has it twice: the statement prevails.
+
+        The other movement (a notice or an imported record, often in another currency)
+        becomes «No cuenta» with a note naming the statement line. A pending statement line
+        takes the decision and category already given to its twin; a decided one keeps its
+        own. A line in dollars recorded in pesos takes the rate those pesos imply, so the
+        spending in pesos stays what was recorded. Both changes are audited and a person
+        can change either.
+        """
+        line = db.execute("SELECT * FROM transactions WHERE id=?", (line_id,)).fetchone()
+        twin = db.execute("SELECT * FROM transactions WHERE id=?", (twin_id,)).fetchone()
+        if line is None or twin is None or twin["decision"] == "exclude" or line["owner"] != twin["owner"]:
+            return
+        rate = None
+        if line["currency"] == "USD":
+            if twin["currency"] == "COP" and line["amount_minor"] > 0:
+                implied = Decimal(twin["amount_minor"]) / Decimal(line["amount_minor"])
+                rate = format(implied.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP), "f")
+            else:
+                rate = twin["exchange_rate"] or line["exchange_rate"]
+        if line["decision"] is None and twin["decision"] in {"personal", "family"} and (
+            line["currency"] != "USD" or rate
+        ):
+            self._decide(
+                db, line_id, twin["decision"], twin["category"], exchange_rate=rate,
+                audit=("decision-statement-twin", twin_id),
+            )
+        self._decide(db, twin_id, "exclude", audit=("statement-duplicate", line_id))
+        amount = f"{line['amount_minor'] / 100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        db.execute(
+            "UPDATE transactions SET note=? WHERE id=?",
+            (f"Duplicado: el extracto muestra esta compra una vez, {amount} {line['currency']} el "
+             f"{line['day']}; prima el extracto", twin_id),
+        )
 
     def _decide_fixed_statement_lines(self, db: sqlite3.Connection) -> int:
         """Decide pending statement lines whose exact wording has one meaning for both owners.
@@ -1195,27 +1290,6 @@ class Store:
                 self._audit(db, "statement-reclassify", event_id, f"{row['kind']} -> {kind}")
                 changed += 1
         return changed
-
-    def set_destinations(self, destinations: dict[str, str]) -> int:
-        """Record destinations read again from the original notices.
-
-        Only movements without one change; amounts, decisions and categories stay as
-        they are. Each change is audited, and transfers to a registered account of the
-        other member are then marked as money between members.
-        """
-        changed: list[str] = []
-        with self.connect() as db:
-            for event_id, key in destinations.items():
-                if not isinstance(key, str) or not re.fullmatch(r"(tr|bb|qr|fd):[\w@.\-]{1,60}", key):
-                    raise ValueError("Destino invalido.")
-                if db.execute(
-                    "UPDATE transactions SET group_key=? WHERE id=? AND group_key IS NULL",
-                    (key, event_id),
-                ).rowcount:
-                    self._audit(db, "destination-backfill", event_id, key)
-                    changed.append(event_id)
-            self._flag_between_owners(db, changed)
-        return len(changed)
 
     def _flag_between_owners(self, db: sqlite3.Connection, ids: list[str] | None) -> int:
         """Mark movements naming another member's account, or a remembered destination.

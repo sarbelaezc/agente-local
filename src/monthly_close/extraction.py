@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from shared.local_model import JsonModel
-from monthly_close.destinations import assign_destinations
+from monthly_close.destinations import QR_NOT_OWN_REASON, assign_destinations
 from monthly_close.statements import is_statement_notice
 from monthly_close.domain import (
     INCOME_CATEGORIES, KINDS, NON_EXPENSES, Preferences, amount_minor, clean_text,
@@ -117,13 +117,13 @@ def extract(
     if mail.sender.lower() not in preferences.approved_senders:
         raise ValueError("Remitente no autorizado. No se envia contenido a Ollama.")
     if is_statement_notice(mail.sender, mail.subject):
-        # The attached statement is read by reconcile-statements; the mail moves no money.
+        # The attached statement is read when statements are reconciled; the mail moves no money.
         return []
     received = received_local(mail.received, preferences.timezone)
     source = _source(mail)
     fixed = _fixed_events(mail, preferences, source)
     if fixed:
-        return _mark_own_transfers(assign_destinations(fixed, source), own_accounts)
+        return _notice_time(_mark_own_transfers(assign_destinations(fixed, source), own_accounts), received)
     context = {
         "accounts": preferences.accounts,
         "own_account_suffixes": sorted(own_accounts or []),
@@ -175,7 +175,9 @@ def extract(
                 # The notice says money left the account but the model returned nothing:
                 # never drop it silently, a person reviews it.
                 raise EvidenceError("events")
-            return _mark_own_transfers(assign_destinations(proposals, source), own_accounts)
+            return _notice_time(
+                _mark_own_transfers(assign_destinations(proposals, source), own_accounts), received,
+            )
         except EvidenceError as exc:
             if exc.field == "events":
                 raise
@@ -259,8 +261,8 @@ def _account_transfers(mail: Mail, preferences: Preferences, source: str) -> lis
     """Transfers to an account number, read from the bank's fixed sentence without the model.
 
     The notice names nobody, so the model has no merchant to copy and may drop the
-    movement. Only the last four digits of the destination are kept, never the number.
-    They stay pending: a person decides whether it is an expense.
+    movement. The merchant shows the last four digits; the destination key keeps the
+    whole number, as Manuela's exported records do. They stay pending: a person decides whether it is an expense.
     """
     proposals = dict(
         _fixed_event(
@@ -274,13 +276,30 @@ def _account_transfers(mail: Mail, preferences: Preferences, source: str) -> lis
 
 
 def _mark_own_transfers(events: list[dict], own_accounts: list[str] | None) -> list[dict]:
-    """A transfer to one of the person's own accounts is money moved, not spent."""
+    """A transfer to one of the person's own accounts is money moved, not spent.
+
+    The model may also call a QR payment an own transfer because the notice names the
+    payer; a QR key that is not a registered own account is a payment to someone else.
+    """
     own = set(own_accounts or [])
     for event in events:
         key = event.get("group_key") or ""
-        if event["kind"] == "transfer" and key.startswith("tr:") and key[3:] in own:
+        if event["kind"] == "transfer" and key.startswith("tr:") and key[-4:] in own:
             event["kind"] = "own_transfer"
             event["reason"] = "Transferencia a una cuenta tuya registrada: confirma que no cuenta."
+        elif event["kind"] == "own_transfer" and key.startswith("qr:") and key[-4:] not in own:
+            event["kind"] = "transfer"
+            event["reason"] = QR_NOT_OWN_REASON
+    return events
+
+
+def _notice_time(events: list[dict], received: datetime) -> list[dict]:
+    """Give a lone movement of the notice's own day the hour the notice arrived.
+
+    A time the notice states is kept; a notice with several movements gives none.
+    """
+    if len(events) == 1 and not events[0].get("time") and events[0]["day"] == received.date().isoformat():
+        events[0]["time"] = received.strftime("%H:%M")
     return events
 
 
@@ -449,20 +468,6 @@ def _fixed_events(mail: Mail, preferences: Preferences, source: str) -> list[dic
         or _card_abonos(mail, preferences, source) or _key_transfers(mail, preferences, source)
         or _received_transfers(mail, preferences, source)
     )
-
-
-def card_named_in(mail: Mail, preferences: Preferences, card_accounts: dict[str, str]) -> str | None:
-    """The account extract() gives a notice's movements by the card digits it names.
-
-    None for statement notices and fixed sentences (which never use the digits) and when
-    the notice names no known card, or more than one.
-    """
-    if is_statement_notice(mail.sender, mail.subject):
-        return None
-    source = _source(mail)
-    if _fixed_events(mail, preferences, source):
-        return None
-    return _named_card(source, card_accounts)
 
 
 def _named_card(source: str, card_accounts: dict[str, str]) -> str | None:

@@ -99,7 +99,7 @@ def test_queued_notice_can_be_discarded_from_the_panel(dashboard):
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.locator("#tab-decisions").click()
     review = page.locator("#extraction-review")
-    assert "el monto que propuso Ollama no aparece en el aviso" in review.inner_text()
+    assert "El monto que propuso Ollama no aparece en el aviso" in review.inner_text()
     assert "12:00" in review.inner_text()  # the time, to find it among the same day's alerts
     # The queue and the movements to decide never overlap: the queue ends before the list starts.
     expect(page.locator("#pending-heading")).to_be_visible()
@@ -135,6 +135,81 @@ def test_decision_persists_and_updates_totals(dashboard):
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     assert store.state()["transactions"][0]["decision"] == "personal"
     assert re.search(r"\b1[.\s]?700,58", page.locator("#month-metrics").inner_text())
+
+
+def test_decision_card_shows_the_hour_next_to_the_date(dashboard):
+    page, store, month, _ = dashboard
+    store.import_message("m-hour", [movement("hour", "TIENDA CON HORA", message_id="m-hour", day=f"{month}-05", time="10:32")])
+    page.reload()
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    card = page.locator("#panel-decisions .decision-card").filter(has_text="TIENDA CON HORA")
+    expect(card.locator(".decision-meta > span").first).to_have_text(re.compile(r"^5 \w+\.? \d{4} · 10:32$"))
+    expect(card.locator("p.hint").filter(has_text="Hora")).to_have_count(0)
+    # The month's category detail shows the same date and hour.
+    page.get_by_role("tab", name="Mes").click()
+    detail = page.locator('#category-details details[data-category="Compras"]')
+    detail.locator("summary").click()
+    expect(detail.locator('button.detail-row[data-tx-id="hour"]')).to_contain_text(re.compile(r"5 \w+\.? \d{4} · 10:32 · TIENDA CON HORA"))
+
+
+# Every text starts in uppercase, chart axes and the calendar's weekday header included.
+VISIBLE_TEXTS = """() => {
+  const texts = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const parent = node.parentElement;
+    const text = node.textContent.trim();
+    // A text right after a figure or a separator in the same element continues its sentence.
+    const before = node.previousSibling ? (node.previousSibling.textContent || "").trim() : "";
+    if (text && parent && parent.getClientRects().length && !before) texts.push(text);
+  }
+  document.querySelectorAll("[aria-label],[title],[placeholder],[data-tip]").forEach(element => {
+    for (const name of ["aria-label", "title", "placeholder", "data-tip"]) {
+      const value = (element.getAttribute(name) || "").trim();
+      if (value) texts.push(value);
+    }
+  });
+  return texts;
+}"""
+
+
+def test_every_text_of_the_panel_starts_in_uppercase(dashboard):
+    page, store, month, _ = dashboard
+    day = month + "-07"
+    store.import_message("x", [
+        movement("inc", "EMPRESA", message_id="x", day=day, kind="income", category="Otros ingresos", time="09:00"),
+        movement("card", "Pago tarjeta", message_id="x", day=day, kind="card_payment", category="Pago de tarjeta"),
+        movement("own-card", "tarjeta de credito *5678", message_id="x", day=day, kind="card_payment",
+                 category="Pago de tarjeta", decision="exclude"),
+        movement("inv", "FONDO", message_id="x", day=day, kind="investment"),
+        movement("wd", "FONDO RETIRO", message_id="x", day=day, kind="unknown", group_key="fd:ab12"),
+        movement("usd", "AMAZON", message_id="x", day=day, currency="USD"),
+        movement("tr1", "PERSONA", message_id="x", day=day, kind="transfer", group_key="tr:1234"),
+        movement("tr2", "PERSONA", message_id="x", day=month + "-08", kind="transfer", group_key="tr:1234"),
+        movement("loan", "Cuota credito", message_id="x", day=day, kind="loan"),
+    ], owner="manuela")
+    store.decide("inc", "income", "Otros ingresos")
+    store.decide("inv", "investment")
+    store.decide("wd", "investment_withdrawal")
+    store.decide("card", "third_party_payment")
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    lowercase = set()
+    for owner in ["hogar", "santiago", "manuela"]:
+        page.locator(f'[data-owner="{owner}"]').first.click()
+        for tab in ["month", "year", "decisions"]:
+            page.locator("#tab-" + tab).click()
+            page.evaluate("() => document.querySelectorAll('details').forEach(detail => { detail.open = true; })")
+            lowercase.update(
+                text for text in page.evaluate(VISIBLE_TEXTS)
+                if text[0].islower()
+            )
+    assert not lowercase, sorted(lowercase)
+    # A card payment is named by its digits, which stay visible in the bar's name.
+    page.locator('[data-owner="hogar"]').first.click()
+    page.locator("#tab-month").click()
+    expect(page.locator("#card-payment-ranking .bar-name")).to_have_text(["Tarjeta *5678 · 1"])
 
 
 def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
@@ -727,6 +802,155 @@ def test_pending_card_hides_when_everything_is_decided_and_the_rest_share_one_ro
         assert "Por decidir" not in page.locator(panel).inner_text()
         tops = {round(heroes.nth(index).bounding_box()["y"]) for index in range(3)}
         assert len(tops) == 1, (panel, tops)
+
+
+def test_cash_hint_shows_only_where_a_destination_can_be_cash(dashboard):
+    page, store, month, _ = dashboard
+    store.import_message("tr", [{
+        "id": "tr", "message_id": "tr", "day": month + "-06", "merchant": "Traslado a Nequi",
+        "account": "Ahorros", "amount_minor": 70000, "currency": "COP", "category": "Otros gastos",
+        "kind": "transfer", "decision": None, "reason": "Transferencia.",
+    }])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    expect(page.locator("#panel-decisions .section-heading p")).to_have_text(
+        "Agrupadas por destino, de la más antigua a la más reciente.",
+    )
+    hint = "Si fue efectivo, elige «Retiro en efectivo»."
+    transfer = page.locator("#pending-list article").filter(has_text="Traslado a Nequi")
+    shop = page.locator("#pending-list article").filter(has_text="Tienda")
+    expect(transfer.get_by_text(hint, exact=False)).to_be_visible()
+    expect(shop.get_by_text(hint, exact=False)).to_have_count(0)
+
+
+def test_income_and_balance_cards_show_their_split_and_coverage(dashboard):
+    page, store, month, _ = dashboard
+    store.import_message("in", [
+        {
+            "id": f"in{index}", "message_id": "in", "day": month + "-07", "merchant": f"Pagador {index}",
+            "account": "Ahorros", "amount_minor": amount, "currency": "COP", "category": category,
+            "kind": "income", "decision": "income", "reason": "Ingreso.",
+        } for index, (amount, category) in enumerate([(80000, "Nómina"), (20000, "Otros ingresos")])
+    ])
+    metrics = page.locator("#month-metrics .metric.hero")
+    income = metrics.filter(has_text="Ingresos").first
+    for owner in ("hogar", "santiago"):
+        page.goto(page.url.split("?")[0] + f"?month={month}&owner={owner}")
+        expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+        # The kinds of income, also in Hogar; never who earned it.
+        expect(income.locator(".split-legend")).to_contain_text("Nómina")
+        expect(income.locator(".split-legend")).to_contain_text("Otros ingresos")
+        expect(income.locator(".split-legend")).not_to_contain_text("Santiago")
+    # Spending decided is 1500,57: 1000,00 of income covers 67 % of it.
+    balance = metrics.filter(has_text="Balance")
+    expect(balance.get_by_role("img")).to_have_attribute("aria-label", "Los ingresos cubren el 67 % del gasto")
+    expect(balance).to_contain_text("Los ingresos cubren el 67 % del gasto")
+    # Against: the bar takes the red of the theme; in favour it would take the green.
+    expect(balance.locator(".meter")).not_to_have_class(re.compile("favor"))
+    fill, red = balance.evaluate('''card => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--bad)';
+      card.append(probe);
+      const colours = [getComputedStyle(card.querySelector('.meter span')).backgroundColor, getComputedStyle(probe).color];
+      probe.remove();
+      return colours;
+    }''')
+    assert fill == red, (fill, red)
+
+
+def test_the_list_of_incomes_keeps_small_amounts_and_scrolls_inside_its_card(dashboard):
+    page, store, month, _ = dashboard
+    store.decide("0", "personal")  # nothing pending: the three cards share one row
+    store.import_message("in", [
+        {
+            "id": f"in{index}", "message_id": "in", "day": month + "-07", "merchant": "Descuento de nómina: cuota quincenal",
+            "account": "Ahorros", "amount_minor": 190000000 + index, "currency": "COP", "category": "Nómina",
+            "kind": "income", "decision": "income", "reason": "Ingreso.",
+        } for index in range(14)
+    ])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    income = page.locator("#month-metrics .metric.hero").filter(has_text="Ingresos").first
+    income.get_by_role("button", name="Ver los 14 ingresos").click()
+    sizes = page.locator("#income-card").evaluate("""card => ({
+      amount: parseFloat(getComputedStyle(card.querySelector('.detail-row strong')).fontSize),
+      list: card.querySelector('.detail-rows').scrollHeight > card.querySelector('.detail-rows').clientHeight,
+    })""")
+    assert sizes["amount"] == 13, sizes
+    # Fourteen movements scroll inside the card instead of stretching it.
+    assert sizes["list"], sizes
+
+
+def test_tile_figures_go_right_of_the_name_unless_a_tile_of_the_row_has_no_room(dashboard):
+    page, _, _, _ = dashboard
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.evaluate("""() => {
+      const strip = document.createElement('div');
+      strip.className = 'metric-strip';
+      for (let index = 0; index < 2; index++) {  // one row on both screens
+        const tile = document.createElement('div');
+        tile.className = 'metric minor';
+        for (const [tag, cls, text] of [['span', 'label', 'Inversión neta'], ['strong', '', '-43.624.110,00 COP'], ['small', '', 'Fuera del gasto']]) {
+          const part = document.createElement(tag);
+          if (cls) part.className = cls;
+          part.textContent = text;
+          tile.append(part);
+        }
+        strip.append(tile);
+      }
+      document.querySelector('#month-metrics').append(strip);
+    }""")
+    # Wide: the figure beside the name. On a phone the row has no room: both below the name.
+    # The panel refits the tiles when their summary changes size.
+    for width, stacked in ((1440, False), (390, True)):
+        page.set_viewport_size({"width": width, "height": 1000})
+        page.wait_for_function("""stacked => {
+          const tiles = [...document.querySelectorAll('#month-metrics .metric-strip .metric.minor')];
+          const beside = tile => Math.abs(tile.querySelector('strong').getBoundingClientRect().top
+            - tile.querySelector('.label').getBoundingClientRect().top) < 8;
+          return tiles.length === 2 && tiles.every(tile => tile.classList.contains('stacked') === stacked && beside(tile) !== stacked);
+        }""", arg=stacked)
+
+
+def test_secondary_figures_fill_each_row_without_overflowing(dashboard):
+    page, _, _, _ = dashboard
+    # The longest figures and notes the month and year views show, seven of them.
+    notes = ["Por mes cerrado · 10 meses", "Agosto de 2026", "56 aportes − 47 retiros · neto, no saldo · fuera del gasto",
+             "Fuera del gasto", "Ya incluido en el gasto", "15 · restan del gasto", "Revisados o conciliados"]
+    for width in (1440, 390):
+        page.set_viewport_size({"width": width, "height": 1000})
+        rows = page.evaluate("""notes => {
+          document.querySelectorAll('#month-metrics .metric-strip').forEach(node => node.remove());
+          const strip = document.createElement('div');
+          strip.className = 'metric-strip';
+          notes.forEach(note => {
+            const tile = document.createElement('div');
+            tile.className = 'metric minor';
+            for (const [tag, text] of [['span', 'Inversión neta'], ['strong', '-43.624.110,00 COP'], ['small', note]]) {
+              const part = document.createElement(tag);
+              part.textContent = text;
+              tile.append(part);
+            }
+            strip.append(tile);
+          });
+          document.querySelector('#month-metrics').append(strip);
+          const right = strip.getBoundingClientRect().right;
+          const tiles = [...strip.children];
+          return {
+            overflow: tiles.filter(tile => tile.scrollWidth > tile.clientWidth).length,
+            // Each row ends at the strip's right edge: no ragged gap after the last tile.
+            ragged: tiles.filter((tile, index) => {
+              const next = tiles[index + 1];
+              const lastInRow = !next || next.getBoundingClientRect().top > tile.getBoundingClientRect().top + 1;
+              return lastInRow && Math.abs(tile.getBoundingClientRect().right - right) > 1;
+            }).length,
+            rowCount: new Set(tiles.map(tile => Math.round(tile.getBoundingClientRect().top))).size,
+          };
+        }""", notes)
+        assert rows["overflow"] == 0 and rows["ragged"] == 0, (width, rows)
+    # On a phone two tiles share each row, instead of seven tall rows.
+    assert rows["rowCount"] == 4, rows
 
 
 def test_a_new_card_number_is_asked_in_decisions_with_the_option_of_a_new_card(dashboard):

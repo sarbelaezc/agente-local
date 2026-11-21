@@ -193,8 +193,7 @@ personal. Hoy la app está en Testing.
 | `origin` | Opcional. Forma parte de la identidad de cada mensaje (por defecto `outlook.live.com` y `mail.google.com`). No lo cambies después de importar: volvería a importar todo |
 | `accounts`, `excluded_accounts` | Opcional. Alias de cuentas de ese titular para Ollama; si faltan, se usan los del paso 0 |
 
-El Outlook de Santiago es obligatorio. Los extractos, el piloto y
-`backfill-destinations` leen solo ese buzón. Los remitentes aprobados del paso 0
+El Outlook de Santiago es obligatorio. El piloto lee solo ese buzón. Los remitentes aprobados del paso 0
 valen para todos los buzones.
 
 **Iniciar sesión y validar.** Manuela inicia sesión en su navegador; si Google

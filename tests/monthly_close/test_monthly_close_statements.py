@@ -183,6 +183,53 @@ def test_reconcile_matches_known_movements_once_and_from_the_start_date():
     assert (check["movements"], check["matched"], check["missing"]) == (4, 1, 3)
 
 
+def purchase(event_id: str, day: str, amount: int, merchant: str, **changes) -> dict:
+    return {
+        "id": event_id, "message_id": "m-" + event_id, "day": day, "merchant": merchant, "account": "Tarjeta A",
+        "amount_minor": amount, "currency": "COP", "category": "Compras", "kind": "purchase",
+        "decision": None, "reason": "Revisar.", **changes,
+    }
+
+
+def test_a_purchase_the_statement_shows_once_in_another_currency_is_a_duplicate():
+    card = st.parse("TARJETA_MASTERCARD", "202601", CARD)
+    rows = [
+        {**purchase("dup", "2026-01-08", 4567800, "SERVICIO FICTICIO E"), "owner": "santiago"},
+        # Another merchant, or the same one too many days away, is never taken for it.
+        {**purchase("other", "2026-01-08", 4567800, "OTRA TIENDA"), "owner": "santiago"},
+        {**purchase("far", "2026-01-02", 4567800, "SERVICIOFICTICIO"), "owner": "santiago"},
+    ]
+    report = st.reconcile([card], rows, date(2026, 1, 1))
+    assert [(c.movement.description, line, twin) for c, line, twin in report.twins] == [
+        ("SERVICIO FICTICIO", st.line_id(next(c for c in report.missing if c.movement.currency == "USD")), "dup"),
+    ]
+
+
+def test_the_statement_prevails_over_its_duplicate_now_and_for_lines_imported_before(store):
+    card = st.parse("TARJETA_MASTERCARD", "202601", CARD)
+    # The line was imported by an earlier run, before duplicates were looked for.
+    first = st.reconcile([card], [], date(2026, 1, 1))
+    store.record_statements(first.checks(), [st.missing_event(c, "Otros gastos", "Otros ingresos") for c in first.missing])
+    store.import_message("m-dup", [purchase("dup", "2026-01-08", 4567800, "SERVICIO FICTICIO")])
+    store.decide("dup", "personal", "Compras")
+    again = st.reconcile([card], store.state()["transactions"], date(2026, 1, 1))
+    line = st.line_id(next(c for c in first.missing if c.movement.currency == "USD"))
+    assert [(found, twin) for _, found, twin in again.twins] == [(line, "dup")]
+    store.record_statements(again.checks(), [], [(found, twin) for _, found, twin in again.twins])
+    rows = {row["id"]: row for row in store.state()["transactions"]}
+    assert (rows["dup"]["decision"], rows["dup"]["amount_minor"]) == ("exclude", 4567800)
+    assert rows["dup"]["note"].startswith("Duplicado: el extracto muestra esta compra una vez, 12,34 USD")
+    # The statement line takes the decision already given to the same purchase.
+    assert (rows[line]["decision"], rows[line]["category"], rows[line]["currency"]) == ("personal", "Compras", "USD")
+    # In pesos it stays what was recorded: the rate is the one those pesos imply.
+    assert (rows[line]["exchange_rate"], rows[line]["cop_amount_minor"]) == ("3701.620746", 4567800)
+    with store.connect() as db:
+        actions = {row[0] for row in db.execute("SELECT action FROM audit")}
+    assert {"statement-duplicate", "decision-statement-twin"} <= actions
+    # Once settled, a new run finds nothing more.
+    assert st.reconcile([card], store.state()["transactions"], date(2026, 1, 1)).twins == []
+
+
 def test_statement_movements_enter_pending_audited_and_only_once(store):
     card = st.parse("TARJETA_MASTERCARD", "202601", CARD)
     report = st.reconcile([card], [], date(2026, 1, 1))
@@ -322,7 +369,7 @@ TWO_MAILBOXES = {"mailboxes": [
 
 
 def run_reconcile(
-    store, tmp_path, preferences, monkeypatch, texts, read_only, settings=None, by_mailbox=None, opens=None,
+    store, tmp_path, preferences, monkeypatch, texts, settings=None, by_mailbox=None, opens=None,
     tried=None,
 ):
     """Reconcile with fake mailboxes; by_mailbox gives each mailbox its own attachment names.
@@ -368,7 +415,7 @@ def run_reconcile(
 
     monkeypatch.setattr(app, "OllamaJsonModel", SilentModel)
     settings = {"ollama_url": "http://127.0.0.1:11434", "ollama_model": "prueba", **(settings or {})}
-    return app.reconcile_statements(store, tmp_path, settings, preferences, date(2026, 1, 1), read_only)
+    return app.reconcile_statements(store, tmp_path, settings, preferences, date(2026, 1, 1))
 
 
 def test_each_mailbox_statements_reconcile_against_its_owners_movements(store, tmp_path, preferences, monkeypatch):
@@ -380,7 +427,7 @@ def test_each_mailbox_statements_reconcile_against_its_owners_movements(store, t
     texts = {"Extracto_1_202601_TARJETA_VISA_0002.pdf": CARD, "Extracto_1_202601_FIDUCUENTA_0003.pdf": FUND}
     tried = []
     result = run_reconcile(
-        store, tmp_path, preferences, monkeypatch, texts, read_only=False, settings=TWO_MAILBOXES,
+        store, tmp_path, preferences, monkeypatch, texts, settings=TWO_MAILBOXES,
         by_mailbox={"santiago": ["Extracto_1_202601_FIDUCUENTA_0003.pdf"], "manuela": ["Extracto_1_202601_TARJETA_VISA_0002.pdf"]},
         tried=tried,
     )
@@ -399,7 +446,7 @@ def test_each_mailbox_statements_reconcile_against_its_owners_movements(store, t
 def test_a_statement_in_two_owners_mailboxes_stops_without_importing(store, tmp_path, preferences, monkeypatch):
     texts = {"Extracto_1_202601_TARJETA_VISA_0002.pdf": CARD}
     with pytest.raises(ValueError, match="buzones de santiago y manuela"):
-        run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False, settings=TWO_MAILBOXES)
+        run_reconcile(store, tmp_path, preferences, monkeypatch, texts, settings=TWO_MAILBOXES)
     assert store.state()["transactions"] == [] and store.state()["statement_checks"] == []
 
 
@@ -408,7 +455,7 @@ def test_a_statement_that_does_not_open_with_its_owners_password_stops(store, tm
     name = "Extracto_1_202601_TARJETA_VISA_0002.pdf"
     with pytest.raises(ValueError, match="buzon manuela: .*Se probo solo la de manuela"):
         run_reconcile(
-            store, tmp_path, preferences, monkeypatch, {name: CARD}, read_only=False,
+            store, tmp_path, preferences, monkeypatch, {name: CARD},
             settings=TWO_MAILBOXES, by_mailbox={"manuela": [name]}, opens={name: "clave-santiago"},
         )
     assert store.state()["transactions"] == [] and store.state()["statement_checks"] == []
@@ -421,7 +468,7 @@ def test_a_mailbox_without_its_owners_password_stops(store, tmp_path, preference
     with pytest.raises(ValueError, match="Falta la contrasena de los extractos de manuela"):
         run_reconcile(
             store, tmp_path, preferences, monkeypatch, {"Extracto_1_202601_TARJETA_VISA_0002.pdf": CARD},
-            read_only=False, settings=TWO_MAILBOXES,
+            settings=TWO_MAILBOXES,
             by_mailbox={"manuela": ["Extracto_1_202601_TARJETA_VISA_0002.pdf"]},
         )
 
@@ -429,24 +476,21 @@ def test_a_mailbox_without_its_owners_password_stops(store, tmp_path, preference
 def test_each_owners_proteccion_statement_is_kept_apart(store, tmp_path, preferences, monkeypatch):
     """Protección statements carry no product number; the mailbox tells whose they are."""
     texts = {"123_PensionesCesantias_202606.pdf": SEVERANCE}
-    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False, settings=TWO_MAILBOXES)
+    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, settings=TWO_MAILBOXES)
     assert result["statements"] == 2
     checks = sorted((row["owner"], row["identity"]) for row in store.state()["statement_checks"])
     assert [owner for owner, _ in checks] == ["manuela", "santiago"]
     assert checks[0][1] == checks[1][1] + ":manuela"
 
 
-def test_reconcile_command_reports_read_only_then_imports(store, tmp_path, preferences, monkeypatch):
+def test_reconcile_imports_what_only_the_statements_show(store, tmp_path, preferences, monkeypatch):
     texts = {
         "Extracto_1_202601_TARJETA_MASTERCARD_0002.pdf": CARD,
         "Extracto_1_202601_FIDUCUENTA_0003.pdf": FUND,
         "Extracto_1_202601_CONSOLIDADO_0003.pdf": "no se lee",
     }
-    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=True)
-    assert result == {"statements": 2, "matched": 0, "missing": 5, "imported": 0, "balances": 1, "reclassified": 0, "categories_proposed": 0}
-    assert store.state()["transactions"] == [] and store.state()["statement_checks"] == []
-    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
-    assert result["imported"] == 5
+    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts)
+    assert result == {"statements": 2, "matched": 0, "missing": 5, "imported": 5, "balances": 1, "reclassified": 0, "categories_proposed": 0, "duplicates": 0}
     assert {r["account"] for r in store.state()["transactions"]} == {"Tarjeta de crédito Master", "Fiducuenta"}
 
 
@@ -456,7 +500,7 @@ def test_unreadable_statement_stops_without_importing(store, tmp_path, preferenc
         "Extracto_1_202602_CREDITO_4444.pdf": "formato desconocido",
     }
     with pytest.raises(ValueError, match="CREDITO 202602 del buzon santiago"):
-        run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
+        run_reconcile(store, tmp_path, preferences, monkeypatch, texts)
     assert store.state()["transactions"] == []
 
 
@@ -490,22 +534,46 @@ def test_panel_shows_statement_checks_and_balances(store, start_panel, new_page)
     visa = st.parse("TARJETA_VISA", "202601", CARD)
     visa.owner = "manuela"
     report = st.reconcile(statements + [visa], [], date(2026, 1, 1))
-    store.record_statements(report.checks(), [])
+    checks = report.checks()
+    for check in checks:
+        if check["product"] == "HIPOTECARIO":
+            check["matched"], check["missing"] = check["movements"], 0
+    store.record_statements(checks, [])
     url = start_panel(store)
     page = new_page()
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.goto(f"{url}/?month=2026-01&currency=COP&owner=santiago")
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    blocks = page.locator("#statements-card details.statement-section")
+    # Each block folds to its heading and total; one with movements no notice had opens itself.
+    opened = {
+        blocks.nth(index).locator("h4").inner_text(): blocks.nth(index).evaluate("node => node.open")
+        for index in range(blocks.count())
+    }
+    assert opened == {"Inversiones": True, "Créditos": False}
     text = page.locator("#statements-card").inner_text()
     assert "Inversiones" in text and "Créditos" in text
     assert re.search(r"1[.\s]?204[.\s]?950,00", text)
+    assert "Hipotecario" not in text
+    # The person's choice is kept while the panel redraws.
+    blocks.filter(has_text="Créditos").locator("summary").click()
+    page.locator("#owner-switch").get_by_role("button", name="Hogar").click()
+    page.locator("#owner-switch").get_by_role("button", name="Santiago").click()
+    text = page.locator("#statements-card").inner_text()
+    assert "Hipotecario" in text
     assert "Fiducuenta *0003" in text and "Visa" not in text
     page.locator("#owner-switch").get_by_role("button", name="Manuela").click()
+    summary = page.locator("#statements-card summary").filter(has_text="Tarjetas y cuentas")
+    expect(summary).to_contain_text(re.compile(r"1 extracto, (cuadra|1 con movimientos sin aviso)"))
+    if not summary.evaluate("node => node.parentElement.open"):
+        summary.click()
     text = page.locator("#statements-card").inner_text()
     assert "Visa *0002" in text and "Fiducuenta" not in text
     page.locator("#owner-switch").get_by_role("button", name="Hogar").click()
     card = page.locator("#statements-card")
+    for block in card.locator("details.statement-section:not([open]) > summary").all():
+        block.click()
     text = card.inner_text()
     assert "Tarjetas y cuentas" in text and "Inversiones" in text and "Créditos" in text
     # In the household view each statement carries its owner's tag.
@@ -806,15 +874,15 @@ def test_reconcile_stores_protection_figures_without_importing_movements(store, 
         "0A81F716_PensionesCesantias_202609.pdf": SEVERANCE,
         "0A81F6F5_PensionVoluntaria_202512.pdf": VOLUNTARY_PREVIOUS,  # before the start: skipped
     }
-    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
-    assert result == {"statements": 2, "matched": 0, "missing": 0, "imported": 0, "balances": 2, "reclassified": 0, "categories_proposed": 0}
+    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts)
+    assert result == {"statements": 2, "matched": 0, "missing": 0, "imported": 0, "balances": 2, "reclassified": 0, "categories_proposed": 0, "duplicates": 0}
     assert store.state()["transactions"] == []
     checks = {check["product"]: check for check in store.state()["statement_checks"]}
     assert checks["PROTECCION_VOLUNTARIA"]["contributions_minor"] == 50_000_000
     assert checks["PROTECCION_VOLUNTARIA"]["returns_minor"] == -18_000_000
     assert checks["PROTECCION_CESANTIAS"]["balance_minor"] == 2_090_000_100
     # Repeating it changes nothing.
-    run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
+    run_reconcile(store, tmp_path, preferences, monkeypatch, texts)
     assert len(store.state()["statement_checks"]) == 2
 
 
@@ -872,9 +940,7 @@ def test_reconcile_corrects_pending_movements_it_imported_with_an_old_kind(store
     store.decide(decided, "exclude")
 
     texts = {"Extracto_1_202601_CTA_AHORROS_0001.pdf": SAVINGS_TOPUP}
-    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=True)
-    assert result["reclassified"] == 0  # read-only writes nothing
-    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
+    result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts)
     assert (result["imported"], result["reclassified"]) == (0, 1)
 
     kinds = {row["id"]: (row["kind"], row["decision"]) for row in store.state()["transactions"]}
@@ -886,7 +952,7 @@ def test_reconcile_corrects_pending_movements_it_imported_with_an_old_kind(store
         audit = db.execute("SELECT target, value FROM audit WHERE action='statement-reclassify'").fetchall()
     assert [tuple(row) for row in audit] == [(events[0]["id"], "card_payment -> purchase")]
     # Repeating it changes nothing.
-    assert run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)["reclassified"] == 0
+    assert run_reconcile(store, tmp_path, preferences, monkeypatch, texts)["reclassified"] == 0
 
 
 def test_own_card_payment_wording_is_decided_not_counted_only_on_card_statements(store):

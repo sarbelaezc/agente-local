@@ -72,18 +72,14 @@ estas opciones a los comandos de Python.
 | `serve [-Red]` (predeterminado) | Abre el panel del cierre mensual; con `-Red`, también para tus [dispositivos emparejados](docs/configuracion.md#11-paneles-desde-otros-dispositivos-opcional) | Opcional: solo los botones de sugerencias |
 | `login [-Mailbox <buzón>]` | Inicia sesión: sin `-Mailbox`, el Outlook de Santiago; `-Mailbox manuela`, su Gmail; `-Mailbox facturas`, el buzón de facturas | No |
 | `check-config` | Comprueba el paso 0 y la configuración del cierre | No |
-| `import [-Start AAAA-MM-DD -End AAAA-MM-DD]` | `check-config`, `scan` y apertura del panel | Sí |
+| `import [-Start AAAA-MM-DD -End AAAA-MM-DD]` | `check-config`, `scan` y apertura del panel; al leer concilia los extractos e importa el Excel de los créditos | Sí; en los extractos, solo sugiere categorías de compras |
 | `scan [-Start … -End …] [-ReadOnly] [-ReprocessEmpty]` | Lee los buzones: sin fechas, solo lo nuevo; con fechas, el rango completo | Sí, salvo con `-ReadOnly` |
 | `pilot [-ReadOnly]` | Prueba la lectura con un solo aviso | Sí, salvo con `-ReadOnly` |
 | `summary -Month AAAA-MM [-Owner santiago\|manuela\|hogar]` | Resumen de un mes en la terminal | No |
-| `reconcile-statements [-Start AAAA-MM-DD] [-ReadOnly]` | Concilia los extractos PDF del banco y de Protección | Opcional: sugiere categorías de compras; sin él, solo reglas e historial |
 | `import-manuela [-SourceDir <carpeta>]` | Importa los movimientos exportados del panel de Manuela | No |
 | `owner-account -Owner <titular> -Suffix NNNN` | Registra una cuenta (últimos 4 dígitos) de un titular | No |
 | `payroll-deduction -Owner <titular> -Suffix NNNN` | Marca un crédito cuyas cuotas se descuentan de la nómina | No |
-| `import-credit-ledger` | Importa los pagos de los créditos desde tu Excel | No |
 | `merge-category -FromCategory <a> -ToCategory <b>` | Une una categoría de gasto a otra | No |
-| `backfill-destinations` | Completa el destino de pagos de Santiago ya importados | No |
-| `backfill-card-accounts [-ReadOnly]` | Corrige la tarjeta de movimientos de Santiago ya importados según los dígitos del aviso | No |
 | `scheduled` | Cierre automático de la tarea programada | Solo si toca cerrar |
 | `invoices [-BatchSize 1-20] [-Days 1-365] [-Resume] [-Red]` | Lote de facturas: 10 correos de los últimos 90 días por defecto; con `-Red`, el panel también para tus dispositivos emparejados | Sí |
 | `invoices-cleanup [-OlderThanDays N] [-Apply]` | Limpia estados de lotes que ya no hace falta guardar | No |

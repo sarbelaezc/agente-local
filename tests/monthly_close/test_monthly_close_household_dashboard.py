@@ -187,13 +187,20 @@ def test_month_view_is_interactive_like_manuelas_dashboard(household):
     assert page.locator("#weekday-chart .bar-row").count() == 7
     assert page.locator("#merchant-ranking .bar-fill").count() >= 2
 
-    # Incomes and third-party payments open from their cards.
+    # The income card takes you to its list in «Ingresos por tipo», opened and in view.
     income = page.locator("#month-metrics .metric").filter(has_text="Ingresos").first
-    income.locator("summary", has_text="Ver el ingreso").click()
-    assert "EMPRESA SINTETICA" in income.inner_text()
+    assert income.locator("summary").count() == 0
+    income.get_by_role("button", name="Ver el ingreso").click()
+    listing = page.locator("#income-card .inline-detail")
+    expect(listing).to_have_attribute("open", "")
+    expect(listing.get_by_text("EMPRESA SINTETICA")).to_be_in_viewport()
+    expect(listing.locator("summary")).to_be_focused()
+    # Third-party payments open from their tile.
     spending = page.locator("#month-metrics .metric").filter(has_text="Gasto del mes")
-    spending.locator("summary", has_text="Ver el abono de terceros").click()
-    assert "Pagos de otras personas" in spending.inner_text()
+    assert spending.locator("summary").count() == 0  # the spending card only shows the subtraction
+    paid_back = page.locator("#month-metrics .metric.minor").filter(has_text="Abonos de terceros")
+    paid_back.locator("summary", has_text="Ver el abono").click()
+    assert "Pagos de otras personas" in paid_back.inner_text()
 
 
 def test_months_live_under_the_tabs_and_only_in_the_month_view(household):
@@ -205,7 +212,7 @@ def test_months_live_under_the_tabs_and_only_in_the_month_view(household):
     months = chips.locator("button").evaluate_all("items => items.map(item => item.dataset.month)")
     assert months[0] == MONTH
     assert months == sorted(months)
-    expect(chips.locator("button").first).to_have_attribute("aria-label", "marzo de 2026")
+    expect(chips.locator("button").first).to_have_attribute("aria-label", "Marzo de 2026")
     assert chips.locator("button").first.inner_text().startswith("Mar")
     assert "2026" in chips.locator("button").first.inner_text()
     assert "2026" not in chips.locator("button").nth(1).inner_text()  # same year: no repeat
@@ -238,7 +245,7 @@ def test_destination_card_decides_every_pending_payment_with_audit(household):
     page, store, _ = household
     page.locator("#tab-decisions").click()
     summary = page.locator("#decision-summary").inner_text()
-    assert "1" in summary and "destino por decidir" in summary
+    assert "1" in summary and "Destino por decidir" in summary
     card = page.locator("#pending-list .group-card")
     assert card.count() == 1
     assert "Transferencia a la cuenta *55550009999" in card.inner_text()
@@ -258,3 +265,63 @@ def test_destination_card_decides_every_pending_payment_with_audit(household):
     assert store.state()["group_rules"][0]["decision"] == "family"
     page.locator("#tab-month").click()
     assert re.search(r"\b1[.\s]?650,00", spend(page))  # + 100 in family spending
+
+
+
+def tiles_page(make_store, start_panel, new_page, **options):
+    """A month with two secondary tiles side by side: third-party payments and card payments."""
+    store = make_store()
+    store.import_external("manuela", "manuela", [
+        member("m1", 20000, "purchase", "personal"),
+        member("m22", 5000, "card_payment", "third_party_payment", category="Pagos de otras personas"),
+        member("m333", 9000, "card_payment", "exclude", category="Pago de tarjeta"),
+    ], {})
+    page = new_page(viewport={"width": 1280, "height": 1000}, **options)
+    page.goto(f"{start_panel(store)}/?month={MONTH}&currency=COP")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    return page
+
+
+def open_paid_back(page) -> list[int]:
+    """Opens the third-party tile and returns the height of its list over the next frames."""
+    return page.evaluate("""async () => {
+        const detail = Array.from(document.querySelectorAll('#month-metrics .metric.minor'))
+            .find(tile => tile.textContent.includes('Abonos de terceros')).querySelector('details');
+        detail.querySelector('summary').click();
+        const heights = [];
+        for (let frame = 0; frame < 4; frame++) {
+            heights.push(Math.round(detail.getBoundingClientRect().height));
+            await new Promise(done => setTimeout(done, 50));
+        }
+        return heights;
+    }""")
+
+
+def tile_animations(page) -> int:
+    return page.locator("#month-metrics .metric-strip").evaluate(
+        "strip => strip.getAnimations({ subtree: true }).length"
+    )
+
+
+def test_opening_a_tile_list_slides_the_tiles_and_unfolds_the_list(make_store, start_panel, new_page):
+    page = tiles_page(make_store, start_panel, new_page)
+    assert page.locator("#month-metrics .metric-strip > .metric").count() == 2
+    heights = open_paid_back(page)
+    # The tiles slide from where they were and the list unfolds from its summary.
+    assert tile_animations(page) >= 2
+    assert heights == sorted(heights) and heights[0] < heights[-1], heights
+    # The state changed at once: the list is already there to read.
+    paid_back = page.locator("#month-metrics .metric.minor").filter(has_text="Abonos de terceros")
+    expect(paid_back.locator("details")).to_have_attribute("open", "")
+    assert "Pagos de otras personas" in paid_back.inner_text()
+    page.locator("#tab-year").click()
+    assert page.locator("#panel-year").evaluate("panel => panel.getAnimations().length") == 1  # the tab fades in
+
+
+def test_reduced_motion_changes_the_dashboard_without_animations(make_store, start_panel, new_page):
+    page = tiles_page(make_store, start_panel, new_page, reduced_motion="reduce")
+    heights = open_paid_back(page)
+    assert tile_animations(page) == 0
+    assert len(set(heights)) == 1, heights  # the list is at its full height from the first frame
+    page.locator("#tab-year").click()
+    assert page.locator("#panel-year").evaluate("panel => panel.getAnimations().length") == 0

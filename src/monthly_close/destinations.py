@@ -2,7 +2,8 @@
 
 The key groups payments to the same destination, like Manuela's exported keys:
 ``tr:`` account, ``bb:`` Bre-B key, ``qr:`` QR payment key and ``fd:`` investment fund.
-Account numbers and numeric keys keep only their last four digits.
+Account numbers and Bre-B and QR keys are kept whole, as the bank writes them, so a
+destination has the same key in notices and in Manuela's exported records.
 """
 from __future__ import annotations
 
@@ -10,6 +11,9 @@ import re
 
 from monthly_close.domain import amount_minor
 
+QR_NOT_OWN_REASON = (
+    "Pago por QR a una llave que no es una cuenta tuya registrada: confirma si es gasto personal o familiar."
+)
 AMOUNT = r"(?P<amount>\$\s?\d[\d.,]*\d|\$\s?\d)"
 ACCOUNT = r"\*?\s?\d[\d\s]*?"
 PATTERNS = (
@@ -34,12 +38,16 @@ PATTERNS = (
 )
 
 
+WHOLE_KEYS = {"tr", "bb", "qr"}
+
+
 def _key(prefix: str, raw: str) -> str:
     raw = raw.strip()
     if raw.startswith("@"):
         return f"{prefix}:{raw.lower()}"
     if re.fullmatch(r"[\d\s*]+", raw):
-        return f"{prefix}:{re.sub(r'\D', '', raw)[-4:]}"
+        digits = re.sub(r"\D", "", raw)
+        return f"{prefix}:{digits if prefix in WHOLE_KEYS else digits[-4:]}"
     return f"{prefix}:{re.sub(r'\W', '', raw)[-4:].lower()}"
 
 

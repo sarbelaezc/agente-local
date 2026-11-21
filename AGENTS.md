@@ -197,7 +197,7 @@ privacy, human-approval, and data-handling rules.
 - Write comments only for non-obvious logic.
 - Add docstrings to important public functions.
 - Keep UI-related functions separate from domain logic.
-- Write every user-facing text of the panels in Spanish sentence case: a text that stands on its own (heading, button, label, hint, message, list line) starts with an uppercase letter and the rest stays lowercase except proper nouns. Never use Title Case. Text that continues a sentence on the same line (after ` · `, `:` or a figure it completes) stays lowercase, and so do axis abbreviations such as weekdays and months. A text that starts with a number or code keeps it as is. Uppercase headings come from CSS, not from the text.
+- Write every user-facing text of the panels in Spanish sentence case: a text that stands on its own (heading, button, label, hint, message, list line) starts with an uppercase letter and the rest stays lowercase except proper nouns. Never use Title Case. Text that continues a sentence inside the same element (after ` · `, `:` or a figure it completes) stays lowercase. There are no other exceptions: chart axes, calendar headers and weekday or month abbreviations start in uppercase too. A note in its own element (the note of a metric or chip, a definition value, a tooltip, an accessible label, a select option) stands on its own and starts in uppercase even when it follows a figure; month names from `Intl` are lowercase in Spanish, so capitalize them when they start a text. `test_every_text_of_the_panel_starts_in_uppercase` checks the monthly close dashboard. A text that starts with a number or code keeps it as is. Uppercase headings come from CSS, not from the text.
 
 ## Version control (GitFlow)
 
@@ -207,6 +207,7 @@ The repository follows GitFlow:
 - `develop`: integration branch. Receives finished features.
 - `feature/<short-name>`: branches off `develop` and merges back into `develop` through a pull request.
 - `release/<version>`: branches off `develop` to prepare a version. Only minor fixes are allowed, and it merges into `main` and then back into `develop` through pull requests.
+- Every release ends with its annotated tag `v<version>` ("Release <version>") on the merge into `main` and a GitHub release for that tag, created with `gh release create v<version> --verify-tag --notes-file <file>` and marked as latest. A tag alone does not show up as a release on GitHub. Write the notes in Spanish, grouped by feature with the pull request numbers, ending with the validation and what is pending, as in the previous releases.
 - `hotfix/<short-name>`: branches off `main` to fix urgent production bugs. It merges into `main` and then into `develop` through pull requests.
 
 Rules:

@@ -68,8 +68,8 @@ la fecha local del aviso y la propuesta lo indica.
 **Cobertura.** Cada mes importado empieza **parcial**: contar correos no demuestra
 que estén todos. Se confirma de dos formas:
 
-- **Conciliado** (automático): el agente lo marca cuando los extractos de los dos
-  titulares cuadran. Ver [Conciliación automática del mes](#conciliación-automática-del-mes).
+- **Conciliado** (automático): el agente lo marca cuando los extractos de todos
+  los titulares cuadran. Ver [Conciliación automática del mes](#conciliación-automática-del-mes).
 - **Revisado** (manual): lo marcas tú en el panel, con una nota de conciliación.
 
 Un movimiento nuevo en un mes conciliado o revisado lo devuelve a parcial.
@@ -154,11 +154,15 @@ el total y una pista, con botones que deciden todos sus movimientos a la vez.
   tienen: Inversión y Retiro de inversión asignan su propia categoría. Al decidir
   Gasto personal o Familiar, todos toman esa categoría, con la misma validación
   todo o nada y una auditoría por movimiento; las demás decisiones no la usan.
+  En destinos que no son solo compras en comercios (también con un solo
+  movimiento), una nota debajo recuerda elegir «Retiro en efectivo» si fue
+  efectivo.
   Muestra la sugerencia común si la pediste, si no la categoría que ya comparten,
   y si no «Mantener la de cada movimiento», que no cambia ninguna. También está
   en «Decisiones anteriores» para recategorizar un destino ya decidido.
-- **Uno por uno.** «Ver N movimientos», en cada tarjeta, permite decidir cada
-  movimiento con su categoría. Decidir un movimiento confirma su categoría. Cada
+- **Uno por uno.** «Ver los N movimientos y decidir uno por uno», en cada
+  tarjeta, permite decidir cada movimiento con su categoría. En «Decisiones anteriores» se llama «Ver N
+  movimientos». Decidir un movimiento confirma su categoría. Cada
   movimiento indica su origen («Extracto Visa *1234») o el motivo del aviso; la
   moneda se corrige en «Corregir moneda», que viene cerrado, salvo en los
   movimientos en USD, que muestran «Moneda y tasa» abierto.
@@ -207,11 +211,11 @@ los más frecuentes primero). Usa el mismo historial y los mismos ejemplos que l
 ### Sugerencias de categoría para pendientes
 
 Las compras que solo muestra un extracto llegan ya con una **categoría sugerida**:
-al registrar extractos (`reconcile-statements`, no con `-ReadOnly`) se calcula como
+al conciliar extractos (en cada `scan` o `import`) se calcula como
 se explica abajo y la razón del movimiento dice su origen («Categoría sugerida por
 tus decisiones anteriores de este comercio; confírmala al decidir»). No decide nada:
 siguen pendientes. Si Ollama no responde, la importación sigue con solo tus reglas
-y decisiones anteriores, y lo demás queda en «Otros gastos»; el comando lo avisa.
+y decisiones anteriores, y lo demás queda en «Otros gastos»; la lectura lo avisa.
 
 En **Decisión**, el botón **Volver a sugerir categorías** recalcula la sugerencia
 para todas las compras pendientes, por ejemplo después de crear reglas o decidir
@@ -259,7 +263,7 @@ aplica a todas sus compras en dólares al pulsar la decisión, con la misma
 validación todo o nada y una auditoría por movimiento. Las compras en pesos del
 mismo destino no la usan. Si las compras ya tienen tasas distintas, el campo
 viene vacío: déjalo así para conservar la de cada una, o decide cada compra en
-«Ver N movimientos».
+«Ver los N movimientos y decidir uno por uno».
 
 **Compras que coinciden con una regla.** Las reglas por comercio y por destino
 nunca deciden una compra en USD sin tasa, porque la tasa la pones tú. En cambio,
@@ -394,43 +398,30 @@ local):
   destino, que vale para pagos futuros a ese destino.
 - Las cuentas propias también se le indican a Ollama, para que una transferencia a
   ellas quede como transferencia propia.
+- Un pago por QR solo queda como transferencia propia si la llave termina en una
+  cuenta registrada del mismo titular. Si Ollama lo propone así por otra llave (por
+  ejemplo, porque el aviso nombra a quien paga), queda como transferencia pendiente,
+  que admite Gasto personal. Al abrir el cierre se corrigen igual los ya guardados,
+  sin cambiar su decisión, y cada cambio queda en la auditoría.
 
-**Completar destinos ya importados.** Los avisos nuevos guardan el destino del
-pago al importarse. Para los importados antes:
+**Destino completo.** Cada aviso guarda el destino del pago al importarse, con
+la cuenta o la llave Bre-B o QR completa (o los dígitos que el aviso escriba).
 
-```powershell
-.\scripts\agente-local.ps1 backfill-destinations
-```
-
-Vuelve a leer por Graph, en solo lectura y sin Ollama, los avisos de pagos
-salientes de Santiago sin destino. Solo completa destinos vacíos (auditados como
-`destination-backfill`); no cambia importes, categorías ni decisiones.
-
-**Corregir la tarjeta de movimientos ya importados.** Aplica a los avisos de
-Santiago importados antes la misma regla que los nuevos: la tarjeta que nombran
-sus últimos 4 dígitos (ver [Validación de lo que propone
-Ollama](#validación-de-lo-que-propone-ollama)).
-
-```powershell
-.\scripts\agente-local.ps1 backfill-card-accounts -ReadOnly   # cuenta lo que cambiaría
-.\scripts\agente-local.ps1 backfill-card-accounts             # lo aplica
-```
-
-Vuelve a leer por Graph, en solo lectura y sin Ollama, los avisos que leyó el
-modelo; los de frases fijas e ingresos no cambian. Antes de escribir copia la base
-(`close.sqlite3.backup-…`) y audita cada cambio con la tarjeta anterior
-(`card-account-backfill`). Solo cambia la cuenta: importes, categorías, decisiones
-y totales quedan iguales; sí cambia el reparto por medio de pago.
+**Hora de cada movimiento.** El panel muestra la hora junto a la fecha en todas
+partes (tarjetas de la pestaña Decisión, detalle por categoría, ingresos, abonos de
+terceros y detalle de un día del calendario, ordenados por fecha y hora) para
+identificar el movimiento: la que escribe el aviso o, si no
+la escribe, la hora en que llegó el aviso. Solo se pone cuando el aviso trae un
+único movimiento del mismo día en que llegó; un aviso con varios movimientos o de
+otro día no da hora. Los movimientos de extractos, del Excel de créditos y de los
+descuentos de nómina no tienen hora.
 
 ## Conciliar extractos
 
 Requiere `statements.json` ([configuración](configuracion.md#6-extractos-y-créditos-opcional)).
-Se ejecuta solo con cada `scan` o `import`, o a mano:
-
-```powershell
-.\scripts\agente-local.ps1 reconcile-statements -Start 2026-01-01 -ReadOnly  # solo informa
-.\scripts\agente-local.ps1 reconcile-statements                               # importa faltantes
-```
+Se ejecuta con cada `scan` o `import` (sin `-ReadOnly`) y con la tarea programada,
+desde el 1 de enero del año en que empieza la lectura. No hay un comando aparte:
+para conciliar ahora, corre un `import`.
 
 **Extractos del banco** (cuenta de ahorros, tarjetas en pesos y dólares,
 Fiducuenta, crédito de consumo e hipotecario):
@@ -463,6 +454,21 @@ Fiducuenta, crédito de consumo e hipotecario):
   con una categoría sugerida (ver
   [Sugerencias de categoría](#sugerencias-de-categoría-para-pendientes)). Repetir no
   importa nada dos veces.
+- **Prima el extracto.** Si el extracto muestra una compra una sola vez y el panel
+  la tiene dos veces (por ejemplo, el registro de Manuela en pesos y la línea del
+  extracto en dólares), la otra es un duplicado: un movimiento del mismo titular y
+  comercio (comparado sin espacios ni símbolos) con hasta 3 días de diferencia que
+  no coincidió con ninguna línea del extracto. Vale para todos los comercios.
+  - El duplicado queda **No cuenta**, con una nota que nombra la línea del extracto
+    (auditado como `statement-duplicate`).
+  - Si la línea del extracto estaba pendiente, toma la decisión y la categoría del
+    duplicado (`decision-statement-twin`). Una línea en dólares registrada en pesos
+    toma la tasa que dan esos pesos, así el gasto en pesos sigue siendo el
+    registrado. Si ya estaba decidida, conserva su decisión.
+  - Cada línea toma a lo sumo un duplicado, el más cercano en fecha, y lo ya
+    marcado «No cuenta» no se toca. Volver a conciliar también revisa las líneas
+    importadas en conciliaciones anteriores; con `-ReadOnly` solo cuenta los
+    duplicados.
 - Al registrar extractos se aplican tus [reglas por comercio](#reglas-por-comercio)
   y tus reglas por destino, con las mismas salvaguardas que para los avisos: nunca
   deciden posibles duplicados, compras en USD sin tasa ni cuentas excluidas, ni
@@ -521,10 +527,15 @@ nombre a la izquierda y su saldo o estado a la derecha.
 Un extracto sin movimientos no muestra conciliación. Cada titular ve sus
 extractos; **Hogar** los ve todos, con la etiqueta del titular.
 
+Cada bloque aparece plegado: solo su título con el total, o en Tarjetas y
+cuentas cuántos extractos hay y si todos cuadran. Se abre con un clic. Un bloque
+con algún extracto que trajo movimientos sin aviso aparece abierto. El panel
+recuerda lo que abres o cierras en cada mes mientras sigue abierto.
+
 ## Conciliación automática del mes
 
 Después de cada lectura (`scan`, `import`, la tarea programada), de
-`reconcile-statements`, `import-manuela` e `import-credit-ledger`, y de cada
+`import-manuela` y de cada
 decisión en el panel, el agente revisa los meses ya cerrados (anteriores al mes en
 curso). Un mes queda **Conciliado** si se cumple todo:
 
@@ -591,11 +602,9 @@ y a las futuras.
 
 **Pagos desde tu registro en Excel.** El extracto de un crédito solo muestra el
 último pago de cada periodo. Si llevas tus pagos en Excel (configurado en
-`credit_ledgers.json`):
-
-```powershell
-.\scripts\agente-local.ps1 import-credit-ledger
-```
+`credit_ledgers.json`), cada `scan` o `import` (sin `-ReadOnly`) y la tarea
+programada los importan después de conciliar los extractos. No hay un comando
+aparte: para aplicar ahora un cambio del Excel, corre un `import`.
 
 - **Hoja.** Encabezados en cualquiera de las primeras 10 filas: «Fecha», «Pago
   Capital», «Pago Intereses», «Seguros y Cargos Adicionales» y «Pago Total»;
@@ -610,6 +619,21 @@ y a las futuras.
   eliminan (con auditoría) y la conciliación deja de importarlas.
 - Cada pago entra **pendiente**, con capital, intereses y seguros en la nota, en el
   destino `cr:NNNN`.
+- **Correcciones en el Excel.** El registro manda sobre sus pagos desde el primer
+  extracto. Si corriges en el Excel la fecha o el total de un pago, en el
+  siguiente `import`:
+  - El pago anterior se quita del panel, con su ingreso de nómina espejo
+    (`ledger-row-removed`).
+  - El pago corregido entra en su lugar. Si el anterior contaba como Gasto
+    personal o Familiar, el pago pendiente del mismo crédito más cercano en fecha
+    (hasta 10 días) toma esa decisión y categoría (`ledger-correction`).
+  - Si el anterior estaba en «No cuenta», solo se quita.
+  - Un pago que borras del Excel también se quita.
+  - Si solo cambias cómo se reparte un pago (capital, intereses o seguros) sin
+    cambiar su fecha ni su total, conserva su decisión y su nota se actualiza
+    (`ledger-update`).
+  - El resultado dice cuántos pagos se quitaron. El corregido igual debe cuadrar
+    con el banco: si no cuadra, no cambia nada.
 - **Origen del dinero.** Las cuotas quincenales son descuento de nómina; un abono
   a capital en un mes de `bonus_months` es descuento de prima y queda como ingreso
   pendiente; fuera de esos meses salió de tu cuenta y no suma ingreso.
@@ -696,19 +720,45 @@ navegador recuerda que lo cerraste, igual que el tema; en otro dispositivo, o
 con otra dirección, como la de `-Red`, aparece de nuevo hasta cerrarlo allí. El
 aviso del formulario de configuración inicial no se puede cerrar.
 
+Los cambios del panel se animan para que se vea qué pasó: una lista o un detalle
+se despliega desde su título y se pliega de vuelta en él; al abrir la lista de
+una ficha pequeña, la ficha se extiende hasta ocupar la fila y las demás se
+deslizan a su nuevo lugar; al cambiar de pestaña o de mes, el contenido nuevo
+aparece con un fundido corto, y la tarjeta de decisión de un movimiento se
+despliega bajo él. El cambio ocurre de inmediato y la animación solo lo
+acompaña (dura cerca de un cuarto de segundo). Si el sistema tiene activado
+reducir el movimiento (en Windows: Configuración > Accesibilidad > Efectos
+visuales > Efectos de animación), el panel cambia sin animaciones.
+
 **Mes**
 
 - Meses en orden cronológico con nombre corto y la línea de cobertura del mes.
 - Cuatro cifras: **Gasto del mes** (con barra por titular y familiar),
-  **Ingresos**, **Balance** y **Por decidir** (lleva a Decisión; solo aparece si
-  queda algo pendiente, y sin ella las otras tres van en una fila). Debajo, en una
-  fila compacta y solo si existen: inversiones, pagos a tarjetas, abonos de
-  terceros, movimientos entre titulares y retiro en efectivo.
+  **Ingresos** (con barra por tipo de ingreso cuando hay más de uno, también en
+  Hogar), **Balance** (con una barra que dice qué parte del gasto cubren los
+  ingresos: verde si el balance es a favor, roja si es en contra; el texto lo
+  dice igual) y **Por decidir** (lleva a Decisión; solo aparece si
+  queda algo pendiente, y sin ella las otras tres van en una fila). Debajo, en
+  fichas pequeñas y solo si existen: primero lo que toca el gasto (retiro en
+  efectivo, abonos de terceros) y luego lo que queda fuera (pagos a tarjetas,
+  movimientos entre titulares, inversiones). Cada ficha lleva el nombre con la
+  cifra a la derecha y una nota debajo; si en una fila alguna ficha no tiene
+  espacio para eso (en el celular, por ejemplo), toda la fila pone la cifra
+  debajo del nombre. Las filas se reparten parejas (siete fichas van
+  4 + 3, nunca 5 + 2) y llenan el ancho; en el celular van de a dos por fila.
+  La ficha «Abonos de terceros» (en Mes y en Año) abre la lista de esos abonos;
+  el Gasto solo muestra la resta en su nota. Con la lista abierta, la ficha ocupa
+  toda la fila y una lista larga se desplaza dentro de ella. La lista de los
+  ingresos está en la tarjeta «Ingresos por tipo», bajo el reparto por tipo;
+  «Ver los N ingresos» en la cifra Ingresos lleva a esa tarjeta con la lista
+  abierta.
 - Calendario por día (tocar un día muestra sus movimientos), dona por categoría
   (tocar una categoría abre su detalle), acumulado, días de la semana, medios de
   pago, ingresos, pagos por tarjeta y comercios frecuentes. «Comercios frecuentes»
   agrupa variantes del mismo comercio (por ejemplo `UBER RIDES` y `UBER *TRIP`
-  como «Uber»); lo guardado conserva el texto del aviso.
+  como «Uber»); lo guardado conserva el texto del aviso. «Pagos por tarjeta»
+  nombra cada tarjeta por sus dígitos («Tarjeta *1234»), y los nombres que el
+  aviso escribe en minúscula se muestran con mayúscula inicial.
 - **Detalle por categoría** separa gastos, inversiones, ingresos y pagos de
   tarjeta, e indica cuántos movimientos faltan por decidir. Tocar un movimiento
   abre debajo su tarjeta de decisión, la misma de la pestaña Decisión, para
@@ -722,9 +772,10 @@ aviso del formulario de configuración inicial no se puede cerrar.
 **Año**
 
 - Las mismas cuatro cifras para el año (Por decidir se oculta si todo está
-  decidido) y chips con el promedio de gasto por mes cerrado (sin el mes en
-  curso), el mes de mayor gasto, la inversión neta, retiros, efectivo, abonos y la
-  cobertura («X de N» meses revisados a mano o conciliados con los extractos).
+  decidido) y las mismas fichas pequeñas: primero el gasto (promedio por mes
+  cerrado, sin el mes en curso; el mes de mayor gasto; efectivo y abonos) y luego
+  la inversión neta, los retiros de inversión y la cobertura («X de N» meses
+  revisados a mano o conciliados con los extractos).
 - Gráfica de ingresos (azul) y gastos (naranja), dos colores que se distinguen
   también con daltonismo rojo-verde; categorías del año con barras y porcentaje, y
   columnas por categoría con los mismos colores que el mes. El mes en curso se ve
@@ -851,9 +902,9 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 | Frase del aviso | Resultado |
 |---|---|
 | «Pagaste $X en la tarjeta de credito *NNNN desde la cuenta *NNNN, el DD/MM/AAAA» | Pago de tarjeta decidido «No cuenta» (no es gasto: el gasto son las compras). La cuenta queda `Desconocida` |
-| «Transferiste $X [por QR] desde tu cuenta *NNNN a la cuenta *NNNN, el …» | Transferencia pendiente a `cuenta *NNNN`, destino `tr:NNNN` |
-| «Transferiste $X a la llave @alias o número desde tu cuenta …» (Bre-B) | Destino `bb:@alias` o `bb:NNNN` |
-| «Pagaste $X por código QR desde tu cuenta … a la llave …» | Destino `qr:…` |
+| «Transferiste $X [por QR] desde tu cuenta *NNNN a la cuenta *NNNN, el …» | Transferencia pendiente a `cuenta *NNNN`, destino `tr:` con el número completo que escribe el aviso |
+| «Transferiste $X a la llave @alias o número desde tu cuenta …» (Bre-B) | Destino `bb:@alias` o `bb:` con el número completo de la llave |
+| «Pagaste $X por código QR desde tu cuenta … a la llave …» | Destino `qr:` con la llave completa |
 | «Retiraste $X de tu cuenta de inversión *XXXX …» | Destino `fd:XXXX` |
 | «NOMBRE hizo un abono por $X a tu tarjeta de crédito terminada en *N» | Pago a tarjeta pendiente: «Abono de tercero» si pagó otra persona, «No cuenta» si fuiste tú |
 | «transferiste $X a la llave K desde tu cuenta *N a NOMBRE» | Transferencia a NOMBRE con la llave y la hora |
@@ -862,7 +913,11 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 Las tres últimas frases se reconocen aunque el correo las parta en varias líneas
 (por ejemplo «…hizo» al final de una línea y «un abono por…» en la siguiente).
 
-De las cuentas y llaves numéricas se guardan solo los últimos 4 dígitos. Si la
+Las cuentas y las llaves Bre-B y QR de destino se guardan completas, como las
+escribe el aviso y como en lo importado del panel de Manuela, para que un mismo
+destino tenga la misma llave en avisos e importaciones. Si el aviso solo escribe
+los últimos dígitos, se guardan esos. Una cuenta propia o del otro titular se
+reconoce por los últimos 4 dígitos. Si la
 frase no dice el destino o es ambigua, no se asigna; no se adivinan formatos. Al
 modelo se le indica además que «transferiste» o «pagaste» nunca es ingreso y que
 el comercio es el destinatario nombrado, no el banco.
@@ -906,10 +961,14 @@ etiquetas principales:
 | `rule-local-user`, `group-rule-local-user`, `group-rule-between-local-user`, `group-rule-delete-local-user` | Regla por comercio o por destino creada, marcada entre titulares o borrada |
 | `decision-manuela`, `group-rule-manuela` | Decisiones importadas del panel anterior de Manuela |
 | `statement-import`, `statement-reclassify` | Movimiento importado de un extracto, o su tipo corregido |
+| `statement-duplicate`, `decision-statement-twin` | Duplicado de una línea del extracto marcado No cuenta, y la decisión que esa línea tomó de él |
 | `category-suggestions` | Sugerencias de categoría guardadas o recalculadas (solo el número) |
 | `decision-statement-phrase` | Línea de extracto decidida por un texto fijo confirmado (ver «Conciliar extractos») |
-| `destination-backfill` | Destino completado con `backfill-destinations` |
-| `card-account-backfill` | Tarjeta corregida con `backfill-card-accounts` (con la anterior) |
+| `destination-backfill` | Destino completado, o llave corta cambiada por la completa, al releer los avisos ya importados |
+| `group-rule-key-backfill` | Regla de un destino pasada de la llave corta a la completa |
+| `time-backfill` | Hora completada al releer los avisos ya importados |
+| `qr-not-own-transfer` | Pago por QR que Ollama propuso como transferencia propia, vuelto transferencia |
+| `card-account-backfill` | Tarjeta corregida por los dígitos del aviso al releer los avisos ya importados (con la anterior) |
 | `payroll-deduction-income` | Ingreso espejo de una cuota descontada de la nómina |
 | `mailbox-possible-duplicate` | Posible duplicado entre el Gmail de Manuela y su archivo |
 | `reprocess-replace-card-payments` | Pagos de tarjeta reemplazados por `-ReprocessEmpty` |
@@ -952,8 +1011,9 @@ tablas. No cambia importes, decisiones ni auditoría.
 - Extractos del banco de 2026: leídos sin errores; una segunda ejecución no
   importó nada. Extractos de Protección (2026-11-16): 10 de pensión voluntaria en
   los dos formatos y 2 de cesantías, encadenados sin diferencias mayores a $10.
-- `backfill-destinations`: guardó el destino de casi todos los pagos de Santiago
-  sin cambiar importes ni decisiones.
+- Destinos de pagos ya importados, releyendo los avisos de todos los buzones:
+  quedó guardado el destino de casi todos, con la llave completa, sin cambiar
+  importes ni decisiones.
 - Recuperación de avisos (2026-11-14/15): 9 ingresos y 8 gastos recuperados con
   `-ReprocessEmpty`, 9 pagos de tarjeta leídos, y la cola de 15 avisos quedó vacía
   (9 informativos, 2 inversiones y 4 movimientos recuperados, más 12
@@ -964,7 +1024,7 @@ tablas. No cambia importes, decisiones ni auditoría.
 - Extractos del Gmail de Manuela (2026-11-18): el lector de Gmail descargó en
   solo lectura los PDF de extractos desde diciembre de 2025 (ahorros, Fiducuenta,
   Mastercard, Visa y cesantías).
-- Extractos por titular (2026-11-19), `reconcile-statements -ReadOnly`: 111
+- Extractos por titular (2026-11-19), en solo lectura: 111
   extractos de Santiago y 31 de Manuela, cada buzón con la contraseña de su
   titular, sin errores. El lector de ahorros solo leía la primera página de cada
   trimestre (33 líneas; se saltaban entre 88 y 151 por extracto). Corregido, los 20
@@ -997,7 +1057,7 @@ tablas. No cambia importes, decisiones ni auditoría.
   otra tarjeta en unos 17 de 44 avisos (por ejemplo «Visa» para la Mastercard).
   Con la tarjeta por sus dígitos, la cuenta coincide con los dígitos del aviso en
   todos los que nombran una tarjeta conocida.
-- `backfill-card-accounts` (2026-11-20): de 547 avisos de Santiago, 234
+- Tarjeta por sus dígitos en avisos ya importados (2026-11-20): de 547 avisos de Santiago, 234
   movimientos de 2026 tenían otra tarjeta que la de sus dígitos (132 Amex que eran
   Mastercard, 51 Visa que eran Mastercard, 23 Mastercard que eran Amex…). En todos,
   los dígitos aparecían en la forma del banco («con tu T.Cred \*NNNN»). Corregidos
@@ -1011,6 +1071,17 @@ tablas. No cambia importes, decisiones ni auditoría.
   una decisión guardada desde el celular, con su nombre en la columna `device` de
   la auditoría.
   Revocado con `devices -Revoke`, el celular volvió a pedir un código al recargar.
+- Cambios del panel de la versión 0.4.0 (2026-11-21), revisados por el usuario con
+  datos reales:
+  - Decisiones: tasa en la tarjeta de un destino con compras en dólares, reglas
+    que proponen su decisión cuando solo falta la tasa, y Decisión sin los
+    botones por titular.
+  - Panel: vista en el celular, mensajes flotantes, aviso que se cierra, titular
+    fijo junto a las pestañas y todo en COP sin selector de moneda.
+  - Pestaña Mes: edición de un movimiento desde el detalle por categoría y
+    «Extractos y saldos» por tipo de producto.
+  - Pestaña Año: inversiones y créditos con detalle por producto, y los colores
+    de «Ingresos y gastos».
 
 **Pendiente**
 

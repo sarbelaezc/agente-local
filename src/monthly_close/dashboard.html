@@ -168,6 +168,8 @@
     .chip .chip-year { margin-left: 4px; opacity: .7; font-size: 12px; }
     .link-button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; cursor: pointer; }
     .link-button:hover { text-decoration-color: currentColor; }
+    /* The income card's link to the list of incomes, further down in «Ingresos por tipo». */
+    .metric .card-jump { margin-top: 8px; color: var(--ink2); font-size: 13px; font-weight: 500; }
     .legend-row.link-button { width: 100%; text-decoration: none; }
     .legend-row.link-button:hover .legend-label > span:last-child { text-decoration: underline; }
     svg .jump { cursor: pointer; }
@@ -178,23 +180,51 @@
     .month-summary { margin: 0 0 12px; }
     .month-summary .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
     .month-summary .metrics.single-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .month-summary .metrics.single-row .hero strong { font-size: clamp(22px, 2.4vw, 32px); overflow-wrap: normal; }
+    .month-summary .metrics.single-row .hero > strong { font-size: clamp(22px, 2.4vw, 32px); overflow-wrap: normal; }
     .metric { padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--surf); }
     .metric .label { display: block; color: var(--ink2); font-size: 13px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
-    .metric strong { display: block; margin-top: 6px; font-size: 22px; font-weight: 750; letter-spacing: -.5px; overflow-wrap: anywhere; }
+    /* Only a card's own figure is big; the numbers of its detail list keep the list's size. */
+    .metric > strong { display: block; margin-top: 6px; font-size: 22px; font-weight: 750; letter-spacing: -.5px; overflow-wrap: anywhere; }
     .metric small { display: block; margin-top: 8px; color: var(--ink2); font-size: 13px; }
-    .metric.hero strong { font-size: clamp(28px, 3.4vw, 40px); line-height: 1.05; letter-spacing: -1px; }
+    .metric.hero > strong { font-size: clamp(28px, 3.4vw, 40px); line-height: 1.05; letter-spacing: -1px; }
     .metric.action { display: flex; flex-direction: column; justify-content: flex-start; cursor: pointer; text-align: left; font: inherit; color: inherit; }
     .metric.action:hover { border-color: var(--ink2); }
     .split-bar { display: flex; gap: 2px; height: 10px; margin-top: 12px; border-radius: 4px; overflow: hidden; background: var(--soft); }
     .split-bar span { display: block; min-width: 2px; }
     .split-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; color: var(--ink2); font-size: 12px; }
     .split-legend span { display: inline-flex; align-items: center; gap: 5px; }
-    .metric-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-    .metric.minor { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; padding: 7px 13px; border-radius: 999px; font-size: 13px; }
-    .metric.minor .label { display: inline; font-size: inherit; letter-spacing: 0; text-transform: none; font-weight: 600; }
-    .metric.minor strong { display: inline; margin: 0; font-size: inherit; letter-spacing: 0; }
-    .metric.minor small { display: inline; margin: 0; font-size: 12px; }
+    /* Secondary figures: tiles of one width that grow to fill each row, whatever the length of each note. */
+    .metric-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    /* --per-row comes from the number of tiles, so rows stay balanced (7 tiles: 4 + 3, never 5 + 2). */
+    .metric.minor { flex: 1 1 calc((100% - (var(--per-row, 4) - 1) * 8px) / var(--per-row, 4)); display: flex; flex-wrap: wrap; align-items: baseline; align-content: flex-start; justify-content: space-between; gap: 3px 12px; min-width: 190px; padding: 10px 14px; border-radius: 12px; }
+    /* The name on the left and the figure on the right of one line; a narrow tile moves the
+       figure below the name. The note and the detail take a line of their own. */
+    .metric.minor .label { flex: 1 0 auto; }
+    .metric.minor small, .metric.minor details.inline-detail, .metric.minor.stacked .label { flex-basis: 100%; }
+    /* A tile with its detail open takes the whole row, so the list is never squeezed. */
+    .metric.minor:has(> details[open]) { flex-basis: 100%; }
+    .metric.minor details.inline-detail > summary { padding: 2px 0 0; }
+    /* Motion: a list unfolds from its summary and folds back into it, a tab or month fades in,
+       so the eye follows what changed. The state changes at once; only the drawing moves. */
+    :root { interpolate-size: allow-keywords; }
+    details::details-content { block-size: 0; overflow: clip; transition: block-size .26s ease, content-visibility .26s allow-discrete; }
+    /* Opening shows the content at once and only grows; closing keeps it while it folds. */
+    details[open]::details-content { block-size: auto; transition: block-size .26s ease; }
+    @keyframes view-in { from { opacity: 0; transform: translateY(6px); } }
+    @keyframes reveal-in { from { opacity: 0; transform: translateY(-4px); } }
+    .view-in { animation: view-in .24s ease-out; }
+    .detail-editor:not([hidden]) { animation: reveal-in .2s ease-out; }
+    @media (prefers-reduced-motion: reduce) {
+      details::details-content, details[open]::details-content { transition: none; }
+      .view-in, .detail-editor:not([hidden]) { animation: none; }
+    }
+    /* How much of the spending the income covers: green when the balance is in favour, red
+       when it is against; the text beside it says the same, so colour is never alone. */
+    .split-bar.meter span { flex: none; background: var(--bad); }
+    .split-bar.meter.favor span { background: var(--good); }
+    .metric.minor .label { font-size: 12.5px; letter-spacing: 0; text-transform: none; font-weight: 600; }
+    .metric.minor strong { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: 0; font-variant-numeric: tabular-nums; overflow-wrap: normal; white-space: nowrap; }
+    .metric.minor small { margin: 0; color: var(--mut); font-size: 12px; line-height: 1.4; }
     .decision-summary { margin-bottom: 12px; }
     /* Year view: monthly table with the month always visible while scrolling sideways. */
     #year-table table { min-width: 860px; }
@@ -251,9 +281,15 @@
     .bar-row .bar-track { height: 10px; }
     .bar-row .bar-fill { height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--s1); }
     .bar-row strong { font-weight: 600; font-variant-numeric: tabular-nums; }
-    .metric details.inline-detail { margin-top: 6px; }
-    .metric details.inline-detail > summary { padding: 4px 0; color: var(--ink2); font-size: 13px; font-weight: 500; }
-    .metric .inline-detail .detail-row strong, .metric .inline-detail .flag-tag { display: inline; margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0; white-space: nowrap; }
+    details.inline-detail { margin-top: 6px; }
+    /* A long list scrolls inside its card instead of stretching the whole row. */
+    .detail-row.stacked { align-items: baseline; }
+    .detail-row .detail-text { display: grid; gap: 1px; }
+    .detail-row .detail-title { color: var(--ink); overflow-wrap: anywhere; }
+    .detail-row .detail-sub { color: var(--mut); font-size: 12px; }
+    .inline-detail .detail-rows { max-height: 280px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+    details.inline-detail > summary { padding: 4px 0; color: var(--ink2); font-size: 13px; font-weight: 500; }
+    .inline-detail .detail-row strong, .inline-detail .flag-tag { display: inline; margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0; white-space: nowrap; }
 
     /* Tables and details */
     .table-wrap { width: 100%; overflow-x: auto; }
@@ -321,6 +357,12 @@
     button.balance-product[aria-pressed="true"] { background: var(--soft); box-shadow: inset 3px 0 0 var(--balance-color, var(--s1)); }
     /* Statements card: one block per kind of product, one two-line row per statement. */
     .statement-section + .statement-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+    /* Each block folds to its heading; it opens on its own when a statement needs a look. */
+    .statement-section > summary { list-style: none; padding: 2px 0; font-weight: inherit; }
+    .statement-section > summary::-webkit-details-marker { display: none; }
+    .statement-section > summary h4::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 10px 2px 2px; border-right: 2px solid var(--mut); border-bottom: 2px solid var(--mut); transform: rotate(-45deg); transition: transform .15s ease; }
+    .statement-section[open] > summary h4::before { transform: rotate(45deg); }
+    @media (prefers-reduced-motion: reduce) { .statement-section > summary h4::before { transition: none; } }
     .statement-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; }
     .statement-head h4 { margin: 0; color: var(--ink); font-size: 14px; }
     .statement-head strong { font-size: 16px; font-variant-numeric: tabular-nums; }
@@ -345,6 +387,8 @@
       .top-actions .button { min-height: 38px; padding: 7px 9px; font-size: 13px; }
       .config-form { grid-template-columns: 1fr; }
       .metrics, .month-summary .metrics, .month-summary .metrics.single-row { grid-template-columns: 1fr; gap: 10px; }
+      .metric.minor { flex-basis: 140px; min-width: 140px; padding: 10px 12px; }
+      .metric.minor strong { font-size: 14.5px; white-space: normal; }
       .toolbar { align-items: flex-start; }
       .toolbar-group { width: 100%; }
       .month-chips { margin-right: -14px; padding-right: 14px; }
@@ -489,6 +533,7 @@
             <article class="card" id="income-card">
               <div class="card-header"><div><h3>Ingresos por tipo</h3><p>Solo dinero recibido que confirmaste como ingreso</p></div></div>
               <div id="income-ranking" class="rank-list"></div>
+              <div id="income-detail"></div>
             </article>
             <article class="card" id="card-payment-card">
               <div class="card-header"><div><h3>Pagos por tarjeta</h3><p>Abonos a la deuda leídos del aviso; no suman al gasto</p></div></div>
@@ -557,7 +602,7 @@
         </section>
 
         <section id="panel-decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden>
-          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Agrupadas por destino, de la más antigua a la más reciente: los botones de la tarjeta deciden todos sus movimientos pendientes; «Ver movimientos» permite decidir uno por uno. Para efectivo, elige la categoría Retiro en efectivo; Inversión y Retiro de inversión ponen su categoría solos.</p></div></div>
+          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Agrupadas por destino, de la más antigua a la más reciente.</p></div></div>
           <div id="decision-summary" class="metric hero decision-summary" aria-live="polite"></div>
           <section id="card-review" hidden>
             <h3>Tarjetas con número nuevo · confirma cuál es</h3>
@@ -598,7 +643,7 @@
             <div id="history-list" class="decision-list" style="margin-top:12px"></div>
           </details>
         </section>
-        <p class="footer-note">Importes en la moneda del cierre; las compras en dólares cuentan con la tasa que les pones al decidirlas. Un mes queda verificado cuando lo revisas a mano o cuando cuadra con los extractos de Santiago.</p>
+        <p class="footer-note">Importes en la moneda del cierre; las compras en dólares cuentan con la tasa que les pones al decidirlas. Un mes queda verificado cuando lo revisas a mano o cuando cuadra con los extractos de todos los titulares.</p>
       </section>
     </main>
   </div>
@@ -633,6 +678,8 @@
         openCategories: new Set(),
         balanceFocus: { investments: null, credits: null },
         balanceListOpen: { investments: false, credits: false },
+        // Statement blocks the person opened or closed, by "month|block".
+        statementOpen: new Map(),
         editingTx: null,
         month: initialMonth && monthPattern.test(initialMonth) ? initialMonth : currentMonth(),
         year: initialYear && /^\d{4}$/.test(initialYear) ? initialYear : String(new Date().getFullYear()),
@@ -830,12 +877,20 @@
       }
       function failureReason(field) {
         const reasons = {
-          merchant: "el comercio que propuso Ollama no aparece en el aviso",
-          amount_text: "el monto que propuso Ollama no aparece en el aviso",
-          events: "el aviso dice que salió dinero, pero no se extrajo ningún movimiento",
-          correction: "la propuesta no coincidía con el aviso y la corrección cambió otros datos o quitó movimientos",
+          merchant: "El comercio que propuso Ollama no aparece en el aviso",
+          amount_text: "El monto que propuso Ollama no aparece en el aviso",
+          events: "El aviso dice que salió dinero, pero no se extrajo ningún movimiento",
+          correction: "La propuesta no coincidía con el aviso y la corrección cambió otros datos o quitó movimientos",
         };
-        return reasons[field] || `el campo ${field} no coincide con el aviso`;
+        return reasons[field] || `El campo ${field} no coincide con el aviso`;
+      }
+      // The date of a movement, with its hour when known: the same in every list and card.
+      function movementWhen(tx) {
+        if (!tx.day) return "Sin fecha";
+        return typeof tx.time === "string" && tx.time ? `${formatDate(tx.day)} · ${tx.time}` : formatDate(tx.day);
+      }
+      function byWhen(a, b) {
+        return `${a.day || ""} ${a.time || ""}`.localeCompare(`${b.day || ""} ${b.time || ""}`);
       }
       function formatDate(value) {
         if (typeof value !== "string") return "Fecha no disponible";
@@ -868,7 +923,8 @@
       }
       function itemText(item) {
         const name = typeof item === "string" && item.trim() ? item.trim() : "Sin especificar";
-        return name;
+        // Names come as the notice wrote them («tarjeta de credito *1234»): they start in uppercase.
+        return name.charAt(0).toLocaleUpperCase("es") + name.slice(1);
       }
       // Owner label in the household view, plus marks a person still has to see.
       function appendFlags(host, tx) {
@@ -940,10 +996,13 @@
         const detail = el("details", "inline-detail");
         detail.append(el("summary", "", summary));
         const body = el("div", "detail-rows");
-        rows.slice().sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
-          const row = el("div", "detail-row");
-          const text = el("span", "", `${tx.day ? formatDate(tx.day) : "Sin fecha"} · ${itemText(tx.merchant)} · ${itemText(tx.category)}`);
-          appendFlags(text, tx);
+        rows.slice().sort(byWhen).forEach(tx => {
+          // Two lines: who and how much, then when, the category and the tags in grey.
+          const row = el("div", "detail-row stacked");
+          const text = el("span", "detail-text");
+          const sub = el("span", "detail-sub", `${movementWhen(tx)} · ${itemText(tx.category)}`);
+          appendFlags(sub, tx);
+          text.append(el("span", "detail-title", itemText(tx.merchant)), sub);
           row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
           body.append(row);
         });
@@ -953,15 +1012,30 @@
       // Bar and legend of a spending card: in the household view personal spending is shown
       // per member; family is one item.
       function appendSpendSplit(card, personal, family) {
-        const parts = state.owner === "hogar"
+        appendSplit(card, state.owner === "hogar"
           ? [
             ...safeArray(state.data.owners).map((owner, index) => [
               `Personal ${owner.label}`, personal.filter(tx => tx.owner === owner.id), index ? palette[3] : palette[0]
             ]),
             ["Familiar", family, palette[1]]
           ]
-          : [["Personal", personal, palette[0]], ["Familiar", family, palette[1]]];
-        if (sum(personal) + sum(family) > 0) {
+          : [["Personal", personal, palette[0]], ["Familiar", family, palette[1]]]);
+      }
+      // The kinds of income when there is more than one, in every view (Hogar too: whose income
+      // it was is in the owner filter). Each kind keeps its colour by the fixed order of the
+      // income categories, apart from the personal and family colours.
+      function appendIncomeSplit(card, incomes) {
+        if (sum(incomes) <= 0) return;
+        const kinds = [...incomeCategories(), "Sin tipo"];
+        const colors = [palette[2], palette[4], palette[5], palette[6]];
+        const typeOf = tx => kinds.includes(tx.category) ? tx.category : "Sin tipo";
+        const parts = kinds.map((kind, index) => [kind, incomes.filter(tx => typeOf(tx) === kind), colors[index % colors.length]])
+          .filter(([, rows]) => rows.length);
+        if (parts.length > 1) appendSplit(card, parts);
+      }
+      // A bar split in parts ([name, rows, colour]) and its legend with each amount and count.
+      function appendSplit(card, parts) {
+        if (parts.some(([, rows]) => sum(rows) > 0)) {
           const bar = el("div", "split-bar");
           bar.setAttribute("role", "img");
           bar.setAttribute("aria-label", parts.map(([name, rows]) => `${name} ${formatMoney(sum(rows))}`).join(", "));
@@ -985,6 +1059,46 @@
         });
         card.append(split);
       }
+      // Balance: how much of the spending the confirmed income covers.
+      function appendCoverageMeter(card, income, spend) {
+        if (income <= 0 || spend <= 0) return;
+        const share = income / spend;
+        const text = share < 1
+          ? `Los ingresos cubren el ${Math.round(share * 100)} % del gasto`
+          : `Los ingresos superan el gasto en ${Math.round((share - 1) * 100)} %`;
+        const meter = el("div", `split-bar meter${share >= 1 ? " favor" : ""}`);
+        meter.setAttribute("role", "img");
+        meter.setAttribute("aria-label", text);
+        const fill = el("span");
+        fill.style.width = `${Math.min(share, 1) * 100}%`;
+        meter.append(fill);
+        card.append(meter, el("div", "split-legend", text));
+      }
+      // Rows of tiles as even as possible: up to five per row.
+      function balanceStrip(strip) {
+        const count = strip.childElementCount;
+        strip.style.setProperty("--per-row", String(Math.ceil(count / Math.ceil(count / 5))));
+      }
+      // Each tile puts its figure to the right of its name; when one tile of a row has no room
+      // for that, the whole row puts the figures below the names, so a row never mixes both.
+      function fitTiles(host) {
+        for (const strip of host.querySelectorAll(".metric-strip")) {
+          const tiles = Array.from(strip.children);
+          tiles.forEach(tile => tile.classList.remove("stacked"));
+          const rows = new Map();
+          tiles.forEach(tile => rows.set(tile.offsetTop, [...(rows.get(tile.offsetTop) || []), tile]));
+          rows.forEach(row => {
+            const wrapped = row.some(tile => {
+              const label = tile.querySelector(".label"), figure = tile.querySelector(":scope > strong");
+              return label && figure && figure.offsetTop > label.offsetTop + 2;
+            });
+            if (wrapped) row.forEach(tile => tile.classList.add("stacked"));
+          });
+        }
+      }
+      // Refit when a summary shows, the window changes width or a tile opens its list.
+      const tileObserver = new ResizeObserver(entries => entries.forEach(entry => fitTiles(entry.target)));
+      ["#month-metrics", "#year-metrics"].forEach(id => tileObserver.observe($(id)));
       // Headline cards of the month and year summaries. "Por decidir" opens the Decision tab
       // and only appears while something is pending; otherwise the other three share one row.
       function summaryHeroes(cards, pending, pendingIncomes) {
@@ -1274,7 +1388,7 @@
           if (index === 0 || months[index - 1].slice(0, 4) !== month.slice(0, 4)) button.append(el("span", "chip-year", month.slice(0, 4)));
           button.type = "button";
           button.dataset.month = month;
-          button.setAttribute("aria-label", monthLabel(month));
+          button.setAttribute("aria-label", capitalize(monthLabel(month)));
           button.setAttribute("aria-pressed", String(month === state.month));
           button.addEventListener("click", () => goToMonth(month));
           chips.append(button);
@@ -1283,7 +1397,7 @@
         const coverageSelect = $("#coverage-month");
         coverageSelect.replaceChildren();
         months.slice().reverse().forEach(month => {
-          const option = el("option", "", monthLabel(month));
+          const option = el("option", "", capitalize(monthLabel(month)));
           option.value = month;
           option.selected = month === state.month;
           coverageSelect.append(option);
@@ -1334,6 +1448,9 @@
         if (state.activeTab !== "month") {
           selectTab("month");
           $("#panel-month").scrollIntoView({ block: "start" });
+        } else {
+          // The chips stay put; what they show changes.
+          playViewIn(...Array.from($("#panel-month").children).filter(node => node.id !== "month-chips"));
         }
         syncUrl();
         requestAnimationFrame(centerSelectedMonth);
@@ -1392,14 +1509,22 @@
             : `${incomes.length} confirmados`
         );
         income.classList.add("hero");
-        if (incomes.length) income.append(inlineDetail(`Ver ${incomes.length === 1 ? "el ingreso" : `los ${incomes.length} ingresos`}`, incomes));
-        if (paidBack.length) spend.append(inlineDetail(`Ver ${paidBack.length === 1 ? "el abono" : `los ${paidBack.length} abonos`} de terceros`, paidBack));
+        appendIncomeSplit(income, incomes);
+        // The list of incomes lives in «Ingresos por tipo»; the summary card takes you there.
+        const incomeLabel = `Ver ${incomes.length === 1 ? "el ingreso" : `los ${incomes.length} ingresos`}`;
+        if (incomes.length) {
+          const jump = el("button", "link-button card-jump", incomeLabel);
+          jump.type = "button";
+          jump.addEventListener("click", openIncomeDetail);
+          income.append(jump);
+        }
         const net = makeMetric(
           "Balance", formatMoney(balance),
           incomeTotal === 0 && total === 0 ? "Sin ingresos ni gastos decididos"
             : `${balance >= 0 ? "A favor" : "En contra"} · ingresos confirmados − gasto`
         );
         net.classList.add("hero");
+        appendCoverageMeter(net, incomeTotal, total);
         const heroes = summaryHeroes([spend, income, net], pending, pendingIncomes);
 
         const strip = el("div", "metric-strip");
@@ -1407,20 +1532,31 @@
           const chip = makeMetric(label, value, note);
           chip.classList.add("minor");
           strip.append(chip);
+          return chip;
         };
+        // What touches the spending first, then what stays out of it.
+        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
+        // The money received lives in its own tile; the spending card only shows the subtraction.
+        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`)
+          .append(inlineDetail(`Ver ${paidBack.length === 1 ? "el abono" : `los ${paidBack.length} abonos`}`, paidBack));
+        if (cardPayments.length) minor("Pagos a tarjetas", formatMoney(sum(cardPayments)), `${cardPayments.length} · no es gasto`);
+        if (between.length) minor("Entre Santiago y Manuela", formatMoney(sum(between)), `${between.length} · no cuentan en Hogar`);
         if (investments.length || withdrawals.length) {
           minor("Inversiones", formatMoney(netInvestments(inMonth)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo · fuera del gasto`);
         }
-        if (cardPayments.length) minor("Pagos a tarjetas", formatMoney(sum(cardPayments)), `${cardPayments.length} · no es gasto`);
-        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
-        if (between.length) minor("Entre Santiago y Manuela", formatMoney(sum(between)), `${between.length} · no cuentan en Hogar`);
-        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "ya incluido en el gasto");
+        balanceStrip(strip);
         $("#month-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
+        fitTiles($("#month-metrics"));
 
         $("#income-card").hidden = incomes.length === 0;
         $("#card-payment-card").hidden = cardPayments.length === 0;
         renderRanking("#income-ranking", incomes, tx => tx.category, "Sin tipo", items => items);
-        renderRanking("#card-payment-ranking", cardPayments, tx => tx.merchant, "Sin tarjeta", items => items);
+        $("#income-detail").replaceChildren(...(incomes.length ? [inlineDetail(incomeLabel, incomes)] : []));
+        // "tarjeta de credito *1234" from the notice: the short name keeps the digits visible.
+        renderRanking("#card-payment-ranking", cardPayments, tx => {
+          const digits = typeof tx.merchant === "string" ? /\*\s*(\d{4})\s*$/.exec(tx.merchant) : null;
+          return digits ? `Tarjeta *${digits[1]}` : tx.merchant;
+        }, "Sin tarjeta", items => items);
         renderCalendar(inMonth, monthDate);
         renderDonut(decisions);
         renderCumulative(inMonth, monthDate);
@@ -1503,15 +1639,27 @@
           const rows = inMonth.filter(belongs);
           const known = withTotal ? Array.from(latest.values()).filter(belongs) : [];
           if (!rows.length && !known.length) return;
-          const section = el("section", "statement-section");
+          // Folded to its heading and total; a statement with movements no notice had opens it.
+          const unmatched = rows.filter(check => check.missing).length;
+          const key = `${state.month}|${label}`;
+          const section = el("details", "statement-section");
+          section.open = state.statementOpen.has(key) ? state.statementOpen.get(key) : unmatched > 0;
+          section.addEventListener("toggle", () => state.statementOpen.set(key, section.open));
+          const summary = el("summary");
           const head = el("div", "statement-head");
           head.append(el("h4", "", label));
           if (known.length) {
             const total = known.reduce((sumValue, check) => sumValue + check.balance_minor, 0);
             head.append(el("strong", "", formatMoney(total, "COP")),
               el("p", "", `${known.length} ${known.length === 1 ? "producto" : "productos"} · saldo al ${formatDate(known.map(check => check.period_end).sort().pop())}`));
-          } else if (note) head.append(el("p", "", note));
-          section.append(head);
+          } else if (note) {
+            const count = `${rows.length} ${rows.length === 1 ? "extracto" : "extractos"}`;
+            head.append(el("p", "", unmatched
+              ? `${note} · ${count}, ${unmatched} con movimientos sin aviso`
+              : `${note} · ${count}, ${rows.length === 1 ? "cuadra" : "todos cuadran"}`));
+          }
+          summary.append(head);
+          section.append(summary);
           const list = el("div", "statement-rows");
           rows.forEach(check => list.append(statementRow(check)));
           if (!rows.length) list.append(el("p", "hint", "Sin extractos con corte en este mes."));
@@ -1533,7 +1681,7 @@
         const host = $("#calendar");
         host.replaceChildren();
         for (const day of weekdayNames) {
-          const heading = el("div", "weekday", day);
+          const heading = el("div", "weekday", capitalize(day));
           heading.setAttribute("aria-hidden", "true");
           host.append(heading);
         }
@@ -1558,7 +1706,7 @@
         for (let day = 1; day <= days; day++) {
           const date = new Date(year, month, day);
           const today = date.toDateString() === new Date().toDateString() ? " today" : "";
-          const label = `${weekdayNames[(date.getDay() + 6) % 7]}, ${day} ${monthLabel(state.month)}`;
+          const label = `${capitalize(weekdayNames[(date.getDay() + 6) % 7])}, ${day} de ${monthLabel(state.month)}`;
           if (!grouped.has(day)) {
             const cell = el("div", `day-cell${today}`);
             cell.setAttribute("aria-label", label);
@@ -1600,7 +1748,8 @@
         rows.forEach(tx => {
           const row = el("div", "detail-row");
           const scope = tx.decision === "family" ? "Familiar" : "Personal";
-          const text = el("span", "", `${itemText(tx.merchant)} · ${itemText(tx.category)} · ${scope}`);
+          const hour = typeof tx.time === "string" && tx.time ? `${tx.time} · ` : "";
+          const text = el("span", "", `${hour}${itemText(tx.merchant)} · ${itemText(tx.category)} · ${scope}`);
           appendFlags(text, tx);
           row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
           body.append(row);
@@ -1741,13 +1890,14 @@
       }
 
       // Name, proportional bar and amount, as in Manuela's rankings.
-      function barRow(name, amount, max, tipText = `${name}: ${formatMoney(amount)}`) {
+      function barRow(name, amount, max, tipText = `${capitalize(name)}: ${formatMoney(amount)}`) {
         const row = setTip(el("div", "bar-row"), tipText);
         const track = el("div", "bar-track");
         const fill = el("div", "bar-fill");
         fill.style.width = `${max > 0 ? Math.max(1, 100 * Math.max(0, amount) / max) : 0}%`;
         track.append(fill);
-        row.append(el("span", "bar-name", name), track, el("strong", "", formatMoney(amount)));
+        // A bar's name is a list line of its own: weekdays and card names from notices start in uppercase.
+        row.append(el("span", "bar-name", capitalize(name)), track, el("strong", "", formatMoney(amount)));
         return row;
       }
 
@@ -1769,6 +1919,16 @@
           `${name} · ${value.count}`, value.total, max,
           `${name}: ${formatMoney(value.total)} en ${value.count} ${value.count === 1 ? "movimiento" : "movimientos"}`
         )));
+      }
+
+      // Opens the list of incomes in «Ingresos por tipo» and brings that card into view.
+      function openIncomeDetail() {
+        const detail = $("#income-detail details");
+        if (!detail) return;
+        detail.open = true;
+        hideTip();
+        $("#income-card").scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        detail.querySelector("summary").focus({ preventScroll: true });
       }
 
       // Opens a category of the month's detail and brings it into view; spending comes first in the list.
@@ -1832,13 +1992,13 @@
             const pending = rows.filter(tx => tx.decision == null).length;
             detail.append(el("summary", "", `${category} · ${totalOf(rows)} · ${rows.length} movimientos${pending ? ` · ${pending} por decidir` : ""}`));
             const body = el("div", "detail-rows");
-            rows.sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
+            rows.sort(byWhen).forEach(tx => {
               const row = el("button", "detail-row");
               row.type = "button";
               row.dataset.txId = tx.id;
               row.setAttribute("aria-expanded", "false");
-              row.setAttribute("aria-label", `Cambiar ${itemText(tx.merchant)} del ${tx.day ? formatDate(tx.day) : "día sin fecha"}, ${formatMoney(tx.amount_minor)}, ${statusOf(tx)}`);
-              const text = el("span", "", `${tx.day ? formatDate(tx.day) : "Sin fecha"} · ${itemText(tx.merchant)} · ${statusOf(tx)}`);
+              row.setAttribute("aria-label", `Cambiar ${itemText(tx.merchant)} del ${tx.day ? movementWhen(tx) : "día sin fecha"}, ${formatMoney(tx.amount_minor)}, ${statusOf(tx)}`);
+              const text = el("span", "", `${movementWhen(tx)} · ${itemText(tx.merchant)} · ${statusOf(tx)}`);
               appendFlags(text, tx);
               const amount = el("span", "detail-amount");
               const chevron = el("span", "detail-chevron", "▾");
@@ -1965,6 +2125,7 @@
             + (pendingIncomes.length ? ` · ${pendingIncomes.length} por confirmar (${formatMoney(sum(pendingIncomes))})` : "")
         );
         income.classList.add("hero");
+        appendIncomeSplit(income, buckets.flatMap(bucket => bucket.incomes));
         const balance = yearIncome - yearSpend;
         const net = makeMetric(
           "Balance del año", formatMoney(balance),
@@ -1972,6 +2133,7 @@
             : `${balance >= 0 ? "A favor" : "En contra"} · ingresos confirmados − gasto${pending.length ? ` · sin contar ${formatMoney(sum(pending))} por decidir` : ""}`
         );
         net.classList.add("hero");
+        appendCoverageMeter(net, yearIncome, yearSpend);
         const heroes = summaryHeroes([spend, income, net], pending, pendingIncomes);
 
         const strip = el("div", "metric-strip");
@@ -1979,17 +2141,23 @@
           const chip = makeMetric(label, value, note);
           chip.classList.add("minor");
           strip.append(chip);
+          return chip;
         };
-        if (closed.length) minor("Promedio de gasto", formatMoney(average), `por mes cerrado · ${closed.length} ${closed.length === 1 ? "mes" : "meses"}`);
+        // The spending first (a row of four), then investments and coverage.
+        if (closed.length) minor("Promedio de gasto", formatMoney(average), `Por mes cerrado · ${closed.length} ${closed.length === 1 ? "mes" : "meses"}`);
         if (highest && bucketTotal(highest) > 0) minor("Mes de mayor gasto", formatMoney(bucketTotal(highest)), capitalize(monthLabel(highest.month)));
+        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
+        // The money received lives in its own tile; the spending card only shows the subtraction.
+        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`)
+          .append(inlineDetail(`Ver ${paidBack.length === 1 ? "el abono" : `los ${paidBack.length} abonos`}`, paidBack));
         if (investments.length || withdrawals.length) {
           minor("Inversión neta", formatMoney(netInvestments(items)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo · fuera del gasto`);
         }
-        if (withdrawals.length) minor("Retiros de inversión", formatMoney(sum(withdrawals)), "fuera del gasto");
-        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "ya incluido en el gasto");
-        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
-        if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed}`, "meses transcurridos revisados o conciliados");
+        if (withdrawals.length) minor("Retiros de inversión", formatMoney(sum(withdrawals)), "Fuera del gasto");
+        if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed} ${coverage.elapsed === 1 ? "mes" : "meses"}`, "Revisados o conciliados");
+        balanceStrip(strip);
         $("#year-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
+        fitTiles($("#year-metrics"));
 
         const categoryHost = $("#year-categories");
         categoryHost.replaceChildren();
@@ -2194,7 +2362,7 @@
         for (let index = 0; index < 12; index++) {
           const month = `${state.year}-${String(index + 1).padStart(2, "0")}`;
           const axis = svgEl("text", { x: xOf(index), y: height - 10, "text-anchor": "middle", class: month === current ? "axis-label current" : "axis-label" });
-          axis.textContent = monthNames[index].slice(0, 3);
+          axis.textContent = capitalize(monthNames[index].slice(0, 3));
           svg.append(axis);
         }
         // One column per month with a point: a guide line and its balance on hover, touch or focus.
@@ -2246,12 +2414,12 @@
               x: left + band * index + band * .12 + position * (barWidth + 2), y: top + chartHeight - barHeight,
               width: barWidth, height: barHeight, fill: colors[position], "fill-opacity": inProgress ? .45 : 1
             });
-            setTip(rect, `${monthLabel(bucket.month)}${inProgress ? " (en curso)" : ""} · ${name}: ${formatMoney(amount)}`);
+            setTip(rect, `${capitalize(monthLabel(bucket.month))}${inProgress ? " (en curso)" : ""} · ${name}: ${formatMoney(amount)}`);
             jumpToMonth(rect, bucket.month);
             svg.append(rect);
           });
           const label = svgEl("text", { x: left + band * index + band / 2, y: height - 12, "text-anchor": "middle", class: inProgress ? "axis-label current" : "axis-label" });
-          label.textContent = monthNames[index].slice(0, 3);
+          label.textContent = capitalize(monthNames[index].slice(0, 3));
           svg.append(label);
         });
         host.append(svg);
@@ -2311,14 +2479,14 @@
                 x, y: top + chartHeight - stackedHeight - segmentHeight, width: barWidth, height: segmentHeight,
                 fill: categoryColor(category), "fill-opacity": inProgress ? .45 : 1
               });
-              setTip(rect, `${monthLabel(bucket.month)}${inProgress ? " (en curso)" : ""} · ${category}: ${formatMoney(amount)}`);
+              setTip(rect, `${capitalize(monthLabel(bucket.month))}${inProgress ? " (en curso)" : ""} · ${category}: ${formatMoney(amount)}`);
               jumpToMonth(rect, bucket.month);
               svg.append(rect);
             }
             stackedHeight += segmentHeight;
           });
           const label = svgEl("text", { x: left + band * index + band / 2, y: height - 13, "text-anchor": "middle", class: inProgress ? "axis-label current" : "axis-label" });
-          label.textContent = monthNames[index].slice(0, 3);
+          label.textContent = capitalize(monthNames[index].slice(0, 3));
           svg.append(label);
         });
         host.append(svg);
@@ -2553,7 +2721,7 @@
           el("span", "label", "Por decidir"),
           el("strong", "", String(pending.length)),
           el("small", "", pending.length
-            ? `${pending.length === 1 ? "destino" : "destinos"} por decidir · ${pendingMovements} ${pendingMovements === 1 ? "movimiento" : "movimientos"} · ${formatMoney(pendingAmount)} sin sumar al gasto`
+            ? `${pending.length === 1 ? "Destino" : "Destinos"} por decidir · ${pendingMovements} ${pendingMovements === 1 ? "movimiento" : "movimientos"} · ${formatMoney(pendingAmount)} sin sumar al gasto`
             : "No hay destinos por decidir.")
         );
         const host = $("#pending-list");
@@ -2718,9 +2886,19 @@
         return button;
       }
 
+      // Cash and investments come from withdrawals and transfers, never from a purchase at a shop,
+      // so only those destinations recall where cash goes and that investments set their own category.
+      function cashHint(rows, options) {
+        const shopsOnly = rows.every(tx => ["purchase", "pse"].includes(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : ""));
+        if (shopsOnly || !options.some(([decision]) => decision === "investment")) return null;
+        return el("p", "hint", "Si fue efectivo, elige «Retiro en efectivo». «Inversión» y «Retiro de inversión» ponen su categoría solos.");
+      }
+
       function makeGroupCard(entry, isPrevious) {
         if (entry.rows.length === 1) {
           const card = makeDecisionCard(entry.rows[0], isPrevious);
+          const hint = cashHint(entry.rows, decisionOptions(entry.rows[0]));
+          if (hint) card.querySelector(".decision-category").append(hint);
           if (entry.rows[0].group_key) card.insertBefore(el("p", "hint", `Destino: ${groupTitle(entry)}`), card.children[1]);
           const toggle = betweenToggle(entry);
           if (toggle) {
@@ -2779,6 +2957,8 @@
           groupCategory.value = selected;
           field.append(label, groupCategory);
           if (typeof suggested === "string") field.append(suggestionNote(groupSuggestions[0].source));
+          const hint = cashHint(entry.rows, options);
+          if (hint) field.append(hint);
           card.append(field);
         }
         // One rate for every dollar movement of the destination; each one can still be changed below.
@@ -2840,7 +3020,8 @@
           card.append(line);
         }
         const details = el("details");
-        details.append(el("summary", "", `Ver ${entry.rows.length} movimientos`));
+        details.append(el("summary", "", isPrevious ? `Ver ${entry.rows.length} movimientos`
+          : `Ver los ${entry.rows.length} movimientos y decidir uno por uno`));
         const list = el("div", "decision-list");
         entry.rows.forEach(tx => list.append(makeDecisionCard(tx, isPrevious)));
         details.append(list);
@@ -3007,12 +3188,11 @@
       function makeDecisionCard(tx, isPrevious, onSaved = null) {
         const card = el("article", "decision-card");
         const meta = el("div", "decision-meta");
-        meta.append(el("span", "", formatDate(tx.day)), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
+        meta.append(el("span", "", movementWhen(tx)), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
         const title = el("h3", "", itemText(tx.merchant));
         card.append(meta, title, el("strong", "", formatMoney(tx.amount_minor, txCurrency(tx))));
         const flags = el("p", "hint");
         appendFlags(flags, tx);
-        if (typeof tx.time === "string" && tx.time) flags.prepend(document.createTextNode(`Hora ${tx.time}`));
         if (flags.childNodes.length) card.append(flags);
         if (txCurrency(tx) === "USD" && Number.isSafeInteger(tx.cop_amount_minor)) {
           card.append(el("p", "hint", `Estimado: ${formatMoney(tx.cop_amount_minor, "COP")} · Tasa manual: ${tx.exchange_rate} COP por USD.`));
@@ -3119,7 +3299,47 @@
         return card;
       }
 
+      // Motion follows the system setting; without it every change is instant.
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const motionAllowed = () => !reducedMotion.matches && typeof Element.prototype.animate === "function";
+      // Fades in a view that just appeared or changed (another tab, another month).
+      function playViewIn(...nodes) {
+        if (!motionAllowed()) return;
+        nodes.forEach(node => {
+          node.classList.remove("view-in");
+          void node.offsetWidth; // Restarts the animation when the class was already there.
+          node.classList.add("view-in");
+        });
+      }
+      // A tile that opens its list takes the whole row and the other tiles change place: each
+      // tile slides from where it was, and the one that grew unrolls from its old size.
+      function slideTiles(strip, before) {
+        fitTiles(strip.parentElement);
+        Array.from(strip.children).forEach(tile => {
+          const old = before.get(tile);
+          if (!old) return;
+          const now = tile.getBoundingClientRect();
+          const dx = old.left - now.left, dy = old.top - now.top;
+          const right = Math.max(0, now.width - old.width), bottom = Math.max(0, now.height - old.height);
+          if (!dx && !dy && !right && !bottom) return;
+          const radius = getComputedStyle(tile).borderTopLeftRadius;
+          tile.animate([
+            { transform: `translate(${dx}px, ${dy}px)`, clipPath: `inset(0 ${right}px ${bottom}px 0 round ${radius})` },
+            { transform: "none", clipPath: `inset(0 0 0 0 round ${radius})` }
+          ], { duration: 260, easing: "ease" });
+        });
+      }
+      document.addEventListener("click", event => {
+        const summary = event.target.closest(".metric-strip details > summary");
+        if (!summary || !motionAllowed()) return;
+        const strip = summary.closest(".metric-strip");
+        const before = new Map(Array.from(strip.children, tile => [tile, tile.getBoundingClientRect()]));
+        // The list opens right after this click; the next frame sees the tiles in their new places.
+        requestAnimationFrame(() => slideTiles(strip, before));
+      });
+
       function selectTab(tab) {
+        const changed = state.activeTab !== tab;
         state.activeTab = tab;
         const tabs = [
           ["month", "#tab-month", "#panel-month"],
@@ -3132,6 +3352,7 @@
           $(buttonSelector).tabIndex = selected ? 0 : -1;
           $(panelSelector).hidden = !selected;
         });
+        if (changed) playViewIn($(`#panel-${tab}`));
         hideTip();
         if (tab === "month") requestAnimationFrame(centerSelectedMonth);
         syncUrl();
