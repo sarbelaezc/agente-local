@@ -544,11 +544,16 @@ def test_year_view_shows_how_investments_and_credits_moved(store, start_panel, n
     expect(credits.locator(".statement-head p")).to_contain_text(re.compile(r"bajó 50[.\s]?000,00"))
     assert "*0006" not in credits.inner_text()
     fund = investments.locator(".statement-row").filter(has_text="*0003")
-    expect(fund).to_contain_text(re.compile(r"subió 30[.\s]?000,00\sCOP desde el inicio del año"))
-    # One point per month up to the latest, carrying the last known balance forward.
-    tips = investments.locator("svg rect[data-tip]").evaluate_all("rects => rects.map(rect => rect.dataset.tip)")
-    assert tips[0].startswith("Enero de 2026: 100") and "1 producto" in tips[0]
-    assert re.search(r"Marzo de 2026: 180[.\s]?000,00\sCOP · 2 productos", tips[2])
+    expect(fund).to_contain_text(re.compile(r"subió 30[.\s]?000,00\sCOP en el año · al 28 feb 2026"))
+    # Each product has its own line: one point per month up to now, repeating the last balance.
+    tips = fund.locator("svg.sparkline rect[data-tip]").evaluate_all("rects => rects.map(rect => rect.dataset.tip)")
+    assert re.search(r"Enero de 2026: 100[.\s]?000,00", tips[0])
+    assert re.search(r"Marzo de 2026: 130[.\s]?000,00", tips[2])
+    # A product whose first statement comes later starts later: no jump in anyone's line.
+    late = investments.locator(".statement-row").filter(has_text="*0005")
+    expect(late).to_contain_text("desde el 28 feb 2026")
+    late_tips = late.locator("svg.sparkline rect[data-tip]").evaluate_all("rects => rects.map(rect => rect.dataset.tip)")
+    assert "Febrero de 2026" in late_tips[0]
     page.locator("#owner-switch").get_by_role("button", name="Santiago").click()
     assert "*0005" not in investments.inner_text()
     assert not errors
