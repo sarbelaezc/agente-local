@@ -178,23 +178,28 @@
     .month-summary { margin: 0 0 12px; }
     .month-summary .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
     .month-summary .metrics.single-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .month-summary .metrics.single-row .hero strong { font-size: clamp(22px, 2.4vw, 32px); overflow-wrap: normal; }
+    .month-summary .metrics.single-row .hero > strong { font-size: clamp(22px, 2.4vw, 32px); overflow-wrap: normal; }
     .metric { padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--surf); }
     .metric .label { display: block; color: var(--ink2); font-size: 13px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
-    .metric strong { display: block; margin-top: 6px; font-size: 22px; font-weight: 750; letter-spacing: -.5px; overflow-wrap: anywhere; }
+    /* Only a card's own figure is big; the numbers of its detail list keep the list's size. */
+    .metric > strong { display: block; margin-top: 6px; font-size: 22px; font-weight: 750; letter-spacing: -.5px; overflow-wrap: anywhere; }
     .metric small { display: block; margin-top: 8px; color: var(--ink2); font-size: 13px; }
-    .metric.hero strong { font-size: clamp(28px, 3.4vw, 40px); line-height: 1.05; letter-spacing: -1px; }
+    .metric.hero > strong { font-size: clamp(28px, 3.4vw, 40px); line-height: 1.05; letter-spacing: -1px; }
     .metric.action { display: flex; flex-direction: column; justify-content: flex-start; cursor: pointer; text-align: left; font: inherit; color: inherit; }
     .metric.action:hover { border-color: var(--ink2); }
     .split-bar { display: flex; gap: 2px; height: 10px; margin-top: 12px; border-radius: 4px; overflow: hidden; background: var(--soft); }
     .split-bar span { display: block; min-width: 2px; }
     .split-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; color: var(--ink2); font-size: 12px; }
     .split-legend span { display: inline-flex; align-items: center; gap: 5px; }
-    .metric-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-    .metric.minor { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; padding: 7px 13px; border-radius: 999px; font-size: 13px; }
-    .metric.minor .label { display: inline; font-size: inherit; letter-spacing: 0; text-transform: none; font-weight: 600; }
-    .metric.minor strong { display: inline; margin: 0; font-size: inherit; letter-spacing: 0; }
-    .metric.minor small { display: inline; margin: 0; font-size: 12px; }
+    /* Secondary figures: tiles of one width that grow to fill each row, whatever the length of each note. */
+    .metric-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    /* --per-row comes from the number of tiles, so rows stay balanced (7 tiles: 4 + 3, never 5 + 2). */
+    .metric.minor { flex: 1 1 calc((100% - (var(--per-row, 4) - 1) * 8px) / var(--per-row, 4)); display: flex; flex-direction: column; gap: 3px; min-width: 190px; padding: 10px 14px; border-radius: 12px; }
+    /* How much of the spending the income covers: one neutral fill, the text says the figure. */
+    .split-bar.meter span { flex: none; background: color-mix(in srgb, var(--ink2) 70%, var(--surf)); }
+    .metric.minor .label { font-size: 12.5px; letter-spacing: 0; text-transform: none; font-weight: 600; }
+    .metric.minor strong { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: 0; font-variant-numeric: tabular-nums; overflow-wrap: normal; white-space: nowrap; }
+    .metric.minor small { margin: 0; color: var(--mut); font-size: 12px; line-height: 1.4; }
     .decision-summary { margin-bottom: 12px; }
     /* Year view: monthly table with the month always visible while scrolling sideways. */
     #year-table table { min-width: 860px; }
@@ -252,6 +257,12 @@
     .bar-row .bar-fill { height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--s1); }
     .bar-row strong { font-weight: 600; font-variant-numeric: tabular-nums; }
     .metric details.inline-detail { margin-top: 6px; }
+    /* A long list scrolls inside its card instead of stretching the whole row. */
+    .detail-row.stacked { align-items: baseline; }
+    .detail-row .detail-text { display: grid; gap: 1px; }
+    .detail-row .detail-title { color: var(--ink); overflow-wrap: anywhere; }
+    .detail-row .detail-sub { color: var(--mut); font-size: 12px; }
+    .metric .inline-detail .detail-rows { max-height: 280px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
     .metric details.inline-detail > summary { padding: 4px 0; color: var(--ink2); font-size: 13px; font-weight: 500; }
     .metric .inline-detail .detail-row strong, .metric .inline-detail .flag-tag { display: inline; margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0; white-space: nowrap; }
 
@@ -321,6 +332,12 @@
     button.balance-product[aria-pressed="true"] { background: var(--soft); box-shadow: inset 3px 0 0 var(--balance-color, var(--s1)); }
     /* Statements card: one block per kind of product, one two-line row per statement. */
     .statement-section + .statement-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+    /* Each block folds to its heading; it opens on its own when a statement needs a look. */
+    .statement-section > summary { list-style: none; padding: 2px 0; font-weight: inherit; }
+    .statement-section > summary::-webkit-details-marker { display: none; }
+    .statement-section > summary h4::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 10px 2px 2px; border-right: 2px solid var(--mut); border-bottom: 2px solid var(--mut); transform: rotate(-45deg); transition: transform .15s ease; }
+    .statement-section[open] > summary h4::before { transform: rotate(45deg); }
+    @media (prefers-reduced-motion: reduce) { .statement-section > summary h4::before { transition: none; } }
     .statement-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; }
     .statement-head h4 { margin: 0; color: var(--ink); font-size: 14px; }
     .statement-head strong { font-size: 16px; font-variant-numeric: tabular-nums; }
@@ -345,6 +362,8 @@
       .top-actions .button { min-height: 38px; padding: 7px 9px; font-size: 13px; }
       .config-form { grid-template-columns: 1fr; }
       .metrics, .month-summary .metrics, .month-summary .metrics.single-row { grid-template-columns: 1fr; gap: 10px; }
+      .metric.minor { flex-basis: 140px; min-width: 140px; padding: 10px 12px; }
+      .metric.minor strong { font-size: 14.5px; white-space: normal; }
       .toolbar { align-items: flex-start; }
       .toolbar-group { width: 100%; }
       .month-chips { margin-right: -14px; padding-right: 14px; }
@@ -557,7 +576,7 @@
         </section>
 
         <section id="panel-decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden>
-          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Agrupadas por destino, de la más antigua a la más reciente: los botones de la tarjeta deciden todos sus movimientos pendientes; «Ver movimientos» permite decidir uno por uno. Para efectivo, elige la categoría Retiro en efectivo; Inversión y Retiro de inversión ponen su categoría solos.</p></div></div>
+          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Agrupadas por destino, de la más antigua a la más reciente.</p></div></div>
           <div id="decision-summary" class="metric hero decision-summary" aria-live="polite"></div>
           <section id="card-review" hidden>
             <h3>Tarjetas con número nuevo · confirma cuál es</h3>
@@ -598,7 +617,7 @@
             <div id="history-list" class="decision-list" style="margin-top:12px"></div>
           </details>
         </section>
-        <p class="footer-note">Importes en la moneda del cierre; las compras en dólares cuentan con la tasa que les pones al decidirlas. Un mes queda verificado cuando lo revisas a mano o cuando cuadra con los extractos de Santiago.</p>
+        <p class="footer-note">Importes en la moneda del cierre; las compras en dólares cuentan con la tasa que les pones al decidirlas. Un mes queda verificado cuando lo revisas a mano o cuando cuadra con los extractos de todos los titulares.</p>
       </section>
     </main>
   </div>
@@ -633,6 +652,8 @@
         openCategories: new Set(),
         balanceFocus: { investments: null, credits: null },
         balanceListOpen: { investments: false, credits: false },
+        // Statement blocks the person opened or closed, by "month|block".
+        statementOpen: new Map(),
         editingTx: null,
         month: initialMonth && monthPattern.test(initialMonth) ? initialMonth : currentMonth(),
         year: initialYear && /^\d{4}$/.test(initialYear) ? initialYear : String(new Date().getFullYear()),
@@ -950,9 +971,12 @@
         detail.append(el("summary", "", summary));
         const body = el("div", "detail-rows");
         rows.slice().sort(byWhen).forEach(tx => {
-          const row = el("div", "detail-row");
-          const text = el("span", "", `${movementWhen(tx)} · ${itemText(tx.merchant)} · ${itemText(tx.category)}`);
-          appendFlags(text, tx);
+          // Two lines: who and how much, then when, the category and the tags in grey.
+          const row = el("div", "detail-row stacked");
+          const text = el("span", "detail-text");
+          const sub = el("span", "detail-sub", `${movementWhen(tx)} · ${itemText(tx.category)}`);
+          appendFlags(sub, tx);
+          text.append(el("span", "detail-title", itemText(tx.merchant)), sub);
           row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
           body.append(row);
         });
@@ -962,15 +986,30 @@
       // Bar and legend of a spending card: in the household view personal spending is shown
       // per member; family is one item.
       function appendSpendSplit(card, personal, family) {
-        const parts = state.owner === "hogar"
+        appendSplit(card, state.owner === "hogar"
           ? [
             ...safeArray(state.data.owners).map((owner, index) => [
               `Personal ${owner.label}`, personal.filter(tx => tx.owner === owner.id), index ? palette[3] : palette[0]
             ]),
             ["Familiar", family, palette[1]]
           ]
-          : [["Personal", personal, palette[0]], ["Familiar", family, palette[1]]];
-        if (sum(personal) + sum(family) > 0) {
+          : [["Personal", personal, palette[0]], ["Familiar", family, palette[1]]]);
+      }
+      // The kinds of income when there is more than one, in every view (Hogar too: whose income
+      // it was is in the owner filter). Each kind keeps its colour by the fixed order of the
+      // income categories, apart from the personal and family colours.
+      function appendIncomeSplit(card, incomes) {
+        if (sum(incomes) <= 0) return;
+        const kinds = [...incomeCategories(), "Sin tipo"];
+        const colors = [palette[2], palette[4], palette[5], palette[6]];
+        const typeOf = tx => kinds.includes(tx.category) ? tx.category : "Sin tipo";
+        const parts = kinds.map((kind, index) => [kind, incomes.filter(tx => typeOf(tx) === kind), colors[index % colors.length]])
+          .filter(([, rows]) => rows.length);
+        if (parts.length > 1) appendSplit(card, parts);
+      }
+      // A bar split in parts ([name, rows, colour]) and its legend with each amount and count.
+      function appendSplit(card, parts) {
+        if (parts.some(([, rows]) => sum(rows) > 0)) {
           const bar = el("div", "split-bar");
           bar.setAttribute("role", "img");
           bar.setAttribute("aria-label", parts.map(([name, rows]) => `${name} ${formatMoney(sum(rows))}`).join(", "));
@@ -993,6 +1032,26 @@
           split.append(item);
         });
         card.append(split);
+      }
+      // Balance: how much of the spending the confirmed income covers.
+      function appendCoverageMeter(card, income, spend) {
+        if (income <= 0 || spend <= 0) return;
+        const share = income / spend;
+        const text = share < 1
+          ? `Los ingresos cubren el ${Math.round(share * 100)} % del gasto`
+          : `Los ingresos superan el gasto en ${Math.round((share - 1) * 100)} %`;
+        const meter = el("div", "split-bar meter");
+        meter.setAttribute("role", "img");
+        meter.setAttribute("aria-label", text);
+        const fill = el("span");
+        fill.style.width = `${Math.min(share, 1) * 100}%`;
+        meter.append(fill);
+        card.append(meter, el("div", "split-legend", text));
+      }
+      // Rows of tiles as even as possible: up to five per row.
+      function balanceStrip(strip) {
+        const count = strip.childElementCount;
+        strip.style.setProperty("--per-row", String(Math.ceil(count / Math.ceil(count / 5))));
       }
       // Headline cards of the month and year summaries. "Por decidir" opens the Decision tab
       // and only appears while something is pending; otherwise the other three share one row.
@@ -1401,6 +1460,7 @@
             : `${incomes.length} confirmados`
         );
         income.classList.add("hero");
+        appendIncomeSplit(income, incomes);
         if (incomes.length) income.append(inlineDetail(`Ver ${incomes.length === 1 ? "el ingreso" : `los ${incomes.length} ingresos`}`, incomes));
         if (paidBack.length) spend.append(inlineDetail(`Ver ${paidBack.length === 1 ? "el abono" : `los ${paidBack.length} abonos`} de terceros`, paidBack));
         const net = makeMetric(
@@ -1409,6 +1469,7 @@
             : `${balance >= 0 ? "A favor" : "En contra"} · ingresos confirmados − gasto`
         );
         net.classList.add("hero");
+        appendCoverageMeter(net, incomeTotal, total);
         const heroes = summaryHeroes([spend, income, net], pending, pendingIncomes);
 
         const strip = el("div", "metric-strip");
@@ -1417,13 +1478,15 @@
           chip.classList.add("minor");
           strip.append(chip);
         };
+        // What touches the spending first, then what stays out of it.
+        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
+        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
+        if (cardPayments.length) minor("Pagos a tarjetas", formatMoney(sum(cardPayments)), `${cardPayments.length} · no es gasto`);
+        if (between.length) minor("Entre Santiago y Manuela", formatMoney(sum(between)), `${between.length} · no cuentan en Hogar`);
         if (investments.length || withdrawals.length) {
           minor("Inversiones", formatMoney(netInvestments(inMonth)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo · fuera del gasto`);
         }
-        if (cardPayments.length) minor("Pagos a tarjetas", formatMoney(sum(cardPayments)), `${cardPayments.length} · no es gasto`);
-        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
-        if (between.length) minor("Entre Santiago y Manuela", formatMoney(sum(between)), `${between.length} · no cuentan en Hogar`);
-        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
+        balanceStrip(strip);
         $("#month-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
 
         $("#income-card").hidden = incomes.length === 0;
@@ -1516,15 +1579,27 @@
           const rows = inMonth.filter(belongs);
           const known = withTotal ? Array.from(latest.values()).filter(belongs) : [];
           if (!rows.length && !known.length) return;
-          const section = el("section", "statement-section");
+          // Folded to its heading and total; a statement with movements no notice had opens it.
+          const unmatched = rows.filter(check => check.missing).length;
+          const key = `${state.month}|${label}`;
+          const section = el("details", "statement-section");
+          section.open = state.statementOpen.has(key) ? state.statementOpen.get(key) : unmatched > 0;
+          section.addEventListener("toggle", () => state.statementOpen.set(key, section.open));
+          const summary = el("summary");
           const head = el("div", "statement-head");
           head.append(el("h4", "", label));
           if (known.length) {
             const total = known.reduce((sumValue, check) => sumValue + check.balance_minor, 0);
             head.append(el("strong", "", formatMoney(total, "COP")),
               el("p", "", `${known.length} ${known.length === 1 ? "producto" : "productos"} · saldo al ${formatDate(known.map(check => check.period_end).sort().pop())}`));
-          } else if (note) head.append(el("p", "", note));
-          section.append(head);
+          } else if (note) {
+            const count = `${rows.length} ${rows.length === 1 ? "extracto" : "extractos"}`;
+            head.append(el("p", "", unmatched
+              ? `${note} · ${count}, ${unmatched} con movimientos sin aviso`
+              : `${note} · ${count}, ${rows.length === 1 ? "cuadra" : "todos cuadran"}`));
+          }
+          summary.append(head);
+          section.append(summary);
           const list = el("div", "statement-rows");
           rows.forEach(check => list.append(statementRow(check)));
           if (!rows.length) list.append(el("p", "hint", "Sin extractos con corte en este mes."));
@@ -1980,6 +2055,7 @@
             + (pendingIncomes.length ? ` · ${pendingIncomes.length} por confirmar (${formatMoney(sum(pendingIncomes))})` : "")
         );
         income.classList.add("hero");
+        appendIncomeSplit(income, buckets.flatMap(bucket => bucket.incomes));
         const balance = yearIncome - yearSpend;
         const net = makeMetric(
           "Balance del año", formatMoney(balance),
@@ -1987,6 +2063,7 @@
             : `${balance >= 0 ? "A favor" : "En contra"} · ingresos confirmados − gasto${pending.length ? ` · sin contar ${formatMoney(sum(pending))} por decidir` : ""}`
         );
         net.classList.add("hero");
+        appendCoverageMeter(net, yearIncome, yearSpend);
         const heroes = summaryHeroes([spend, income, net], pending, pendingIncomes);
 
         const strip = el("div", "metric-strip");
@@ -1995,15 +2072,17 @@
           chip.classList.add("minor");
           strip.append(chip);
         };
+        // The spending first (a row of four), then investments and coverage.
         if (closed.length) minor("Promedio de gasto", formatMoney(average), `Por mes cerrado · ${closed.length} ${closed.length === 1 ? "mes" : "meses"}`);
         if (highest && bucketTotal(highest) > 0) minor("Mes de mayor gasto", formatMoney(bucketTotal(highest)), capitalize(monthLabel(highest.month)));
+        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
+        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
         if (investments.length || withdrawals.length) {
           minor("Inversión neta", formatMoney(netInvestments(items)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo · fuera del gasto`);
         }
         if (withdrawals.length) minor("Retiros de inversión", formatMoney(sum(withdrawals)), "Fuera del gasto");
-        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
-        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
         if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed} ${coverage.elapsed === 1 ? "mes" : "meses"}`, "Revisados o conciliados");
+        balanceStrip(strip);
         $("#year-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
 
         const categoryHost = $("#year-categories");
@@ -2733,9 +2812,19 @@
         return button;
       }
 
+      // Cash and investments come from withdrawals and transfers, never from a purchase at a shop,
+      // so only those destinations recall where cash goes and that investments set their own category.
+      function cashHint(rows, options) {
+        const shopsOnly = rows.every(tx => ["purchase", "pse"].includes(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : ""));
+        if (shopsOnly || !options.some(([decision]) => decision === "investment")) return null;
+        return el("p", "hint", "Si fue efectivo, elige «Retiro en efectivo». «Inversión» y «Retiro de inversión» ponen su categoría solos.");
+      }
+
       function makeGroupCard(entry, isPrevious) {
         if (entry.rows.length === 1) {
           const card = makeDecisionCard(entry.rows[0], isPrevious);
+          const hint = cashHint(entry.rows, decisionOptions(entry.rows[0]));
+          if (hint) card.querySelector(".decision-category").append(hint);
           if (entry.rows[0].group_key) card.insertBefore(el("p", "hint", `Destino: ${groupTitle(entry)}`), card.children[1]);
           const toggle = betweenToggle(entry);
           if (toggle) {
@@ -2794,6 +2883,8 @@
           groupCategory.value = selected;
           field.append(label, groupCategory);
           if (typeof suggested === "string") field.append(suggestionNote(groupSuggestions[0].source));
+          const hint = cashHint(entry.rows, options);
+          if (hint) field.append(hint);
           card.append(field);
         }
         // One rate for every dollar movement of the destination; each one can still be changed below.
@@ -2855,7 +2946,8 @@
           card.append(line);
         }
         const details = el("details");
-        details.append(el("summary", "", `Ver ${entry.rows.length} movimientos`));
+        details.append(el("summary", "", isPrevious ? `Ver ${entry.rows.length} movimientos`
+          : `Ver los ${entry.rows.length} movimientos y decidir uno por uno`));
         const list = el("div", "decision-list");
         entry.rows.forEach(tx => list.append(makeDecisionCard(tx, isPrevious)));
         details.append(list);

@@ -68,8 +68,8 @@ la fecha local del aviso y la propuesta lo indica.
 **Cobertura.** Cada mes importado empieza **parcial**: contar correos no demuestra
 que estén todos. Se confirma de dos formas:
 
-- **Conciliado** (automático): el agente lo marca cuando los extractos de los dos
-  titulares cuadran. Ver [Conciliación automática del mes](#conciliación-automática-del-mes).
+- **Conciliado** (automático): el agente lo marca cuando los extractos de todos
+  los titulares cuadran. Ver [Conciliación automática del mes](#conciliación-automática-del-mes).
 - **Revisado** (manual): lo marcas tú en el panel, con una nota de conciliación.
 
 Un movimiento nuevo en un mes conciliado o revisado lo devuelve a parcial.
@@ -154,11 +154,15 @@ el total y una pista, con botones que deciden todos sus movimientos a la vez.
   tienen: Inversión y Retiro de inversión asignan su propia categoría. Al decidir
   Gasto personal o Familiar, todos toman esa categoría, con la misma validación
   todo o nada y una auditoría por movimiento; las demás decisiones no la usan.
+  En destinos que no son solo compras en comercios (también con un solo
+  movimiento), una nota debajo recuerda elegir «Retiro en efectivo» si fue
+  efectivo.
   Muestra la sugerencia común si la pediste, si no la categoría que ya comparten,
   y si no «Mantener la de cada movimiento», que no cambia ninguna. También está
   en «Decisiones anteriores» para recategorizar un destino ya decidido.
-- **Uno por uno.** «Ver N movimientos», en cada tarjeta, permite decidir cada
-  movimiento con su categoría. Decidir un movimiento confirma su categoría. Cada
+- **Uno por uno.** «Ver los N movimientos y decidir uno por uno», en cada
+  tarjeta, permite decidir cada movimiento con su categoría. En «Decisiones anteriores» se llama «Ver N
+  movimientos». Decidir un movimiento confirma su categoría. Cada
   movimiento indica su origen («Extracto Visa *1234») o el motivo del aviso; la
   moneda se corrige en «Corregir moneda», que viene cerrado, salvo en los
   movimientos en USD, que muestran «Moneda y tasa» abierto.
@@ -259,7 +263,7 @@ aplica a todas sus compras en dólares al pulsar la decisión, con la misma
 validación todo o nada y una auditoría por movimiento. Las compras en pesos del
 mismo destino no la usan. Si las compras ya tienen tasas distintas, el campo
 viene vacío: déjalo así para conservar la de cada una, o decide cada compra en
-«Ver N movimientos».
+«Ver los N movimientos y decidir uno por uno».
 
 **Compras que coinciden con una regla.** Las reglas por comercio y por destino
 nunca deciden una compra en USD sin tasa, porque la tasa la pones tú. En cambio,
@@ -555,6 +559,11 @@ nombre a la izquierda y su saldo o estado a la derecha.
 Un extracto sin movimientos no muestra conciliación. Cada titular ve sus
 extractos; **Hogar** los ve todos, con la etiqueta del titular.
 
+Cada bloque aparece plegado: solo su título con el total, o en Tarjetas y
+cuentas cuántos extractos hay y si todos cuadran. Se abre con un clic. Un bloque
+con algún extracto que trajo movimientos sin aviso aparece abierto. El panel
+recuerda lo que abres o cierras en cada mes mientras sigue abierto.
+
 ## Conciliación automática del mes
 
 Después de cada lectura (`scan`, `import`, la tarea programada), de
@@ -734,10 +743,15 @@ aviso del formulario de configuración inicial no se puede cerrar.
 
 - Meses en orden cronológico con nombre corto y la línea de cobertura del mes.
 - Cuatro cifras: **Gasto del mes** (con barra por titular y familiar),
-  **Ingresos**, **Balance** y **Por decidir** (lleva a Decisión; solo aparece si
-  queda algo pendiente, y sin ella las otras tres van en una fila). Debajo, en una
-  fila compacta y solo si existen: inversiones, pagos a tarjetas, abonos de
-  terceros, movimientos entre titulares y retiro en efectivo.
+  **Ingresos** (con barra por tipo de ingreso cuando hay más de uno, también en
+  Hogar), **Balance** (con una barra neutra que dice qué parte del gasto
+  cubren los ingresos) y **Por decidir** (lleva a Decisión; solo aparece si
+  queda algo pendiente, y sin ella las otras tres van en una fila). Debajo, en
+  fichas pequeñas y solo si existen: primero lo que toca el gasto (retiro en
+  efectivo, abonos de terceros) y luego lo que queda fuera (pagos a tarjetas,
+  movimientos entre titulares, inversiones). Cada ficha lleva el nombre, la cifra
+  y una nota, una debajo de otra. Las filas se reparten parejas (siete fichas van
+  4 + 3, nunca 5 + 2) y llenan el ancho; en el celular van de a dos por fila.
 - Calendario por día (tocar un día muestra sus movimientos), dona por categoría
   (tocar una categoría abre su detalle), acumulado, días de la semana, medios de
   pago, ingresos, pagos por tarjeta y comercios frecuentes. «Comercios frecuentes»
@@ -758,9 +772,10 @@ aviso del formulario de configuración inicial no se puede cerrar.
 **Año**
 
 - Las mismas cuatro cifras para el año (Por decidir se oculta si todo está
-  decidido) y chips con el promedio de gasto por mes cerrado (sin el mes en
-  curso), el mes de mayor gasto, la inversión neta, retiros, efectivo, abonos y la
-  cobertura («X de N» meses revisados a mano o conciliados con los extractos).
+  decidido) y las mismas fichas pequeñas: primero el gasto (promedio por mes
+  cerrado, sin el mes en curso; el mes de mayor gasto; efectivo y abonos) y luego
+  la inversión neta, los retiros de inversión y la cobertura («X de N» meses
+  revisados a mano o conciliados con los extractos).
 - Gráfica de ingresos (azul) y gastos (naranja), dos colores que se distinguen
   también con daltonismo rojo-verde; categorías del año con barras y porcentaje, y
   columnas por categoría con los mismos colores que el mes. El mes en curso se ve

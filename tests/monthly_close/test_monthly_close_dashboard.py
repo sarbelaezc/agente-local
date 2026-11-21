@@ -804,6 +804,114 @@ def test_pending_card_hides_when_everything_is_decided_and_the_rest_share_one_ro
         assert len(tops) == 1, (panel, tops)
 
 
+def test_cash_hint_shows_only_where_a_destination_can_be_cash(dashboard):
+    page, store, month, _ = dashboard
+    store.import_message("tr", [{
+        "id": "tr", "message_id": "tr", "day": month + "-06", "merchant": "Traslado a Nequi",
+        "account": "Ahorros", "amount_minor": 70000, "currency": "COP", "category": "Otros gastos",
+        "kind": "transfer", "decision": None, "reason": "Transferencia.",
+    }])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    expect(page.locator("#panel-decisions .section-heading p")).to_have_text(
+        "Agrupadas por destino, de la más antigua a la más reciente.",
+    )
+    hint = "Si fue efectivo, elige «Retiro en efectivo»."
+    transfer = page.locator("#pending-list article").filter(has_text="Traslado a Nequi")
+    shop = page.locator("#pending-list article").filter(has_text="Tienda")
+    expect(transfer.get_by_text(hint, exact=False)).to_be_visible()
+    expect(shop.get_by_text(hint, exact=False)).to_have_count(0)
+
+
+def test_income_and_balance_cards_show_their_split_and_coverage(dashboard):
+    page, store, month, _ = dashboard
+    store.import_message("in", [
+        {
+            "id": f"in{index}", "message_id": "in", "day": month + "-07", "merchant": f"Pagador {index}",
+            "account": "Ahorros", "amount_minor": amount, "currency": "COP", "category": category,
+            "kind": "income", "decision": "income", "reason": "Ingreso.",
+        } for index, (amount, category) in enumerate([(80000, "Nómina"), (20000, "Otros ingresos")])
+    ])
+    metrics = page.locator("#month-metrics .metric.hero")
+    income = metrics.filter(has_text="Ingresos").first
+    for owner in ("hogar", "santiago"):
+        page.goto(page.url.split("?")[0] + f"?month={month}&owner={owner}")
+        expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+        # The kinds of income, also in Hogar; never who earned it.
+        expect(income.locator(".split-legend")).to_contain_text("Nómina")
+        expect(income.locator(".split-legend")).to_contain_text("Otros ingresos")
+        expect(income.locator(".split-legend")).not_to_contain_text("Santiago")
+    # Spending decided is 1500,57: 1000,00 of income covers 67 % of it.
+    balance = metrics.filter(has_text="Balance")
+    expect(balance.get_by_role("img")).to_have_attribute("aria-label", "Los ingresos cubren el 67 % del gasto")
+    expect(balance).to_contain_text("Los ingresos cubren el 67 % del gasto")
+
+
+def test_open_detail_of_a_summary_card_keeps_small_amounts_and_scrolls_inside(dashboard):
+    page, store, month, _ = dashboard
+    store.decide("0", "personal")  # nothing pending: the three cards share one row
+    store.import_message("in", [
+        {
+            "id": f"in{index}", "message_id": "in", "day": month + "-07", "merchant": "Descuento de nómina: cuota quincenal",
+            "account": "Ahorros", "amount_minor": 190000000 + index, "currency": "COP", "category": "Nómina",
+            "kind": "income", "decision": "income", "reason": "Ingreso.",
+        } for index in range(14)
+    ])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    income = page.locator("#month-metrics .metric.hero").filter(has_text="Ingresos").first
+    income.locator(".inline-detail > summary").click()
+    sizes = income.evaluate("""card => ({
+      figure: parseFloat(getComputedStyle(card.querySelector(':scope > strong')).fontSize),
+      amount: parseFloat(getComputedStyle(card.querySelector('.detail-row strong')).fontSize),
+      list: card.querySelector('.detail-rows').scrollHeight > card.querySelector('.detail-rows').clientHeight,
+    })""")
+    assert sizes["amount"] == 13 and sizes["figure"] > 20, sizes
+    # Fourteen movements scroll inside the card instead of stretching the row.
+    assert sizes["list"], sizes
+
+
+def test_secondary_figures_fill_each_row_without_overflowing(dashboard):
+    page, _, _, _ = dashboard
+    # The longest figures and notes the month and year views show, seven of them.
+    notes = ["Por mes cerrado · 10 meses", "Agosto de 2026", "56 aportes − 47 retiros · neto, no saldo · fuera del gasto",
+             "Fuera del gasto", "Ya incluido en el gasto", "15 · restan del gasto", "Revisados o conciliados"]
+    for width in (1440, 390):
+        page.set_viewport_size({"width": width, "height": 1000})
+        rows = page.evaluate("""notes => {
+          document.querySelectorAll('#month-metrics .metric-strip').forEach(node => node.remove());
+          const strip = document.createElement('div');
+          strip.className = 'metric-strip';
+          notes.forEach(note => {
+            const tile = document.createElement('div');
+            tile.className = 'metric minor';
+            for (const [tag, text] of [['span', 'Inversión neta'], ['strong', '-43.624.110,00 COP'], ['small', note]]) {
+              const part = document.createElement(tag);
+              part.textContent = text;
+              tile.append(part);
+            }
+            strip.append(tile);
+          });
+          document.querySelector('#month-metrics').append(strip);
+          const right = strip.getBoundingClientRect().right;
+          const tiles = [...strip.children];
+          return {
+            overflow: tiles.filter(tile => tile.scrollWidth > tile.clientWidth).length,
+            // Each row ends at the strip's right edge: no ragged gap after the last tile.
+            ragged: tiles.filter((tile, index) => {
+              const next = tiles[index + 1];
+              const lastInRow = !next || next.getBoundingClientRect().top > tile.getBoundingClientRect().top + 1;
+              return lastInRow && Math.abs(tile.getBoundingClientRect().right - right) > 1;
+            }).length,
+            rowCount: new Set(tiles.map(tile => Math.round(tile.getBoundingClientRect().top))).size,
+          };
+        }""", notes)
+        assert rows["overflow"] == 0 and rows["ragged"] == 0, (width, rows)
+    # On a phone two tiles share each row, instead of seven tall rows.
+    assert rows["rowCount"] == 4, rows
+
+
 def test_a_new_card_number_is_asked_in_decisions_with_the_option_of_a_new_card(dashboard):
     page, store, _, _ = dashboard
 
