@@ -139,7 +139,6 @@ function Start-Process {
     (["serve"], ["serve"]),
     (["login", "-Mailbox", "manuela"], ["login", "--mailbox", "manuela"]),
     (["backfill-destinations"], ["backfill-destinations"]),
-    (["backfill-times"], ["backfill-times"]),
     (["merge-category", "-FromCategory", "Predial", "-ToCategory", "Vivienda"],
      ["merge-category", "--from", "Predial", "--to", "Vivienda"]),
     (["payroll-deduction", "-Owner", "santiago", "-Suffix", "1234"],

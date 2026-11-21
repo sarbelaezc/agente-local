@@ -9,7 +9,6 @@ from monthly_close import main as app
 from monthly_close.destinations import assign_destinations, notice_destinations
 from monthly_close.domain import Preferences
 from monthly_close.extraction import Mail, extract
-from monthly_close.mailboxes import Mailbox
 from monthly_close.outlook import Candidate
 from monthly_close.store import Store
 from builders import SENDER, FakeExtractionModel
@@ -251,57 +250,6 @@ def test_a_lone_movement_gets_the_hour_its_notice_arrived(preferences):
         "a PERSONA DE PRUEBA el 27/02/26"
     ), preferences, NoModel())[0]
     assert earlier["time"] is None  # another day: the arrival hour says nothing about it
-
-
-def test_backfill_times_reads_every_mailbox_and_keeps_decisions(preferences, tmp_path, monkeypatch):
-    store = Store(tmp_path / "close.sqlite3")
-    store.configure(preferences.to_dict())
-    def row(event_id, message_id, amount, **changes):
-        return {**santiago_row(event_id, amount), "message_id": message_id, **changes}
-
-    store.import_message("msg-s", [row("s", "msg-s", 100, kind="purchase")])
-    store.import_message("msg-m", [row("m", "msg-m", 200, kind="purchase")], owner="manuela")
-    store.import_message("msg-two", [row("t1", "msg-two", 300), row("t2", "msg-two", 400)])
-    store.import_message("msg-old", [row("o", "msg-old", 500, day="2026-02-27")])
-    store.import_message("msg-kept", [row("k", "msg-kept", 600, time="08:05")])
-    store.import_message("ledger:1", [row("l", "ledger:1", 700)])
-    store.decide("s", "personal", "Otros gastos")
-    boxes = [
-        Mailbox("principal", "graph", "santiago", "outlook", "graph.bin", True),
-        Mailbox("manuela", "gmail", "manuela", "gmail", "gmail.json", True),
-    ]
-    mailbox_of = {"msg-s": "graph", "msg-two": "graph", "msg-old": "graph", "msg-kept": "graph", "msg-m": "gmail"}
-    walked = []
-
-    @contextmanager
-    def fake_source(data_dir, settings, senders, box=None):
-        class Reader:
-            _received = {}
-
-            def walk_folders(self, limit, visit, **extra):
-                walked.append((box.provider, sorted(extra)))
-                for key, provider in mailbox_of.items():
-                    if provider == box.provider:
-                        visit(Candidate(key, SENDER, "Alertas"))
-                return []
-
-            def read(self, candidate):
-                return Mail(candidate.item_id, SENDER, "Alertas", RECEIVED, "Aviso.")
-
-        yield Reader()
-
-    monkeypatch.setattr(app, "open_source", fake_source)
-    monkeypatch.setattr(app, "load_mailboxes", lambda settings: boxes)
-    result = app.backfill_times(store, tmp_path, {"max_messages": 100}, preferences)
-    assert walked == [("graph", []), ("gmail", ["since"])]
-    assert result == {"notices": 4, "read": 4, "updated": 2}
-    rows = {row["id"]: row for row in store.state()["transactions"]}
-    assert {key: rows[key]["time"] for key in rows} == {
-        "s": "10:00", "m": "10:00", "t1": None, "t2": None, "o": None, "k": "08:05", "l": None,
-    }
-    assert rows["s"]["decision"] == "personal"
-    with pytest.raises(ValueError):
-        store.set_times({"s": "25:00"})
 
 
 def test_merge_category_moves_movements_and_rules_and_removes_it(preferences, tmp_path):

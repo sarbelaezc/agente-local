@@ -549,14 +549,11 @@ class _AllFound(Exception):
     """Every notice the backfill needed was read; the walk can stop."""
 
 
-def reread_notices(
-    data_dir: Path, settings: dict, preferences: Preferences, rows: list, handle, box: Mailbox | None = None,
-) -> int:
+def reread_notices(data_dir: Path, settings: dict, preferences: Preferences, rows: list, handle) -> int:
     """Read again (read-only, no Ollama) the notices behind rows; handle(mail, its rows) each one.
 
-    box is the mailbox to read (Santiago's Outlook by default). Folders are walked newest
-    first and stop at notices older than the oldest row, or once every notice was read.
-    Returns how many notices were read.
+    Folders are walked newest first and stop at notices older than the oldest row, or once
+    every notice was read. Returns how many notices were read.
     """
     if not rows:
         return 0
@@ -565,7 +562,7 @@ def reread_notices(
         by_notice.setdefault(row["message_id"], []).append(row)
     oldest = min(date.fromisoformat(row["day"]) for row in rows) - timedelta(days=10)
     remaining = set(by_notice)
-    with open_source(data_dir, settings, preferences.approved_senders, box) as reader:
+    with open_source(data_dir, settings, preferences.approved_senders) as reader:
 
         def visit(candidate: Candidate) -> bool | None:
             if candidate.sender not in preferences.approved_senders:
@@ -582,45 +579,11 @@ def reread_notices(
                 raise _AllFound
             return None
 
-        # Gmail lists every approved notice unless the listing is narrowed to the dates needed.
-        extra = (
-            {"since": datetime.combine(oldest, datetime.min.time(), ZoneInfo(preferences.timezone))}
-            if box is not None and box.provider == "gmail" else {}
-        )
         try:
-            reader.walk_folders(settings["max_messages"], visit, **extra)
+            reader.walk_folders(settings["max_messages"], visit)
         except _AllFound:
             pass
     return len(by_notice) - len(remaining)
-
-
-def backfill_times(
-    store: Store, data_dir: Path, settings: dict, preferences: Preferences,
-) -> dict[str, int]:
-    """Read every mailbox's notices again (read-only, no Ollama) to store the hour of movements.
-
-    As in a new import, only a notice behind a single movement of its own day gives the
-    hour it arrived. Movements from statements, ledgers or exported files are not read.
-    """
-    result = {"notices": 0, "read": 0, "updated": 0}
-    for box in load_mailboxes(settings):
-        box_preferences = box.preferences(preferences)
-        with store.connect() as db:
-            rows = db.execute(
-                "SELECT id,message_id,day FROM transactions WHERE owner=? AND (time IS NULL OR time='') "
-                "AND id NOT LIKE 'stmt:%' AND instr(message_id, ':')=0", (box.owner,),
-            ).fetchall()
-        times: dict[str, str] = {}
-
-        def collect(mail, notice_rows) -> None:
-            arrived = received_local(mail.received, box_preferences.timezone)
-            if len(notice_rows) == 1 and notice_rows[0]["day"] == arrived.date().isoformat():
-                times[notice_rows[0]["id"]] = arrived.strftime("%H:%M")
-
-        result["notices"] += len({row["message_id"] for row in rows})
-        result["read"] += reread_notices(data_dir, settings, box_preferences, rows, collect, box)
-        result["updated"] += store.set_times(times)
-    return result
 
 
 def backfill_destinations(
@@ -1002,14 +965,6 @@ def run(args: argparse.Namespace) -> None:
             "Solo lectura del buzon; sin Ollama ni cambios de decisiones."
         )
         return
-    if args.command == "backfill-times":
-        result = backfill_times(store, data_dir, settings, preferences)
-        print(
-            f"Horas: {result['notices']} avisos por revisar, {result['read']} leidos; "
-            f"{result['updated']} movimientos con la hora del aviso. "
-            "Solo lectura de los buzones; sin Ollama ni cambios de decisiones."
-        )
-        return
     if args.command == "backfill-card-accounts":
         result = backfill_card_accounts(store, data_dir, settings, preferences, args.read_only)
         detail = "; ".join(f"{count} x {pair}" for pair, count in sorted(result["changes"].items())) or "ninguno"
@@ -1082,7 +1037,7 @@ def main() -> None:
         "command",
         choices=[
             "serve", "login", "pilot", "scan", "summary", "scheduled", "check-config",
-            "import-manuela", "owner-account", "backfill-destinations", "backfill-times", "backfill-card-accounts", "reconcile-statements", "payroll-deduction", "import-credit-ledger", "merge-category",
+            "import-manuela", "owner-account", "backfill-destinations", "backfill-card-accounts", "reconcile-statements", "payroll-deduction", "import-credit-ledger", "merge-category",
         ],
     )
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())

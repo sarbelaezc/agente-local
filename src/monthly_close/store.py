@@ -1238,24 +1238,6 @@ class Store:
             self._flag_between_owners(db, changed)
         return len(changed)
 
-    def set_times(self, times: dict[str, str]) -> int:
-        """Record the hour notices read again arrived, only on movements without one.
-
-        Amounts, categories and decisions stay as they are; each change is audited.
-        """
-        changed = 0
-        with self.connect() as db:
-            for event_id, value in times.items():
-                if not isinstance(value, str) or not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", value):
-                    raise ValueError("Hora invalida.")
-                if db.execute(
-                    "UPDATE transactions SET time=? WHERE id=? AND (time IS NULL OR time='')",
-                    (value, event_id),
-                ).rowcount:
-                    self._audit(db, "time-backfill", event_id, value)
-                    changed += 1
-        return changed
-
     def _flag_between_owners(self, db: sqlite3.Connection, ids: list[str] | None) -> int:
         """Mark movements naming another member's account, or a remembered destination.
 

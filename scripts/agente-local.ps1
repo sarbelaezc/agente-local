@@ -4,7 +4,7 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet(
         "serve", "login", "check-config", "pilot", "scan", "import", "summary", "scheduled", "invoices", "invoices-cleanup",
-        "import-manuela", "owner-account", "backfill-destinations", "backfill-times", "backfill-card-accounts", "reconcile-statements", "payroll-deduction", "import-credit-ledger", "merge-category",
+        "import-manuela", "owner-account", "backfill-destinations", "backfill-card-accounts", "reconcile-statements", "payroll-deduction", "import-credit-ledger", "merge-category",
         "devices", "lan-firewall"
     )]
     [string]$Command = "serve",

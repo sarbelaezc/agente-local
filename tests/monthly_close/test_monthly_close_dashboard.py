@@ -137,6 +137,16 @@ def test_decision_persists_and_updates_totals(dashboard):
     assert re.search(r"\b1[.\s]?700,58", page.locator("#month-metrics").inner_text())
 
 
+def test_decision_card_shows_the_hour_next_to_the_date(dashboard):
+    page, store, _, _ = dashboard
+    store.import_message("m-hour", [movement("hour", "TIENDA CON HORA", message_id="m-hour", time="10:32")])
+    page.reload()
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    card = page.locator("#panel-decisions .decision-card").filter(has_text="TIENDA CON HORA")
+    expect(card.locator(".decision-meta > span").first).to_have_text(re.compile(r"^5 oct 2026 · 10:32$"))
+    expect(card.locator("p.hint").filter(has_text="Hora")).to_have_count(0)
+
+
 def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
     page, store, month, _ = dashboard
     store.import_message("usd", [{

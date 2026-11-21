@@ -3007,12 +3007,12 @@
       function makeDecisionCard(tx, isPrevious, onSaved = null) {
         const card = el("article", "decision-card");
         const meta = el("div", "decision-meta");
-        meta.append(el("span", "", formatDate(tx.day)), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
+        const when = typeof tx.time === "string" && tx.time ? `${formatDate(tx.day)} · ${tx.time}` : formatDate(tx.day);
+        meta.append(el("span", "", when), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
         const title = el("h3", "", itemText(tx.merchant));
         card.append(meta, title, el("strong", "", formatMoney(tx.amount_minor, txCurrency(tx))));
         const flags = el("p", "hint");
         appendFlags(flags, tx);
-        if (typeof tx.time === "string" && tx.time) flags.prepend(document.createTextNode(`Hora ${tx.time}`));
         if (flags.childNodes.length) card.append(flags);
         if (txCurrency(tx) === "USD" && Number.isSafeInteger(tx.cop_amount_minor)) {
           card.append(el("p", "hint", `Estimado: ${formatMoney(tx.cop_amount_minor, "COP")} · Tasa manual: ${tx.exchange_rate} COP por USD.`));
