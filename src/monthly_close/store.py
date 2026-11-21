@@ -1114,13 +1114,16 @@ class Store:
             self._audit(db, "owner-account-local-user", "*" + suffix, owner)
             return self._flag_between_owners(db, None)
 
-    def record_statements(self, checks: list[dict], events: list[dict]) -> int:
+    def record_statements(
+        self, checks: list[dict], events: list[dict], twins: list[tuple[str, str]] | None = None,
+    ) -> int:
         """Store each statement's reconciliation and import the movements it alone shows.
 
         Imported movements stay pending unless a fixed wording the owners confirmed or one
         of the person's own rules decides them (never possible duplicates). Repeating the
         reconciliation imports nothing twice, because every imported id is derived from the
-        statement line and existing ids are skipped.
+        statement line and existing ids are skipped. twins pairs a statement line's id with
+        another movement that duplicates it: the statement prevails (see _settle_twin).
         """
         now = datetime.now(timezone.utc).isoformat()
         inserted: list[str] = []
@@ -1164,11 +1167,49 @@ class Store:
                     inserted.append(event["id"])
                     self._audit(db, "statement-import", event["id"], event["message_id"])
             self._flag_between_owners(db, inserted)
+            for line_id, twin_id in twins or []:
+                self._settle_twin(db, line_id, twin_id)
             # Fixed wordings the owners confirmed first; then the person's own rules, with the
             # same safeguards as for notices. Ollama never decides.
             self._decide_fixed_statement_lines(db)
         self.apply_rules()
         return len(inserted)
+
+    def _settle_twin(self, db: sqlite3.Connection, line_id: str, twin_id: str) -> None:
+        """The statement shows a purchase once and the panel has it twice: the statement prevails.
+
+        The other movement (a notice or an imported record, often in another currency)
+        becomes «No cuenta» with a note naming the statement line. A pending statement line
+        takes the decision and category already given to its twin; a decided one keeps its
+        own. A line in dollars recorded in pesos takes the rate those pesos imply, so the
+        spending in pesos stays what was recorded. Both changes are audited and a person
+        can change either.
+        """
+        line = db.execute("SELECT * FROM transactions WHERE id=?", (line_id,)).fetchone()
+        twin = db.execute("SELECT * FROM transactions WHERE id=?", (twin_id,)).fetchone()
+        if line is None or twin is None or twin["decision"] == "exclude" or line["owner"] != twin["owner"]:
+            return
+        rate = None
+        if line["currency"] == "USD":
+            if twin["currency"] == "COP" and line["amount_minor"] > 0:
+                implied = Decimal(twin["amount_minor"]) / Decimal(line["amount_minor"])
+                rate = format(implied.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP), "f")
+            else:
+                rate = twin["exchange_rate"] or line["exchange_rate"]
+        if line["decision"] is None and twin["decision"] in {"personal", "family"} and (
+            line["currency"] != "USD" or rate
+        ):
+            self._decide(
+                db, line_id, twin["decision"], twin["category"], exchange_rate=rate,
+                audit=("decision-statement-twin", twin_id),
+            )
+        self._decide(db, twin_id, "exclude", audit=("statement-duplicate", line_id))
+        amount = f"{line['amount_minor'] / 100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        db.execute(
+            "UPDATE transactions SET note=? WHERE id=?",
+            (f"Duplicado: el extracto muestra esta compra una vez, {amount} {line['currency']} el "
+             f"{line['day']}; prima el extracto", twin_id),
+        )
 
     def _decide_fixed_statement_lines(self, db: sqlite3.Connection) -> int:
         """Decide pending statement lines whose exact wording has one meaning for both owners.

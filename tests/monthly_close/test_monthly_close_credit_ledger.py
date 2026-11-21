@@ -219,7 +219,7 @@ def test_mortgage_register_is_checked_by_payments_and_keeps_its_cents(tmp_path, 
 def test_after_a_scan_statements_then_registers_run_when_configured(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(app, "reconcile_statements", lambda *args, **kwargs: calls.append("extractos") or {
-        "statements": 0, "matched": 0, "imported": 0})
+        "statements": 0, "matched": 0, "imported": 0, "duplicates": 0})
     monkeypatch.setattr(app, "import_credit_ledgers", lambda *args: calls.append("registros") or [])
     monkeypatch.setattr(app, "refresh_reconciled_coverage", lambda *args: calls.append("conciliacion"))
     app.run_complements(None, tmp_path, {}, None, date(2026, 3, 1))

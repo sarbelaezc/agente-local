@@ -741,13 +741,14 @@ def reconcile_statements(
         )
         for candidate in report.missing
     ]
+    twins = [(line_id, twin_id) for _, line_id, twin_id in report.twins]
     proposals: dict[str, dict] = {}
     if not read_only and any(event["kind"] == "purchase" for event in events):
         model = OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
         proposals, model_failed = propose_statement_categories(store, model, events)
         if model_failed:
             print("Ollama no respondio: las categorias se sugirieron solo con tus reglas y decisiones anteriores.", flush=True)
-    imported = 0 if read_only else store.record_statements(report.checks(), events)
+    imported = 0 if read_only else store.record_statements(report.checks(), events, twins)
     if proposals:
         # Kept so the panel can say where each proposed category came from.
         store.save_category_suggestions(proposals, replace=False)
@@ -758,6 +759,7 @@ def reconcile_statements(
     return {
         "statements": len(found), "matched": len(report.matched), "missing": len(report.missing),
         "imported": imported, "balances": sum(s.balance_minor is not None for s in found.values()),
+        "duplicates": len(twins),
         "reclassified": reclassified,
         "categories_proposed": proposed,
     }
@@ -873,7 +875,8 @@ def run_complements(store: Store, data_dir: Path, settings: dict, preferences: P
         result = reconcile_statements(store, data_dir, settings, preferences, since, read_only=False)
         print(
             f"Extractos: {result['statements']} leidos desde {since.isoformat()}; {result['matched']} coinciden con "
-            f"los avisos; {result['imported']} importados como pendientes.", flush=True,
+            f"los avisos; {result['imported']} importados como pendientes; "
+            f"{result['duplicates']} duplicados marcados No cuenta.", flush=True,
         )
     if credit_ledger.load_configs(data_dir):
         print("\n".join(import_credit_ledgers(store, data_dir, preferences)), flush=True)
@@ -999,7 +1002,8 @@ def run(args: argparse.Namespace) -> None:
             f"Extractos: {result['statements']} leidos desde {start.isoformat()}; "
             f"{result['matched']} movimientos coinciden con los avisos, {result['missing']} faltaban; "
             f"{result['balances']} saldos de inversiones y creditos. "
-            + ("Solo lectura: nada se importo." if args.read_only else
+            f"{result['duplicates']} compras duplicadas en el panel (prima el extracto). "
+            + ("Solo lectura: nada se importo ni se marco." if args.read_only else
                f"{result['imported']} importados como pendientes; decidelos en el panel."
                + (f" {result['reclassified']} pendientes reclasificados." if result["reclassified"] else "")
                + (f" {result['categories_proposed']} compras con categoria sugerida (sin decidir)."

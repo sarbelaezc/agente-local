@@ -183,6 +183,53 @@ def test_reconcile_matches_known_movements_once_and_from_the_start_date():
     assert (check["movements"], check["matched"], check["missing"]) == (4, 1, 3)
 
 
+def purchase(event_id: str, day: str, amount: int, merchant: str, **changes) -> dict:
+    return {
+        "id": event_id, "message_id": "m-" + event_id, "day": day, "merchant": merchant, "account": "Tarjeta A",
+        "amount_minor": amount, "currency": "COP", "category": "Compras", "kind": "purchase",
+        "decision": None, "reason": "Revisar.", **changes,
+    }
+
+
+def test_a_purchase_the_statement_shows_once_in_another_currency_is_a_duplicate():
+    card = st.parse("TARJETA_MASTERCARD", "202601", CARD)
+    rows = [
+        {**purchase("dup", "2026-01-08", 4567800, "SERVICIO FICTICIO E"), "owner": "santiago"},
+        # Another merchant, or the same one too many days away, is never taken for it.
+        {**purchase("other", "2026-01-08", 4567800, "OTRA TIENDA"), "owner": "santiago"},
+        {**purchase("far", "2026-01-02", 4567800, "SERVICIOFICTICIO"), "owner": "santiago"},
+    ]
+    report = st.reconcile([card], rows, date(2026, 1, 1))
+    assert [(c.movement.description, line, twin) for c, line, twin in report.twins] == [
+        ("SERVICIO FICTICIO", st.line_id(next(c for c in report.missing if c.movement.currency == "USD")), "dup"),
+    ]
+
+
+def test_the_statement_prevails_over_its_duplicate_now_and_for_lines_imported_before(store):
+    card = st.parse("TARJETA_MASTERCARD", "202601", CARD)
+    # The line was imported by an earlier run, before duplicates were looked for.
+    first = st.reconcile([card], [], date(2026, 1, 1))
+    store.record_statements(first.checks(), [st.missing_event(c, "Otros gastos", "Otros ingresos") for c in first.missing])
+    store.import_message("m-dup", [purchase("dup", "2026-01-08", 4567800, "SERVICIO FICTICIO")])
+    store.decide("dup", "personal", "Compras")
+    again = st.reconcile([card], store.state()["transactions"], date(2026, 1, 1))
+    line = st.line_id(next(c for c in first.missing if c.movement.currency == "USD"))
+    assert [(found, twin) for _, found, twin in again.twins] == [(line, "dup")]
+    store.record_statements(again.checks(), [], [(found, twin) for _, found, twin in again.twins])
+    rows = {row["id"]: row for row in store.state()["transactions"]}
+    assert (rows["dup"]["decision"], rows["dup"]["amount_minor"]) == ("exclude", 4567800)
+    assert rows["dup"]["note"].startswith("Duplicado: el extracto muestra esta compra una vez, 12,34 USD")
+    # The statement line takes the decision already given to the same purchase.
+    assert (rows[line]["decision"], rows[line]["category"], rows[line]["currency"]) == ("personal", "Compras", "USD")
+    # In pesos it stays what was recorded: the rate is the one those pesos imply.
+    assert (rows[line]["exchange_rate"], rows[line]["cop_amount_minor"]) == ("3701.620746", 4567800)
+    with store.connect() as db:
+        actions = {row[0] for row in db.execute("SELECT action FROM audit")}
+    assert {"statement-duplicate", "decision-statement-twin"} <= actions
+    # Once settled, a new run finds nothing more.
+    assert st.reconcile([card], store.state()["transactions"], date(2026, 1, 1)).twins == []
+
+
 def test_statement_movements_enter_pending_audited_and_only_once(store):
     card = st.parse("TARJETA_MASTERCARD", "202601", CARD)
     report = st.reconcile([card], [], date(2026, 1, 1))
@@ -443,7 +490,7 @@ def test_reconcile_command_reports_read_only_then_imports(store, tmp_path, prefe
         "Extracto_1_202601_CONSOLIDADO_0003.pdf": "no se lee",
     }
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=True)
-    assert result == {"statements": 2, "matched": 0, "missing": 5, "imported": 0, "balances": 1, "reclassified": 0, "categories_proposed": 0}
+    assert result == {"statements": 2, "matched": 0, "missing": 5, "imported": 0, "balances": 1, "reclassified": 0, "categories_proposed": 0, "duplicates": 0}
     assert store.state()["transactions"] == [] and store.state()["statement_checks"] == []
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
     assert result["imported"] == 5
@@ -807,7 +854,7 @@ def test_reconcile_stores_protection_figures_without_importing_movements(store, 
         "0A81F6F5_PensionVoluntaria_202512.pdf": VOLUNTARY_PREVIOUS,  # before the start: skipped
     }
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts, read_only=False)
-    assert result == {"statements": 2, "matched": 0, "missing": 0, "imported": 0, "balances": 2, "reclassified": 0, "categories_proposed": 0}
+    assert result == {"statements": 2, "matched": 0, "missing": 0, "imported": 0, "balances": 2, "reclassified": 0, "categories_proposed": 0, "duplicates": 0}
     assert store.state()["transactions"] == []
     checks = {check["product"]: check for check in store.state()["statement_checks"]}
     assert checks["PROTECCION_VOLUNTARIA"]["contributions_minor"] == 50_000_000

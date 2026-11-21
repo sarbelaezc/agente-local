@@ -482,6 +482,21 @@ Fiducuenta, crédito de consumo e hipotecario):
   con una categoría sugerida (ver
   [Sugerencias de categoría](#sugerencias-de-categoría-para-pendientes)). Repetir no
   importa nada dos veces.
+- **Prima el extracto.** Si el extracto muestra una compra una sola vez y el panel
+  la tiene dos veces (por ejemplo, el registro de Manuela en pesos y la línea del
+  extracto en dólares), la otra es un duplicado: un movimiento del mismo titular y
+  comercio (comparado sin espacios ni símbolos) con hasta 3 días de diferencia que
+  no coincidió con ninguna línea del extracto. Vale para todos los comercios.
+  - El duplicado queda **No cuenta**, con una nota que nombra la línea del extracto
+    (auditado como `statement-duplicate`).
+  - Si la línea del extracto estaba pendiente, toma la decisión y la categoría del
+    duplicado (`decision-statement-twin`). Una línea en dólares registrada en pesos
+    toma la tasa que dan esos pesos, así el gasto en pesos sigue siendo el
+    registrado. Si ya estaba decidida, conserva su decisión.
+  - Cada línea toma a lo sumo un duplicado, el más cercano en fecha, y lo ya
+    marcado «No cuenta» no se toca. Volver a conciliar también revisa las líneas
+    importadas en conciliaciones anteriores; con `-ReadOnly` solo cuenta los
+    duplicados.
 - Al registrar extractos se aplican tus [reglas por comercio](#reglas-por-comercio)
   y tus reglas por destino, con las mismas salvaguardas que para los avisos: nunca
   deciden posibles duplicados, compras en USD sin tasa ni cuentas excluidas, ni
@@ -931,6 +946,7 @@ etiquetas principales:
 | `rule-local-user`, `group-rule-local-user`, `group-rule-between-local-user`, `group-rule-delete-local-user` | Regla por comercio o por destino creada, marcada entre titulares o borrada |
 | `decision-manuela`, `group-rule-manuela` | Decisiones importadas del panel anterior de Manuela |
 | `statement-import`, `statement-reclassify` | Movimiento importado de un extracto, o su tipo corregido |
+| `statement-duplicate`, `decision-statement-twin` | Duplicado de una línea del extracto marcado No cuenta, y la decisión que esa línea tomó de él |
 | `category-suggestions` | Sugerencias de categoría guardadas o recalculadas (solo el número) |
 | `decision-statement-phrase` | Línea de extracto decidida por un texto fijo confirmado (ver «Conciliar extractos») |
 | `destination-backfill` | Destino completado, o llave corta cambiada por la completa, con `backfill-destinations` |
