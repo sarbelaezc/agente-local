@@ -123,7 +123,7 @@ def extract(
     source = _source(mail)
     fixed = _fixed_events(mail, preferences, source)
     if fixed:
-        return _mark_own_transfers(assign_destinations(fixed, source), own_accounts)
+        return _notice_time(_mark_own_transfers(assign_destinations(fixed, source), own_accounts), received)
     context = {
         "accounts": preferences.accounts,
         "own_account_suffixes": sorted(own_accounts or []),
@@ -175,7 +175,9 @@ def extract(
                 # The notice says money left the account but the model returned nothing:
                 # never drop it silently, a person reviews it.
                 raise EvidenceError("events")
-            return _mark_own_transfers(assign_destinations(proposals, source), own_accounts)
+            return _notice_time(
+                _mark_own_transfers(assign_destinations(proposals, source), own_accounts), received,
+            )
         except EvidenceError as exc:
             if exc.field == "events":
                 raise
@@ -288,6 +290,16 @@ def _mark_own_transfers(events: list[dict], own_accounts: list[str] | None) -> l
         elif event["kind"] == "own_transfer" and key.startswith("qr:") and key[3:] not in own:
             event["kind"] = "transfer"
             event["reason"] = QR_NOT_OWN_REASON
+    return events
+
+
+def _notice_time(events: list[dict], received: datetime) -> list[dict]:
+    """Give a lone movement of the notice's own day the hour the notice arrived.
+
+    A time the notice states is kept; a notice with several movements gives none.
+    """
+    if len(events) == 1 and not events[0].get("time") and events[0]["day"] == received.date().isoformat():
+        events[0]["time"] = received.strftime("%H:%M")
     return events
 
 

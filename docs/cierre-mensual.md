@@ -411,6 +411,21 @@ Vuelve a leer por Graph, en solo lectura y sin Ollama, los avisos de pagos
 salientes de Santiago sin destino. Solo completa destinos vacíos (auditados como
 `destination-backfill`); no cambia importes, categorías ni decisiones.
 
+**Hora de cada movimiento.** La tarjeta de la pestaña Decisión muestra la hora
+para identificar el movimiento: la que escribe el aviso o, si no la escribe, la
+hora en que llegó el aviso. Solo se pone cuando el aviso trae un único movimiento
+del mismo día en que llegó; un aviso con varios movimientos o de otro día no da
+hora. Para los importados antes:
+
+```powershell
+.\scripts\agente-local.ps1 backfill-times
+```
+
+Vuelve a leer, en solo lectura y sin Ollama, los avisos de todos los buzones
+detrás de movimientos sin hora. Solo completa horas vacías (auditadas como
+`time-backfill`); no cambia importes, categorías ni decisiones. No lee extractos,
+el Excel de créditos ni lo importado del panel de Manuela.
+
 **Corregir la tarjeta de movimientos ya importados.** Aplica a los avisos de
 Santiago importados antes la misma regla que los nuevos: la tarjeta que nombran
 sus últimos 4 dígitos (ver [Validación de lo que propone
@@ -914,6 +929,8 @@ etiquetas principales:
 | `category-suggestions` | Sugerencias de categoría guardadas o recalculadas (solo el número) |
 | `decision-statement-phrase` | Línea de extracto decidida por un texto fijo confirmado (ver «Conciliar extractos») |
 | `destination-backfill` | Destino completado con `backfill-destinations` |
+| `time-backfill` | Hora completada con `backfill-times` |
+| `qr-not-own-transfer` | Pago por QR que Ollama propuso como transferencia propia, vuelto transferencia |
 | `card-account-backfill` | Tarjeta corregida con `backfill-card-accounts` (con la anterior) |
 | `payroll-deduction-income` | Ingreso espejo de una cuota descontada de la nómina |
 | `mailbox-possible-duplicate` | Posible duplicado entre el Gmail de Manuela y su archivo |
