@@ -63,7 +63,7 @@
     .top-actions, .toolbar, .inline-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 
     /* Buttons: soft pills; the active or primary one turns ink */
-    .button, .select-button {
+    .button {
       display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       min-height: 40px; padding: 9px 13px; border: 1px solid var(--line); border-radius: 12px;
       background: var(--surf); color: var(--ink); font-weight: 600;
@@ -146,8 +146,12 @@
     .toolbar { justify-content: space-between; margin: 10px 0 6px; }
     .toolbar-group { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
     .control-label { color: var(--mut); font-size: 12.5px; font-weight: 600; }
-    .select-button { min-height: 38px; padding: 4px 10px; border-radius: 999px; }
-    .select-button select { min-width: 90px; border: 0; background: transparent; color: var(--ink); font-weight: 600; }
+    /* Toolbar selects (currency, year) look like every other select on the page. */
+    .select-button { display: inline-flex; }
+    .select-button select {
+      min-width: 110px; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line);
+      border-radius: 12px; background: var(--surf); color: var(--ink);
+    }
     .owner-switch { display: inline-flex; gap: 6px; }
     .owner-switch button { min-height: 38px; border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; background: var(--surf); color: var(--ink2); font-size: 14px; }
     .owner-switch button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
@@ -326,8 +330,7 @@
       .topbar { align-items: center; }
       .topbar .eyebrow, .top-actions .theme-label { display: none; }
       .top-actions { flex-wrap: nowrap; }
-      .button, .top-actions .button, .owner-switch button, .select-button, .tab, .chip, .decision-actions .button { min-height: 44px; }
-      .select-button { padding-top: 0; padding-bottom: 0; }
+      .button, .top-actions .button, .owner-switch button, .tab, .chip, .decision-actions .button { min-height: 44px; }
       .select-button select { min-height: 44px; }
       .top-actions .button { min-width: 44px; }
       .field input, .field select, .field textarea, .control, .select-button select { font-size: 16px; }
