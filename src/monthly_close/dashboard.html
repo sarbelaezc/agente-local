@@ -204,6 +204,20 @@
     /* A tile with its detail open takes the whole row, so the list is never squeezed. */
     .metric.minor:has(> details[open]) { flex-basis: 100%; }
     .metric.minor details.inline-detail > summary { padding: 2px 0 0; }
+    /* Motion: a list unfolds from its summary and folds back into it, a tab or month fades in,
+       so the eye follows what changed. The state changes at once; only the drawing moves. */
+    :root { interpolate-size: allow-keywords; }
+    details::details-content { block-size: 0; overflow: clip; transition: block-size .26s ease, content-visibility .26s allow-discrete; }
+    /* Opening shows the content at once and only grows; closing keeps it while it folds. */
+    details[open]::details-content { block-size: auto; transition: block-size .26s ease; }
+    @keyframes view-in { from { opacity: 0; transform: translateY(6px); } }
+    @keyframes reveal-in { from { opacity: 0; transform: translateY(-4px); } }
+    .view-in { animation: view-in .24s ease-out; }
+    .detail-editor:not([hidden]) { animation: reveal-in .2s ease-out; }
+    @media (prefers-reduced-motion: reduce) {
+      details::details-content, details[open]::details-content { transition: none; }
+      .view-in, .detail-editor:not([hidden]) { animation: none; }
+    }
     /* How much of the spending the income covers: green when the balance is in favour, red
        when it is against; the text beside it says the same, so colour is never alone. */
     .split-bar.meter span { flex: none; background: var(--bad); }
@@ -1434,6 +1448,9 @@
         if (state.activeTab !== "month") {
           selectTab("month");
           $("#panel-month").scrollIntoView({ block: "start" });
+        } else {
+          // The chips stay put; what they show changes.
+          playViewIn(...Array.from($("#panel-month").children).filter(node => node.id !== "month-chips"));
         }
         syncUrl();
         requestAnimationFrame(centerSelectedMonth);
@@ -3282,7 +3299,47 @@
         return card;
       }
 
+      // Motion follows the system setting; without it every change is instant.
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const motionAllowed = () => !reducedMotion.matches && typeof Element.prototype.animate === "function";
+      // Fades in a view that just appeared or changed (another tab, another month).
+      function playViewIn(...nodes) {
+        if (!motionAllowed()) return;
+        nodes.forEach(node => {
+          node.classList.remove("view-in");
+          void node.offsetWidth; // Restarts the animation when the class was already there.
+          node.classList.add("view-in");
+        });
+      }
+      // A tile that opens its list takes the whole row and the other tiles change place: each
+      // tile slides from where it was, and the one that grew unrolls from its old size.
+      function slideTiles(strip, before) {
+        fitTiles(strip.parentElement);
+        Array.from(strip.children).forEach(tile => {
+          const old = before.get(tile);
+          if (!old) return;
+          const now = tile.getBoundingClientRect();
+          const dx = old.left - now.left, dy = old.top - now.top;
+          const right = Math.max(0, now.width - old.width), bottom = Math.max(0, now.height - old.height);
+          if (!dx && !dy && !right && !bottom) return;
+          const radius = getComputedStyle(tile).borderTopLeftRadius;
+          tile.animate([
+            { transform: `translate(${dx}px, ${dy}px)`, clipPath: `inset(0 ${right}px ${bottom}px 0 round ${radius})` },
+            { transform: "none", clipPath: `inset(0 0 0 0 round ${radius})` }
+          ], { duration: 260, easing: "ease" });
+        });
+      }
+      document.addEventListener("click", event => {
+        const summary = event.target.closest(".metric-strip details > summary");
+        if (!summary || !motionAllowed()) return;
+        const strip = summary.closest(".metric-strip");
+        const before = new Map(Array.from(strip.children, tile => [tile, tile.getBoundingClientRect()]));
+        // The list opens right after this click; the next frame sees the tiles in their new places.
+        requestAnimationFrame(() => slideTiles(strip, before));
+      });
+
       function selectTab(tab) {
+        const changed = state.activeTab !== tab;
         state.activeTab = tab;
         const tabs = [
           ["month", "#tab-month", "#panel-month"],
@@ -3295,6 +3352,7 @@
           $(buttonSelector).tabIndex = selected ? 0 : -1;
           $(panelSelector).hidden = !selected;
         });
+        if (changed) playViewIn($(`#panel-${tab}`));
         hideTip();
         if (tab === "month") requestAnimationFrame(centerSelectedMonth);
         syncUrl();

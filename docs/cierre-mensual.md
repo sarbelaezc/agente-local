@@ -720,6 +720,16 @@ navegador recuerda que lo cerraste, igual que el tema; en otro dispositivo, o
 con otra dirección, como la de `-Red`, aparece de nuevo hasta cerrarlo allí. El
 aviso del formulario de configuración inicial no se puede cerrar.
 
+Los cambios del panel se animan para que se vea qué pasó: una lista o un detalle
+se despliega desde su título y se pliega de vuelta en él; al abrir la lista de
+una ficha pequeña, la ficha se extiende hasta ocupar la fila y las demás se
+deslizan a su nuevo lugar; al cambiar de pestaña o de mes, el contenido nuevo
+aparece con un fundido corto, y la tarjeta de decisión de un movimiento se
+despliega bajo él. El cambio ocurre de inmediato y la animación solo lo
+acompaña (dura cerca de un cuarto de segundo). Si el sistema tiene activado
+reducir el movimiento (en Windows: Configuración > Accesibilidad > Efectos
+visuales > Efectos de animación), el panel cambia sin animaciones.
+
 **Mes**
 
 - Meses en orden cronológico con nombre corto y la línea de cobertura del mes.
