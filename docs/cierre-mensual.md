@@ -154,11 +154,15 @@ el total y una pista, con botones que deciden todos sus movimientos a la vez.
   tienen: Inversión y Retiro de inversión asignan su propia categoría. Al decidir
   Gasto personal o Familiar, todos toman esa categoría, con la misma validación
   todo o nada y una auditoría por movimiento; las demás decisiones no la usan.
+  En destinos que no son solo compras en comercios (también con un solo
+  movimiento), una nota debajo recuerda elegir «Retiro en efectivo» si fue
+  efectivo.
   Muestra la sugerencia común si la pediste, si no la categoría que ya comparten,
   y si no «Mantener la de cada movimiento», que no cambia ninguna. También está
   en «Decisiones anteriores» para recategorizar un destino ya decidido.
-- **Uno por uno.** «Ver N movimientos», en cada tarjeta, permite decidir cada
-  movimiento con su categoría. Decidir un movimiento confirma su categoría. Cada
+- **Uno por uno.** «Ver los N movimientos y decidir uno por uno», en cada
+  tarjeta, permite decidir cada movimiento con su categoría. En «Decisiones anteriores» se llama «Ver N
+  movimientos». Decidir un movimiento confirma su categoría. Cada
   movimiento indica su origen («Extracto Visa *1234») o el motivo del aviso; la
   moneda se corrige en «Corregir moneda», que viene cerrado, salvo en los
   movimientos en USD, que muestran «Moneda y tasa» abierto.
@@ -259,7 +263,7 @@ aplica a todas sus compras en dólares al pulsar la decisión, con la misma
 validación todo o nada y una auditoría por movimiento. Las compras en pesos del
 mismo destino no la usan. Si las compras ya tienen tasas distintas, el campo
 viene vacío: déjalo así para conservar la de cada una, o decide cada compra en
-«Ver N movimientos».
+«Ver los N movimientos y decidir uno por uno».
 
 **Compras que coinciden con una regla.** Las reglas por comercio y por destino
 nunca deciden una compra en USD sin tasa, porque la tasa la pones tú. En cambio,

@@ -804,6 +804,26 @@ def test_pending_card_hides_when_everything_is_decided_and_the_rest_share_one_ro
         assert len(tops) == 1, (panel, tops)
 
 
+def test_cash_hint_shows_only_where_a_destination_can_be_cash(dashboard):
+    page, store, month, _ = dashboard
+    store.import_message("tr", [{
+        "id": "tr", "message_id": "tr", "day": month + "-06", "merchant": "Traslado a Nequi",
+        "account": "Ahorros", "amount_minor": 70000, "currency": "COP", "category": "Otros gastos",
+        "kind": "transfer", "decision": None, "reason": "Transferencia.",
+    }])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    expect(page.locator("#panel-decisions .section-heading p")).to_have_text(
+        "Agrupadas por destino, de la más antigua a la más reciente.",
+    )
+    hint = "Si fue efectivo, elige «Retiro en efectivo»."
+    transfer = page.locator("#pending-list article").filter(has_text="Traslado a Nequi")
+    shop = page.locator("#pending-list article").filter(has_text="Tienda")
+    expect(transfer.get_by_text(hint, exact=False)).to_be_visible()
+    expect(shop.get_by_text(hint, exact=False)).to_have_count(0)
+
+
 def test_secondary_figures_fill_each_row_without_overflowing(dashboard):
     page, _, _, _ = dashboard
     # The longest figures and notes the month and year views show, seven of them.

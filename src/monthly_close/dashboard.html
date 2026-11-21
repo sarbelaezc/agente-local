@@ -566,7 +566,7 @@
         </section>
 
         <section id="panel-decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden>
-          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Agrupadas por destino, de la más antigua a la más reciente: los botones de la tarjeta deciden todos sus movimientos pendientes; «Ver movimientos» permite decidir uno por uno. Para efectivo, elige la categoría Retiro en efectivo; Inversión y Retiro de inversión ponen su categoría solos.</p></div></div>
+          <div class="section-heading"><div><h2>Revisión de decisiones</h2><p>Agrupadas por destino, de la más antigua a la más reciente.</p></div></div>
           <div id="decision-summary" class="metric hero decision-summary" aria-live="polite"></div>
           <section id="card-review" hidden>
             <h3>Tarjetas con número nuevo · confirma cuál es</h3>
@@ -2756,9 +2756,19 @@
         return button;
       }
 
+      // Cash and investments come from withdrawals and transfers, never from a purchase at a shop,
+      // so only those destinations recall where cash goes and that investments set their own category.
+      function cashHint(rows, options) {
+        const shopsOnly = rows.every(tx => ["purchase", "pse"].includes(typeof tx.kind === "string" ? tx.kind.trim().toLowerCase() : ""));
+        if (shopsOnly || !options.some(([decision]) => decision === "investment")) return null;
+        return el("p", "hint", "Si fue efectivo, elige «Retiro en efectivo». «Inversión» y «Retiro de inversión» ponen su categoría solos.");
+      }
+
       function makeGroupCard(entry, isPrevious) {
         if (entry.rows.length === 1) {
           const card = makeDecisionCard(entry.rows[0], isPrevious);
+          const hint = cashHint(entry.rows, decisionOptions(entry.rows[0]));
+          if (hint) card.querySelector(".decision-category").append(hint);
           if (entry.rows[0].group_key) card.insertBefore(el("p", "hint", `Destino: ${groupTitle(entry)}`), card.children[1]);
           const toggle = betweenToggle(entry);
           if (toggle) {
@@ -2817,6 +2827,8 @@
           groupCategory.value = selected;
           field.append(label, groupCategory);
           if (typeof suggested === "string") field.append(suggestionNote(groupSuggestions[0].source));
+          const hint = cashHint(entry.rows, options);
+          if (hint) field.append(hint);
           card.append(field);
         }
         // One rate for every dollar movement of the destination; each one can still be changed below.
@@ -2878,7 +2890,8 @@
           card.append(line);
         }
         const details = el("details");
-        details.append(el("summary", "", `Ver ${entry.rows.length} movimientos`));
+        details.append(el("summary", "", isPrevious ? `Ver ${entry.rows.length} movimientos`
+          : `Ver los ${entry.rows.length} movimientos y decidir uno por uno`));
         const list = el("div", "decision-list");
         entry.rows.forEach(tx => list.append(makeDecisionCard(tx, isPrevious)));
         details.append(list);
