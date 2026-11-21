@@ -737,9 +737,10 @@ aviso del formulario de configuración inicial no se puede cerrar.
   último extracto y cuánto subió o bajó en el año.
   - El saldo de un mes suma el último extracto de cada producto hasta ese mes;
     un mes sin extracto nuevo repite el saldo anterior.
-  - El mes en que un producto empieza a contarse lleva un punto hueco y una nota
-    debajo («En abril de 2026 empieza a contar Fiducuenta *2553»): ese salto no es dinero que
-    entró.
+  - El mes en que un producto empieza a contarse lleva un punto hueco; al pasar
+    el cursor o tocarlo dice qué producto empieza. En la lista de productos,
+    ese producto dice «Se suma al total desde abril de 2026; ese salto no es
+    dinero que entró.»
   - Por defecto solo se ven los totales. Debajo, «N productos» despliega cada
     producto con su saldo y su variación en el año, o desde su primer extracto
     si empezó a mitad de año. Tocar un producto cambia la gráfica a solo ese

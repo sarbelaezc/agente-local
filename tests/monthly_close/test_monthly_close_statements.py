@@ -571,14 +571,16 @@ def test_year_view_shows_how_investments_and_credits_moved(store, start_panel, n
     # product starts to count is marked, so its arrival does not read as money coming in.
     total = tips()
     assert re.search(r"Enero de 2026: 100[.\s]?000,00", total[0])
-    assert re.search(r"Febrero de 2026: 180[.\s]?000,00\sCOP · 2 productos · empieza a contar", total[1])
-    expect(investments.locator(".balance-note")).to_contain_text("En febrero de 2026 empieza a contar Fiducuenta *0005 (Manuela).")
+    assert re.search(r"Febrero de 2026: 180[.\s]?000,00\sCOP · 2 productos · empieza a contar Fiducuenta \*0005", total[1])
+    expect(late.locator(".balance-note")).to_have_text("Se suma al total desde febrero de 2026; ese salto no es dinero que entró.")
+    expect(fund.locator(".balance-note")).to_have_count(0)
     # Choosing a product shows only its balance; choosing it again, or "Ver total", goes back.
     fund.click()
     expect(fund).to_have_attribute("aria-pressed", "true")
     expect(investments.locator(".balance-focus")).to_contain_text("Mostrando Fiducuenta *0003")
+    # The other product's note stays in the list while one product is shown.
+    expect(late.locator(".balance-note")).to_have_count(1)
     assert re.search(r"Marzo de 2026: 130[.\s]?000,00\sCOP( · toca para ver el mes)?$", tips()[2])
-    expect(investments.locator(".balance-note")).to_have_count(0)
     investments.get_by_role("button", name="Ver total").click()
     expect(fund).to_have_attribute("aria-pressed", "false")
     assert tips() == total

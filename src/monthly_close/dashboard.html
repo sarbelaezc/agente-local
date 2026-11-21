@@ -313,7 +313,7 @@
     /* Year balances: one line chart and one list of products per kind. */
     .balance-section .statement-head { margin-bottom: 4px; }
     .balance-focus { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; color: var(--ink2); font-size: 12.5px; }
-    .balance-note { margin: 0 0 6px; color: var(--mut); font-size: 12.5px; line-height: 1.45; }
+    .balance-note { grid-column: 1 / -1; color: var(--mut); font-size: 12.5px; line-height: 1.45; }
     .balance-products > summary { color: var(--ink2); font-size: 13px; font-weight: 500; }
     button.balance-product { width: 100%; margin: 0; padding: 8px 6px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
     @media (hover: hover) { button.balance-product:hover { background: var(--soft); } }
@@ -2085,19 +2085,26 @@
           if (focus.childElementCount) host.append(focus);
           // Total: a month counts the products known by then. The month a product starts to
           // count is marked, so its arrival is not read as money moving.
-          const points = [], entries = [];
+          // The month each product starts to count in the total, when the total already had
+          // other products: that month's jump is its arrival, not money coming in.
+          const firstKnown = ({ list }) => months.find(({ month }) => latestBy(list, `${month}-31`));
+          const totalStart = series.map(firstKnown).filter(Boolean).map(({ index }) => index).sort((a, b) => a - b)[0];
+          const arrivals = new Map();
+          series.forEach(item => {
+            const known = firstKnown(item);
+            if (known && known.index > totalStart) arrivals.set(item.key, known.month);
+          });
+          const points = [];
           months.forEach(({ index, month }) => {
             const included = chosen ? [chosen] : series;
             const known = included.map(({ list }) => latestBy(list, `${month}-31`)).filter(Boolean);
             if (!known.length) return;
-            const arrived = points.length && !chosen
-              ? series.filter(({ list }) => latestBy(list, `${month}-31`) && !latestBy(list, `${months[index - 1].month}-31`))
-              : [];
-            points.push({ index, month, total: known.reduce((total, check) => total + check.balance_minor, 0), count: known.length, arrived: arrived.length > 0 });
-            arrived.forEach(({ list }) => entries.push(`En ${monthLabel(month)} empieza a contar ${nameOf(endOf(list))}${state.owner === "hogar" ? ` (${ownerLabel(endOf(list).owner)})` : ""}`));
+            points.push({
+              index, month, total: known.reduce((total, check) => total + check.balance_minor, 0), count: known.length,
+              arrived: chosen ? [] : series.filter(({ key }) => arrivals.get(key) === month).map(({ list }) => nameOf(endOf(list)))
+            });
           });
           host.append(balanceChart(points, chosen ? nameOf(endOf(chosen.list)) : label, cssColor(colorName), stroke));
-          if (entries.length) host.append(el("p", "balance-note", `${entries.join(". ")}. Ese salto no es dinero que entró.`));
 
           // The products stay folded until asked for; folding them goes back to the total.
           const details = el("details", "balance-products");
@@ -2121,6 +2128,8 @@
             row.append(name, el("strong", "", formatMoney(last.balance_minor, "COP")),
               el("span", "statement-detail"));
             row.lastChild.append(balanceChange(last.balance_minor - first.balance_minor, upIsGood, true), ` ${since} · al ${formatDate(last.period_end)}`);
+            // Its arrival is the hollow point of the total: say so where the product is.
+            if (arrivals.has(key)) row.append(el("span", "balance-note", `Se suma al total desde ${monthLabel(arrivals.get(key))}; ese salto no es dinero que entró.`));
             row.addEventListener("click", () => {
               state.balanceFocus[group] = state.balanceFocus[group] === key ? null : key;
               renderYearBalances();
@@ -2173,7 +2182,7 @@
           fill: "none", stroke: color, "stroke-width": stroke, "stroke-linejoin": "round", "stroke-linecap": "round"
         }));
         // A hollow point marks the month a product starts to count.
-        points.forEach(point => svg.append(svgEl("circle", point.arrived
+        points.forEach(point => svg.append(svgEl("circle", point.arrived.length
           ? { cx: xOf(point.index), cy: yOf(point.total), r: 5, fill: cssColor("--surf"), stroke: color, "stroke-width": 2 }
           : { cx: xOf(point.index), cy: yOf(point.total), r: 4, fill: color, stroke: cssColor("--surf"), "stroke-width": 2 })));
         const current = currentMonth();
@@ -2189,7 +2198,7 @@
         points.forEach(point => {
           const hit = svgEl("rect", { x: left + chartWidth * point.index / 12, y: top, width: chartWidth / 12, height: chartHeight, fill: "transparent" });
           const products = point.count > 1 ? ` · ${point.count} productos` : "";
-          setTip(hit, `${capitalize(monthLabel(point.month))}: ${formatMoney(point.total, "COP")}${products}${point.arrived ? " · empieza a contar un producto" : ""}`);
+          setTip(hit, `${capitalize(monthLabel(point.month))}: ${formatMoney(point.total, "COP")}${products}${point.arrived.length ? ` · empieza a contar ${point.arrived.join(" y ")}` : ""}`);
           const show = () => { guide.setAttribute("x1", xOf(point.index)); guide.setAttribute("x2", xOf(point.index)); guide.setAttribute("visibility", "visible"); };
           hit.addEventListener("pointerenter", show);
           hit.addEventListener("pointerleave", () => guide.setAttribute("visibility", "hidden"));
