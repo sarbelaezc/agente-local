@@ -301,6 +301,19 @@
     .owner-tag.owner-manuela { background: var(--owner-manuela-soft); color: var(--owner-manuela); }
     .flag-tag { display: inline-flex; padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--ink2); font-size: 11px; font-weight: 600; }
     .empty-state { padding: 10px 0; color: var(--mut); font-size: 13px; }
+    /* Statements card: one block per kind of product, one two-line row per statement. */
+    .statement-section + .statement-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+    .statement-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; }
+    .statement-head h4 { margin: 0; color: var(--ink); font-size: 14px; }
+    .statement-head strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+    .statement-head p { flex-basis: 100%; margin: 2px 0 0; color: var(--mut); font-size: 12.5px; }
+    .statement-rows { display: grid; margin-top: 6px; }
+    .statement-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; padding: 8px 0; }
+    .statement-row + .statement-row { border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+    .statement-name { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; color: var(--ink); font-size: 14px; font-weight: 600; }
+    .statement-row > strong { font-size: 14px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .statement-detail { grid-column: 1 / -1; color: var(--ink2); font-size: 12.5px; line-height: 1.45; font-variant-numeric: tabular-nums; }
+    .statement-row .status-pill { justify-self: end; white-space: nowrap; }
     .coverage-form { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(0, 2fr) auto; align-items: end; gap: 10px; }
     .notice-line { display: flex; align-items: flex-start; gap: 9px; color: var(--ink2); font-size: 13px; line-height: 1.45; }
     .footer-note { margin-top: 20px; color: var(--mut); font-size: 12.5px; line-height: 1.5; }
@@ -466,8 +479,7 @@
             </article>
             <article class="card" id="statements-card" hidden>
               <div class="card-header"><div><h3>Extractos y saldos</h3><p>Conciliación con los extractos del banco y último saldo conocido de inversiones y créditos</p></div></div>
-              <div id="statement-balances" class="rank-list"></div>
-              <div id="statement-checks" class="rank-list" style="margin-top:12px"></div>
+              <div id="statement-sections"></div>
             </article>
             <article class="card">
               <div class="card-header"><div><h3>Cuentas de pago</h3><p>Según los datos disponibles en la importación</p></div></div>
@@ -1415,7 +1427,41 @@
           figure("rendimientos", check.returns_minor)
         ].filter(Boolean).join(" · ");
       }
+      // Conciliation against the notices, as a pill: green when every movement matched,
+      // orange when some only came in the statement. Nothing for a statement without movements.
+      function conciliationPill(check) {
+        if (!Number.isSafeInteger(check.movements) || check.movements <= 0) return null;
+        const missing = Number.isSafeInteger(check.missing) ? check.missing : 0;
+        const pill = el("span", `status-pill ${missing ? "partial" : "reconciled"}`,
+          missing ? `⚠ ${missing} ${missing === 1 ? "pendiente" : "pendientes"}` : `✓ ${check.matched}/${check.movements}`);
+        pill.setAttribute("aria-label", missing
+          ? `${missing} de ${check.movements} movimientos no llegaron por aviso`
+          : `Los ${check.movements} movimientos coinciden con los avisos`);
+        return pill;
+      }
+      function statementRow(check) {
+        const row = el("div", "statement-row");
+        const name = el("span", "statement-name", `${productNames[check.product] || check.product}${check.suffix ? ` *${check.suffix}` : ""}`);
+        if (state.owner === "hogar") name.append(ownerTag(check.owner));
+        row.append(name);
+        const pill = conciliationPill(check);
+        const hasBalance = Number.isSafeInteger(check.balance_minor);
+        if (hasBalance) row.append(el("strong", "", formatMoney(check.balance_minor, "COP")));
+        else if (pill) row.append(pill);
+        const details = [];
+        const figures = investmentFigures(check);
+        if (figures) details.push(figures);
+        if (check.missing) details.push(`${check.matched} de ${check.movements} coinciden con los avisos; ${check.missing} ${check.missing === 1 ? "entró" : "entraron"} como ${check.missing === 1 ? "pendiente" : "pendientes"}`);
+        if (details.length || (hasBalance && pill)) {
+          const detail = el("div", "statement-detail", details.join(" · "));
+          if (hasBalance && pill && !check.missing) detail.prepend(pill, document.createTextNode(details.length ? " " : ""));
+          row.append(detail);
+        }
+        return row;
+      }
       // Each owner sees the statements of their own mailbox; the household view sees them all.
+      // One block per kind: cards and accounts (reconciled against the notices), investments
+      // and credits (each with the total of the latest known balances up to this month).
       function renderStatements() {
         const checks = safeArray(state.data && state.data.statement_checks).filter(check => check && typeof check.period_end === "string" && inOwnerView(check));
         const card = $("#statements-card");
@@ -1426,31 +1472,35 @@
         checks.filter(check => check.period_end <= monthEnd && Number.isSafeInteger(check.balance_minor)).forEach(check => {
           latest.set(`${check.owner}|${check.product}|${check.suffix}`, check);
         });
-        const balances = $("#statement-balances");
-        balances.replaceChildren();
-        const groups = [["Inversiones", investmentProducts], ["Créditos", ["CREDITO", "HIPOTECARIO"]]];
-        groups.forEach(([label, products]) => {
-          const rows = Array.from(latest.values()).filter(check => products.includes(check.product));
-          if (!rows.length) return;
-          const total = rows.reduce((sumValue, check) => sumValue + check.balance_minor, 0);
-          const row = el("div", "rank-row");
-          row.append(el("span", "legend-label", `${label} · ${rows.length} ${rows.length === 1 ? "producto" : "productos"} · saldo al ${formatDate(rows.map(check => check.period_end).sort().pop())}`), el("strong", "", formatMoney(total, "COP")));
-          balances.append(row);
-        });
-        if (!balances.childElementCount) balances.append(el("div", "empty-state", "Sin saldos de extractos hasta este mes."));
         const inMonth = checks.filter(check => check.period_end.slice(0, 7) === state.month);
-        const host = $("#statement-checks");
+        const credits = ["CREDITO", "HIPOTECARIO"];
+        const sections = [
+          ["Tarjetas y cuentas", "Conciliación de los extractos del mes con los avisos", check => !investmentProducts.includes(check.product) && !credits.includes(check.product), false],
+          ["Inversiones", "", check => investmentProducts.includes(check.product), true],
+          ["Créditos", "", check => credits.includes(check.product), true]
+        ];
+        const host = $("#statement-sections");
         host.replaceChildren();
-        if (!inMonth.length) { host.append(el("p", "hint", "No hay extractos con corte en este mes.")); return; }
-        inMonth.forEach(check => {
-          const row = el("div", "rank-row");
-          const name = `${productNames[check.product] || check.product}${check.suffix ? ` *${check.suffix}` : ""}${state.owner === "hogar" ? ` · ${ownerLabel(check.owner)}` : ""}`;
-          const figures = investmentFigures(check);
-          const status = check.missing ? `${check.missing} no llegaron por aviso (importados como pendientes)` : "todo coincide con los avisos";
-          row.append(el("span", "legend-label", figures ? `${name} · ${figures}` : `${name} · ${check.matched}/${check.movements} coinciden · ${status}`));
-          if (Number.isSafeInteger(check.balance_minor)) row.append(el("strong", "", formatMoney(check.balance_minor, "COP")));
-          host.append(row);
+        sections.forEach(([label, note, belongs, withTotal]) => {
+          const rows = inMonth.filter(belongs);
+          const known = withTotal ? Array.from(latest.values()).filter(belongs) : [];
+          if (!rows.length && !known.length) return;
+          const section = el("section", "statement-section");
+          const head = el("div", "statement-head");
+          head.append(el("h4", "", label));
+          if (known.length) {
+            const total = known.reduce((sumValue, check) => sumValue + check.balance_minor, 0);
+            head.append(el("strong", "", formatMoney(total, "COP")),
+              el("p", "", `${known.length} ${known.length === 1 ? "producto" : "productos"} · saldo al ${formatDate(known.map(check => check.period_end).sort().pop())}`));
+          } else if (note) head.append(el("p", "", note));
+          section.append(head);
+          const list = el("div", "statement-rows");
+          rows.forEach(check => list.append(statementRow(check)));
+          if (!rows.length) list.append(el("p", "hint", "Sin extractos con corte en este mes."));
+          section.append(list);
+          host.append(section);
         });
+        if (!host.childElementCount) host.append(el("p", "hint", "No hay extractos con corte en este mes."));
       }
 
       // Manuela's short amounts: 950, 62k, 1,5M.

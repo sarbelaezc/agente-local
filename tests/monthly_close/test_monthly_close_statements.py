@@ -505,8 +505,13 @@ def test_panel_shows_statement_checks_and_balances(store, start_panel, new_page)
     text = page.locator("#statements-card").inner_text()
     assert "Visa *0002" in text and "Fiducuenta" not in text
     page.locator("#owner-switch").get_by_role("button", name="Hogar").click()
-    text = page.locator("#statements-card").inner_text()
-    assert "Visa *0002 · Manuela" in text and "Fiducuenta *0003 · Santiago" in text
+    card = page.locator("#statements-card")
+    text = card.inner_text()
+    assert "Tarjetas y cuentas" in text and "Inversiones" in text and "Créditos" in text
+    # In the household view each statement carries its owner's tag.
+    for name, owner in (("Visa *0002", "Manuela"), ("Fiducuenta *0003", "Santiago")):
+        expect(card.locator(".statement-name").filter(has_text=name).locator(".owner-tag")).to_have_text(owner)
+    assert "0/0" not in text
     assert not errors
 
 

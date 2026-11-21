@@ -507,10 +507,20 @@ de producto, así que el buzón dice de quién es cada uno:
 - Los correos de Protección no se envían a Ollama: se marcan como procesados sin
   movimientos, porque la información la aporta el PDF.
 
-En el panel, «Extractos y saldos» muestra el último saldo conocido y cuántos
-movimientos de cada extracto coinciden en el mes. Cada titular ve sus extractos;
-**Hogar** los ve todos, con el nombre del titular. El grupo **Inversiones** suma
-Fiducuenta, pensión voluntaria y cesantías.
+En el panel, la tarjeta «Extractos y saldos» de la pestaña Mes tiene un bloque
+por tipo de producto. Cada extracto con corte en el mes va en una fila con su
+nombre a la izquierda y su saldo o estado a la derecha.
+
+- **Tarjetas y cuentas:** la conciliación con los avisos. Una marca verde
+  («✓ 21/21») indica que todos los movimientos coinciden. Una naranja («⚠ 3
+  pendientes») indica que algunos solo venían en el extracto: entraron como
+  pendientes y debajo se indica cuántos coinciden.
+- **Inversiones** (Fiducuenta, pensión voluntaria y cesantías) y **Créditos**: el
+  total del último saldo conocido de cada producto hasta ese mes, con la fecha
+  del saldo. Protección muestra además aportes, retiros y rendimientos.
+
+Un extracto sin movimientos no muestra conciliación. Cada titular ve sus
+extractos; **Hogar** los ve todos, con la etiqueta del titular.
 
 ## Conciliación automática del mes
 
