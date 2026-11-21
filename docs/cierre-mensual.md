@@ -707,7 +707,11 @@ aviso del formulario de configuración inicial no se puede cerrar.
   agrupa variantes del mismo comercio (por ejemplo `UBER RIDES` y `UBER *TRIP`
   como «Uber»); lo guardado conserva el texto del aviso.
 - **Detalle por categoría** separa gastos, inversiones, ingresos y pagos de
-  tarjeta, e indica cuántos movimientos faltan por decidir.
+  tarjeta, e indica cuántos movimientos faltan por decidir. Tocar un movimiento
+  abre debajo su tarjeta de decisión, la misma de la pestaña Decisión, para
+  cambiar la categoría, la moneda y la tasa o la decisión. Cada cambio queda
+  auditado igual que en Decisión. Tras guardar, la categoría y el movimiento
+  siguen abiertos con la decisión nueva; se cierran tocando de nuevo.
 - Cada cifra muestra su valor al pasar el mouse, tocar o llegar con el teclado.
 
 **Año**

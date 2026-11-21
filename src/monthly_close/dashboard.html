@@ -273,6 +273,14 @@
     .detail-rows { display: grid; gap: 2px; padding-bottom: 8px; }
     .detail-row { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; color: var(--ink2); font-size: 13px; }
     .detail-row strong { color: var(--ink); font-weight: 600; }
+    /* A movement of the category detail opens its decision card right below it. */
+    button.detail-row { width: 100%; align-items: center; margin: 0; padding: 7px 6px; border: 0; border-radius: 8px; background: none; font: inherit; text-align: left; cursor: pointer; }
+    button.detail-row:hover, button.detail-row[aria-expanded="true"] { background: var(--soft); }
+    .detail-row .detail-amount { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+    .detail-row .detail-chevron { color: var(--mut); font-size: 12px; transition: transform .15s ease-out; }
+    button.detail-row[aria-expanded="true"] .detail-chevron { transform: rotate(180deg); }
+    @media (prefers-reduced-motion: reduce) { .detail-row .detail-chevron { transition: none; } }
+    .detail-editor { margin: 2px 0 10px; }
 
     /* Decision cards, after Manuela's destination cards */
     .decision-list { display: grid; gap: 10px; }
@@ -364,6 +372,7 @@
       /* Bar rankings: the full name on its own line, the bar and amount below. */
       .bar-row, #year-categories .bar-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
       .bar-row .bar-name { grid-column: 1 / -1; white-space: normal; }
+      button.detail-row { min-height: 44px; }
     }
     @media (max-width: 390px) {
       .top-actions { gap: 5px; }
@@ -606,6 +615,8 @@
       const initialTab = initialParams.get("tab");
       const state = {
         data: null,
+        openCategories: new Set(),
+        editingTx: null,
         month: initialMonth && monthPattern.test(initialMonth) ? initialMonth : currentMonth(),
         year: initialYear && /^\d{4}$/.test(initialYear) ? initialYear : String(new Date().getFullYear()),
         currency: initialParams.get("currency") || "",
@@ -1804,15 +1815,49 @@
           Array.from(groups).sort((a, b) => a[0].localeCompare(b[0], "es")).forEach(([category, rows]) => {
             const detail = el("details", "category-detail");
             detail.dataset.category = category;
+            // Categories stay open, and the movement being edited stays open, after a save reloads the panel.
+            const openKey = `${heading}|${category}`;
+            detail.open = state.openCategories.has(openKey);
+            detail.addEventListener("toggle", () => {
+              if (detail.open) state.openCategories.add(openKey);
+              else state.openCategories.delete(openKey);
+            });
             const pending = rows.filter(tx => tx.decision == null).length;
             detail.append(el("summary", "", `${category} · ${totalOf(rows)} · ${rows.length} movimientos${pending ? ` · ${pending} por decidir` : ""}`));
             const body = el("div", "detail-rows");
             rows.sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
-                const row = el("div", "detail-row");
-                const text = el("span", "", `${tx.day ? formatDate(tx.day) : "Sin fecha"} · ${itemText(tx.merchant)} · ${statusOf(tx)}`);
-                appendFlags(text, tx);
-                row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
-              body.append(row);
+              const row = el("button", "detail-row");
+              row.type = "button";
+              row.dataset.txId = tx.id;
+              row.setAttribute("aria-expanded", "false");
+              row.setAttribute("aria-label", `Cambiar ${itemText(tx.merchant)} del ${tx.day ? formatDate(tx.day) : "día sin fecha"}, ${formatMoney(tx.amount_minor)}, ${statusOf(tx)}`);
+              const text = el("span", "", `${tx.day ? formatDate(tx.day) : "Sin fecha"} · ${itemText(tx.merchant)} · ${statusOf(tx)}`);
+              appendFlags(text, tx);
+              const amount = el("span", "detail-amount");
+              const chevron = el("span", "detail-chevron", "▾");
+              chevron.setAttribute("aria-hidden", "true");
+              amount.append(el("strong", "", formatMoney(tx.amount_minor)), chevron);
+              row.append(text, amount);
+              const editor = el("div", "detail-editor");
+              editor.hidden = true;
+              const open = () => {
+                editor.replaceChildren(makeDecisionCard(tx, tx.decision != null));
+                editor.hidden = false;
+                row.setAttribute("aria-expanded", "true");
+              };
+              row.addEventListener("click", () => {
+                if (editor.hidden) {
+                  open();
+                  state.editingTx = tx.id;
+                } else {
+                  editor.hidden = true;
+                  editor.replaceChildren();
+                  row.setAttribute("aria-expanded", "false");
+                  if (state.editingTx === tx.id) state.editingTx = null;
+                }
+              });
+              if (state.editingTx === tx.id) open();
+              body.append(row, editor);
             });
             detail.append(body);
             host.append(detail);

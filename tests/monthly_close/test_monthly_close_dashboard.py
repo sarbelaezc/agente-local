@@ -308,6 +308,27 @@ def test_safety_note_can_be_closed_and_stays_closed_in_this_browser(dashboard):
     expect(note).to_be_hidden()
 
 
+def test_a_movement_of_the_category_detail_can_be_changed_in_place(dashboard):
+    page, store, _, _ = dashboard
+    detail = page.locator('#category-details details[data-category="Compras"]')
+    detail.locator("summary").click()
+    row = detail.locator("button.detail-row").filter(has_text="Personal")
+    expect(row).to_have_attribute("aria-expanded", "false")
+    row.click()
+    expect(row).to_have_attribute("aria-expanded", "true")
+    editor = detail.locator(".detail-editor .decision-card")
+    expect(editor).to_have_count(1)
+    with page.expect_response(lambda response: response.url.endswith("/api/decision")) as saved:
+        editor.get_by_role("button", name="Familiar", exact=True).click()
+    assert saved.value.status == 200
+    assert next(tx for tx in store.state()["transactions"] if tx["id"] == "1")["decision"] == "family"
+    # After the reload the category and the movement stay open, showing the new decision.
+    expect(detail).to_have_attribute("open", "")
+    expect(detail.locator(".detail-editor .decision-card button[aria-pressed='true']")).to_have_text("Familiar")
+    with store.connect() as db:
+        assert db.execute("SELECT count(*) FROM audit WHERE target='1' AND action LIKE 'decision%'").fetchone()[0] >= 1
+
+
 def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(dashboard):
     page, _, month, _ = dashboard
     page.goto(f"{page.url.split('?')[0]}?tab=year&month={month}&year={month[:4]}&currency=COP")
