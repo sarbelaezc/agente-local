@@ -716,7 +716,7 @@ def test_group_category_shows_for_transfers_but_not_for_investments(dashboard):
     assert saved["tr:1"] == saved["tr:2"] == ("family", "Retiro en efectivo")
 
 
-def test_saved_suggestions_survive_a_reload_and_owner_counts_filter_the_view(dashboard):
+def test_saved_suggestions_survive_a_reload_and_the_owner_switch_filters_the_view(dashboard):
     page, store, month, _ = dashboard
     def purchase(event_id, merchant, day):
         return movement(event_id, merchant, day=f"{month}-0{day}", amount_minor=1000000)
@@ -730,10 +730,8 @@ def test_saved_suggestions_survive_a_reload_and_owner_counts_filter_the_view(das
     expect(card.get_by_label(re.compile("Categoría para PEAJE NORTE"))).to_have_value("Transporte")
     expect(card.locator('[data-suggestion-source="history"]')).to_be_visible()
 
-    counts = page.get_by_role("group", name="Pendientes por titular")
-    expect(counts.get_by_role("button", name=re.compile("^Manuela: 1 movimiento"))).to_be_visible()
-    counts.get_by_role("button", name=re.compile("^Manuela:")).click()
-    expect(page.locator("#owner-switch button[data-owner='manuela']")).to_have_attribute("aria-pressed", "true")
+    # The decisions follow the owner chosen at the top of the panel.
+    page.locator("#owner-switch button[data-owner='manuela']").click()
     expect(page.locator("#pending-list").get_by_text("PEAJE NORTE")).to_have_count(0)
     expect(page.locator("#pending-list").get_by_text("TIENDA SOL")).to_be_visible()
 
@@ -754,16 +752,6 @@ def test_focus_moves_to_the_next_pending_card_after_a_decision(dashboard):
     expect(page.locator("#pending-list > article").first).to_contain_text("COMERCIO DOS")
     focused = page.evaluate("document.activeElement && document.activeElement.textContent")
     assert focused == "COMERCIO DOS"
-
-
-def test_owner_count_buttons_are_readable_and_large_enough_in_both_themes(dashboard):
-    page, _, _, _ = dashboard
-    page.get_by_role("tab", name=re.compile("Decisi")).click()
-    page.locator("#owner-switch button[data-owner='santiago']").click()
-    chips = page.locator(".owner-progress .chip")
-    expect(chips).to_have_count(2)
-    for theme in in_both_themes(page):
-        assert_readable(chips, theme, at_least=2, min_height=38)
 
 
 def test_pending_destinations_are_ordered_oldest_first(dashboard):

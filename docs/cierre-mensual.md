@@ -129,8 +129,7 @@ el total y una pista, con botones que deciden todos sus movimientos a la vez.
 «Decisiones anteriores» va del más reciente al más antiguo.
 
 - **Progreso.** Arriba, «Por decidir» muestra los destinos, los movimientos y el
-  importe pendientes de la vista, y un botón por titular con sus movimientos por
-  decidir («Santiago: 16», «Manuela: 68») que abre la vista de ese titular.
+  importe pendientes del titular elegido en «Titular».
 - **Siguiente tarjeta.** Al decidir un destino o un movimiento, el foco pasa a la
   tarjeta que ocupa ahora su lugar, para seguir con el teclado o sin desplazarte.
 - **Todo o nada.** Si un movimiento no pasa la validación (por ejemplo, una compra

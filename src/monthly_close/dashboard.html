@@ -183,9 +183,6 @@
     .axis-label.current { fill: var(--ink); font-weight: 700; }
     .decision-summary strong { font-size: 30px; }
     .currency-fix > summary { color: var(--ink2); font-size: 13px; font-weight: 500; cursor: pointer; margin: 6px 0; }
-    .owner-progress { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-    .owner-progress .chip { min-height: 38px; }
-    .owner-progress .chip[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
 
     /* Charts and lists */
     .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -2142,8 +2139,7 @@
           el("strong", "", String(pending.length)),
           el("small", "", pending.length
             ? `${pending.length === 1 ? "destino" : "destinos"} por decidir · ${pendingMovements} ${pendingMovements === 1 ? "movimiento" : "movimientos"} · ${formatMoney(pendingAmount)} sin sumar al gasto`
-            : "No hay destinos por decidir."),
-          ownerProgress()
+            : "No hay destinos por decidir.")
         );
         const host = $("#pending-list");
         host.replaceChildren();
@@ -2164,31 +2160,6 @@
           () => { state.historyLimit += decisionPageSize; renderDecisions(); }
         );
         renderRules();
-      }
-
-      // Pending movements of each owner in the selected currency, as buttons that open that owner's view.
-      function ownerProgress() {
-        const counts = { santiago: 0, manuela: 0 };
-        safeArray(state.data.transactions).forEach(tx => {
-          if (tx && tx.decision == null && tx.owner in counts && (
-            txCurrency(tx) === state.currency || (state.currency === "COP" && txCurrency(tx) === "USD")
-          )) counts[tx.owner] += 1;
-        });
-        const line = el("div", "owner-progress");
-        line.setAttribute("role", "group");
-        line.setAttribute("aria-label", "Pendientes por titular");
-        Object.entries(counts).forEach(([owner, count]) => {
-          const button = el("button", "chip", `${ownerLabel(owner)}: ${count}`);
-          button.type = "button";
-          button.setAttribute("aria-pressed", String(state.owner === owner));
-          button.setAttribute("aria-label", `${ownerLabel(owner)}: ${count} ${count === 1 ? "movimiento" : "movimientos"} por decidir. Ver solo los suyos.`);
-          button.addEventListener("click", () => {
-            const target = document.querySelector(`#owner-switch button[data-owner="${owner}"]`);
-            if (target) target.click();
-          });
-          line.append(button);
-        });
-        return line;
       }
 
       // After a decision, keyboard and screen focus move to the card now in the same place.
