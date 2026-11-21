@@ -322,9 +322,32 @@ def test_a_movement_of_the_category_detail_can_be_changed_in_place(dashboard):
         editor.get_by_role("button", name="Familiar", exact=True).click()
     assert saved.value.status == 200
     assert next(tx for tx in store.state()["transactions"] if tx["id"] == "1")["decision"] == "family"
-    # After the reload the category and the movement stay open, showing the new decision.
+    # After the save the card closes, and the category stays open with the focus on that movement.
     expect(detail).to_have_attribute("open", "")
-    expect(detail.locator(".detail-editor .decision-card button[aria-pressed='true']")).to_have_text("Familiar")
+    expect(detail.locator(".detail-editor .decision-card")).to_have_count(0)
+    saved_row = detail.locator('button.detail-row[data-tx-id="1"]')
+    expect(saved_row).to_be_focused()
+    expect(saved_row).to_contain_text("Familiar")
+    expect(saved_row).to_have_attribute("aria-expanded", "false")
+
+    # Only one movement is open at a time.
+    rows = detail.locator("button.detail-row")
+    rows.nth(0).click()
+    rows.nth(1).click()
+    expect(detail.locator(".detail-editor .decision-card")).to_have_count(1)
+    expect(rows.nth(0)).to_have_attribute("aria-expanded", "false")
+    expect(rows.nth(1)).to_have_attribute("aria-expanded", "true")
+
+    # A movement saved into another category is followed there.
+    moved = detail.locator('button.detail-row[data-tx-id="1"]')
+    if moved.get_attribute("aria-expanded") != "true":
+        moved.click()
+    card = detail.locator(".detail-editor .decision-card")
+    card.get_by_label(re.compile("^Categoría para")).select_option("Transporte")
+    card.get_by_role("button", name="Familiar", exact=True).click()
+    target = page.locator('#category-details details[data-category="Transporte"]')
+    expect(target).to_have_attribute("open", "")
+    expect(target.locator('button.detail-row[data-tx-id="1"]')).to_be_focused()
     with store.connect() as db:
         assert db.execute("SELECT count(*) FROM audit WHERE target='1' AND action LIKE 'decision%'").fetchone()[0] >= 1
 

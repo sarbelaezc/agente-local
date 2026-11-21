@@ -710,8 +710,10 @@ aviso del formulario de configuración inicial no se puede cerrar.
   tarjeta, e indica cuántos movimientos faltan por decidir. Tocar un movimiento
   abre debajo su tarjeta de decisión, la misma de la pestaña Decisión, para
   cambiar la categoría, la moneda y la tasa o la decisión. Cada cambio queda
-  auditado igual que en Decisión. Tras guardar, la categoría y el movimiento
-  siguen abiertos con la decisión nueva; se cierran tocando de nuevo.
+  auditado igual que en Decisión. Solo hay un movimiento abierto a la vez: abrir
+  otro cierra el anterior. Al guardar, la tarjeta se cierra y la vista queda en
+  ese movimiento, resaltado un momento; si cambió de categoría, se abre su
+  categoría nueva.
 - Cada cifra muestra su valor al pasar el mouse, tocar o llegar con el teclado.
 
 **Año**

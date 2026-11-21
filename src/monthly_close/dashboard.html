@@ -281,6 +281,7 @@
     button.detail-row[aria-expanded="true"] .detail-chevron { transform: rotate(180deg); }
     @media (prefers-reduced-motion: reduce) { .detail-row .detail-chevron { transition: none; } }
     .detail-editor { margin: 2px 0 10px; }
+    button.detail-row.just-saved { background: color-mix(in srgb, var(--good) 16%, var(--surf)); }
 
     /* Decision cards, after Manuela's destination cards */
     .decision-list { display: grid; gap: 10px; }
@@ -1841,12 +1842,15 @@
               const editor = el("div", "detail-editor");
               editor.hidden = true;
               const open = () => {
-                editor.replaceChildren(makeDecisionCard(tx, tx.decision != null));
+                editor.replaceChildren(makeDecisionCard(tx, tx.decision != null, () => focusSavedMovement(tx.id)));
                 editor.hidden = false;
                 row.setAttribute("aria-expanded", "true");
               };
               row.addEventListener("click", () => {
                 if (editor.hidden) {
+                  // One movement at a time: opening this one closes the one that was open.
+                  document.querySelectorAll('#category-details button.detail-row[aria-expanded="true"]')
+                    .forEach(other => { if (other !== row) other.click(); });
                   open();
                   state.editingTx = tx.id;
                 } else {
@@ -1863,6 +1867,27 @@
             host.append(detail);
           });
         });
+      }
+
+      // After a save from the category detail: close the card and keep the view on that
+      // movement, in its category even if the save moved it to another one.
+      function focusSavedMovement(id) {
+        state.editingTx = null;
+        const row = Array.from(document.querySelectorAll("#category-details button.detail-row"))
+          .find(candidate => candidate.dataset.txId === id);
+        if (!row) return;
+        const editor = row.nextElementSibling;
+        if (editor && editor.classList.contains("detail-editor")) {
+          editor.hidden = true;
+          editor.replaceChildren();
+        }
+        row.setAttribute("aria-expanded", "false");
+        const detail = row.closest("details");
+        if (detail) detail.open = true;
+        row.classList.add("just-saved");
+        setTimeout(() => row.classList.remove("just-saved"), 2500);
+        row.focus({ preventScroll: true });
+        row.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
       }
 
       function renderYear() {
@@ -2767,7 +2792,7 @@
         return el("p", "reason", reason);
       }
 
-      function makeDecisionCard(tx, isPrevious) {
+      function makeDecisionCard(tx, isPrevious, onSaved = null) {
         const card = el("article", "decision-card");
         const meta = el("div", "decision-meta");
         meta.append(el("span", "", formatDate(tx.day)), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
@@ -2872,7 +2897,8 @@
               payload.currency = currencySelect.value;
               payload.exchange_rate = currencySelect.value === "USD" ? rateInput.value.trim() : "";
             }
-            await postJson("/api/decision", payload, isPrevious ? "Decisión actualizada." : "Decisión guardada.");
+            const saved = await postJson("/api/decision", payload, isPrevious ? "Decisión actualizada." : "Decisión guardada.");
+            if (saved && onSaved) onSaved();
           });
           actions.append(button);
         });
