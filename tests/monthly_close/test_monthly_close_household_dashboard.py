@@ -192,8 +192,10 @@ def test_month_view_is_interactive_like_manuelas_dashboard(household):
     income.locator("summary", has_text="Ver el ingreso").click()
     assert "EMPRESA SINTETICA" in income.inner_text()
     spending = page.locator("#month-metrics .metric").filter(has_text="Gasto del mes")
-    spending.locator("summary", has_text="Ver el abono de terceros").click()
-    assert "Pagos de otras personas" in spending.inner_text()
+    assert spending.locator("summary").count() == 0  # the spending card only shows the subtraction
+    paid_back = page.locator("#month-metrics .metric.minor").filter(has_text="Abonos de terceros")
+    paid_back.locator("summary", has_text="Ver el abono").click()
+    assert "Pagos de otras personas" in paid_back.inner_text()
 
 
 def test_months_live_under_the_tabs_and_only_in_the_month_view(household):
