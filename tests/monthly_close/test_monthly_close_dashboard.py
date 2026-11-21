@@ -359,8 +359,15 @@ def test_owner_switch_and_tabs_stay_at_the_top_while_scrolling(dashboard):
     for locator in (page.locator("#owner-switch"), page.locator(".tabs")):
         box = locator.bounding_box()
         assert box is not None and 0 <= box["y"] < 140
-    # The currency scrolls away with the page.
+    # On a phone the currency sits above and scrolls away with the page.
     assert page.locator("#currency-select").bounding_box()["y"] < 0
+    # On a wide screen it sits at the end of the owner row, which stays at the top.
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    owners, currency = page.locator("#owner-switch").bounding_box(), page.locator("#currency-select").bounding_box()
+    assert 0 <= currency["y"] < 140 and abs(currency["y"] + currency["height"] / 2 - owners["y"] - owners["height"] / 2) < 4
+    row = page.locator(".nav-row").bounding_box()
+    assert currency["x"] + currency["width"] >= row["x"] + row["width"] - 2
 
 
 def test_dashboard_links_reopen_selected_view_and_keyboard_can_skip_to_content(dashboard):
