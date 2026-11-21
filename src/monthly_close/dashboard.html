@@ -192,9 +192,12 @@
     .split-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; color: var(--ink2); font-size: 12px; }
     .split-legend span { display: inline-flex; align-items: center; gap: 5px; }
     /* Secondary figures: tiles of one width that grow to fill each row, whatever the length of each note. */
-    .metric-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    /* A tile's open detail grows only that tile, not its whole row. */
+    .metric-strip { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 10px; }
     /* --per-row comes from the number of tiles, so rows stay balanced (7 tiles: 4 + 3, never 5 + 2). */
     .metric.minor { flex: 1 1 calc((100% - (var(--per-row, 4) - 1) * 8px) / var(--per-row, 4)); display: flex; flex-direction: column; gap: 3px; min-width: 190px; padding: 10px 14px; border-radius: 12px; }
+    /* A tile with its detail open takes the whole row, so the list is never squeezed. */
+    .metric.minor:has(> details[open]) { flex-basis: 100%; }
     /* How much of the spending the income covers: one neutral fill, the text says the figure. */
     .split-bar.meter span { flex: none; background: color-mix(in srgb, var(--ink2) 70%, var(--surf)); }
     .metric.minor .label { font-size: 12.5px; letter-spacing: 0; text-transform: none; font-weight: 600; }
@@ -1462,7 +1465,6 @@
         income.classList.add("hero");
         appendIncomeSplit(income, incomes);
         if (incomes.length) income.append(inlineDetail(`Ver ${incomes.length === 1 ? "el ingreso" : `los ${incomes.length} ingresos`}`, incomes));
-        if (paidBack.length) spend.append(inlineDetail(`Ver ${paidBack.length === 1 ? "el abono" : `los ${paidBack.length} abonos`} de terceros`, paidBack));
         const net = makeMetric(
           "Balance", formatMoney(balance),
           incomeTotal === 0 && total === 0 ? "Sin ingresos ni gastos decididos"
@@ -1477,10 +1479,13 @@
           const chip = makeMetric(label, value, note);
           chip.classList.add("minor");
           strip.append(chip);
+          return chip;
         };
         // What touches the spending first, then what stays out of it.
         if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
-        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
+        // The money received lives in its own tile; the spending card only shows the subtraction.
+        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`)
+          .append(inlineDetail(`Ver ${paidBack.length === 1 ? "el abono" : `los ${paidBack.length} abonos`}`, paidBack));
         if (cardPayments.length) minor("Pagos a tarjetas", formatMoney(sum(cardPayments)), `${cardPayments.length} · no es gasto`);
         if (between.length) minor("Entre Santiago y Manuela", formatMoney(sum(between)), `${between.length} · no cuentan en Hogar`);
         if (investments.length || withdrawals.length) {
@@ -2071,12 +2076,15 @@
           const chip = makeMetric(label, value, note);
           chip.classList.add("minor");
           strip.append(chip);
+          return chip;
         };
         // The spending first (a row of four), then investments and coverage.
         if (closed.length) minor("Promedio de gasto", formatMoney(average), `Por mes cerrado · ${closed.length} ${closed.length === 1 ? "mes" : "meses"}`);
         if (highest && bucketTotal(highest) > 0) minor("Mes de mayor gasto", formatMoney(bucketTotal(highest)), capitalize(monthLabel(highest.month)));
         if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
-        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
+        // The money received lives in its own tile; the spending card only shows the subtraction.
+        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`)
+          .append(inlineDetail(`Ver ${paidBack.length === 1 ? "el abono" : `los ${paidBack.length} abonos`}`, paidBack));
         if (investments.length || withdrawals.length) {
           minor("Inversión neta", formatMoney(netInvestments(items)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo · fuera del gasto`);
         }
