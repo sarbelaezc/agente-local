@@ -728,6 +728,15 @@ aviso del formulario de configuración inicial no se puede cerrar.
 - Gráfica de ingresos y gastos, categorías del año con barras y porcentaje, y
   columnas por categoría con los mismos colores que el mes. El mes en curso se ve
   más claro.
+- **Inversiones y créditos:** una gráfica de línea para cada uno con el saldo al
+  cierre de cada mes, hasta el mes en curso. Ese saldo suma el último extracto de
+  cada producto hasta ese mes, así que un mes sin extracto nuevo repite el saldo
+  anterior. Arriba de cada gráfica está el saldo total del último extracto y
+  cuánto subió o bajó en el año. Debajo va la lista de productos con su saldo,
+  la variación desde el inicio del año (o desde su primer extracto del año) y la
+  fecha del último extracto. Solo cuentan los productos con algún extracto en el
+  año; en **Hogar** llevan la etiqueta del titular. Tocar un mes de la gráfica
+  abre ese mes.
 - **Resumen por mes:** Gasto, Personal, Familiar, Abonos, Ingresos, Balance (con
   signo y color), Inversiones, Efectivo, Pendiente y Cobertura, con fila de total.
   Un guion (—) significa que no hubo movimientos de ese tipo, nunca gasto cero; los

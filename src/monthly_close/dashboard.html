@@ -310,6 +310,10 @@
     .owner-tag.owner-manuela { background: var(--owner-manuela-soft); color: var(--owner-manuela); }
     .flag-tag { display: inline-flex; padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--ink2); font-size: 11px; font-weight: 600; }
     .empty-state { padding: 10px 0; color: var(--mut); font-size: 13px; }
+    /* Year balances: one line chart and one list of products per kind. */
+    .balance-section .statement-head { margin-bottom: 6px; }
+    .balance-section .chart-wrap { margin: 4px 0 6px; }
+    svg.balance-chart { min-width: 0; }
     /* Statements card: one block per kind of product, one two-line row per statement. */
     .statement-section + .statement-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
     .statement-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; }
@@ -342,6 +346,8 @@
       .day-cell { min-height: 46px; padding: 3px; }
       /* Wide charts shrink to about half on a phone: double their axis text so it stays readable. */
       #year-chart-svg .axis-label, #year-income-chart-svg .axis-label, #cumulative-chart-svg .axis-label { font-size: 22px; }
+      /* The balance charts are narrower, so they shrink less on a phone. */
+      svg.balance-chart .axis-label { font-size: 17px; }
       .day-amount { font-size: 9.5px; }
       .coverage-form { grid-template-columns: 1fr; }
       .coverage-form .button { width: 100%; }
@@ -520,6 +526,13 @@
           <article class="card">
             <div class="card-header"><div><h3>Ingresos y gastos</h3><p>Ingresos confirmados frente al gasto decidido de cada mes. El mes en curso se ve más claro: aún pueden llegar avisos.</p></div></div>
             <div id="year-income-chart" class="chart-wrap"></div>
+          </article>
+          <article class="card" id="balances-card" hidden>
+            <div class="card-header"><div><h3>Inversiones y créditos</h3><p>Saldo al cierre de cada mes según el último extracto de cada producto; un mes sin extracto nuevo repite el saldo anterior.</p></div></div>
+            <div class="grid-2">
+              <section id="investment-balances" class="balance-section"></section>
+              <section id="credit-balances" class="balance-section"></section>
+            </div>
           </article>
           <article class="card">
             <div class="card-header"><div><h3>Categorías del año</h3><p>Gasto personal y familiar decidido; el porcentaje es sobre el total de categorías.</p></div></div>
@@ -1921,6 +1934,7 @@
         const pendingIncomes = items.filter(tx => tx.decision == null && tx.kind === "income");
         const coverage = renderYearTable(buckets, bucketTotal);
         renderYearIncomeChart(buckets, bucketTotal);
+        renderYearBalances();
         renderYearChart(buckets);
 
         // Same four headline figures as the month; everything else goes in the slim row below.
@@ -1991,6 +2005,128 @@
       }
 
       // Income next to spending for each month, as in Manuela's yearly view.
+      // How a balance moved, in words: the sign alone is easy to miss.
+      function balanceChange(amount) {
+        if (!amount) return "sin cambio";
+        return `${amount > 0 ? "subió" : "bajó"} ${formatMoney(Math.abs(amount), "COP")}`;
+      }
+
+      // Investments and credits over the year: the month-end balance of each product is its
+      // latest statement up to that month. Only products with a statement in the year count.
+      function renderYearBalances() {
+        const card = $("#balances-card");
+        const checks = safeArray(state.data && state.data.statement_checks).filter(check =>
+          check && typeof check.period_end === "string" && Number.isSafeInteger(check.balance_minor) && inOwnerView(check));
+        const yearEnd = `${state.year}-12-31`;
+        const groups = [
+          ["#investment-balances", "Inversiones", investmentProducts],
+          ["#credit-balances", "Créditos", ["CREDITO", "HIPOTECARIO"]]
+        ];
+        let shown = 0;
+        groups.forEach(([selector, label, products]) => {
+          const host = $(selector);
+          host.replaceChildren();
+          const byProduct = new Map();
+          checks.filter(check => products.includes(check.product) && check.period_end <= yearEnd).forEach(check => {
+            const key = `${check.owner}|${check.product}|${check.suffix}`;
+            if (!byProduct.has(key)) byProduct.set(key, []);
+            byProduct.get(key).push(check);
+          });
+          const series = Array.from(byProduct.values())
+            .map(list => list.sort((a, b) => a.period_end.localeCompare(b.period_end)))
+            .filter(list => list[list.length - 1].period_end.startsWith(`${state.year}-`));
+          if (!series.length) return;
+          shown++;
+          const latestBy = (list, end) => list.filter(check => check.period_end <= end).pop();
+          const current = currentMonth();
+          const points = [];
+          for (let index = 0; index < 12; index++) {
+            const month = `${state.year}-${String(index + 1).padStart(2, "0")}`;
+            if (month > current) break;
+            const known = series.map(list => latestBy(list, `${month}-31`)).filter(Boolean);
+            if (known.length) points.push({ index, month, total: known.reduce((total, check) => total + check.balance_minor, 0), count: known.length });
+          }
+          const startOf = list => latestBy(list, `${Number(state.year) - 1}-12-31`) || list.find(check => check.period_end.startsWith(`${state.year}-`));
+          const endOf = list => list[list.length - 1];
+          const start = series.reduce((total, list) => total + startOf(list).balance_minor, 0);
+          const end = series.reduce((total, list) => total + endOf(list).balance_minor, 0);
+          const lastDate = series.map(list => endOf(list).period_end).sort().pop();
+          const head = el("div", "statement-head");
+          head.append(el("h4", "", label), el("strong", "", formatMoney(end, "COP")),
+            el("p", "", `Saldo al ${formatDate(lastDate)} · ${balanceChange(end - start)} en el año`));
+          host.append(head, balanceChart(points, label));
+          const list = el("div", "statement-rows");
+          series.forEach(items => {
+            const first = startOf(items), last = endOf(items);
+            const row = el("div", "statement-row");
+            const name = el("span", "statement-name", `${productNames[last.product] || last.product}${last.suffix ? ` *${last.suffix}` : ""}`);
+            if (state.owner === "hogar") name.append(ownerTag(last.owner));
+            row.append(name, el("strong", "", formatMoney(last.balance_minor, "COP")));
+            const since = first.period_end < `${state.year}-01-01` ? "desde el inicio del año" : `desde el ${formatDate(first.period_end)}`;
+            row.append(el("div", "statement-detail", `${balanceChange(last.balance_minor - first.balance_minor)} ${since} · último extracto ${formatDate(last.period_end)}`));
+            list.append(row);
+          });
+          host.append(list);
+        });
+        card.hidden = state.currency !== "COP" || shown === 0;
+      }
+
+      // One series per chart: the title names it, so there is no legend. The scale starts near
+      // the lowest balance so monthly changes are visible; the axis shows where it starts.
+      function balanceChart(points, label) {
+        const wrap = el("div", "chart-wrap");
+        if (!points.length) { wrap.append(el("div", "empty-state", "Sin saldos este año.")); return wrap; }
+        const width = 520, height = 200, left = 104, right = 12, top = 14, bottom = 30;
+        const chartWidth = width - left - right, chartHeight = height - top - bottom;
+        const values = points.map(point => point.total);
+        const low = Math.min(...values), high = Math.max(...values);
+        const pad = Math.max((high - low) * .15, Math.abs(high) * .02, 100);
+        const min = low - pad, max = high + pad;
+        const yOf = value => top + chartHeight * (1 - (value - min) / (max - min));
+        const xOf = index => left + chartWidth * (index + .5) / 12;
+        const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, class: "chart balance-chart", role: "img", "aria-label": `Línea del saldo mensual de ${label.toLowerCase()} en ${state.year}` });
+        const title = svgEl("title"); title.textContent = `${label}: saldo al cierre de cada mes de ${state.year}`; svg.append(title);
+        for (let tick = 0; tick <= 3; tick++) {
+          const value = min + (max - min) * (3 - tick) / 3;
+          const y = top + chartHeight * tick / 3;
+          svg.append(svgEl("line", { x1: left, y1: y, x2: width - right, y2: y, class: "chart-grid" }));
+          const axis = axisAmount(Math.round(value));
+          axis.setAttribute("x", String(left - 8));
+          axis.setAttribute("y", String(y + 4));
+          axis.setAttribute("text-anchor", "end");
+          svg.append(axis);
+        }
+        const color = cssColor("--s1");
+        svg.append(svgEl("polyline", {
+          points: points.map(point => `${xOf(point.index)},${yOf(point.total)}`).join(" "),
+          fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round"
+        }));
+        const current = currentMonth();
+        points.forEach(point => {
+          svg.append(svgEl("circle", { cx: xOf(point.index), cy: yOf(point.total), r: 4, fill: color, stroke: cssColor("--surf"), "stroke-width": 2 }));
+        });
+        for (let index = 0; index < 12; index++) {
+          const month = `${state.year}-${String(index + 1).padStart(2, "0")}`;
+          const axis = svgEl("text", { x: xOf(index), y: height - 10, "text-anchor": "middle", class: month === current ? "axis-label current" : "axis-label" });
+          axis.textContent = monthNames[index].slice(0, 3);
+          svg.append(axis);
+        }
+        // One column per month with a point: a guide line and its balance on hover, touch or focus.
+        const guide = svgEl("line", { x1: 0, y1: top, x2: 0, y2: top + chartHeight, stroke: cssColor("--mut"), "stroke-width": 1, visibility: "hidden" });
+        svg.append(guide);
+        points.forEach(point => {
+          const hit = svgEl("rect", { x: left + chartWidth * point.index / 12, y: top, width: chartWidth / 12, height: chartHeight, fill: "transparent" });
+          setTip(hit, `${capitalize(monthLabel(point.month))}: ${formatMoney(point.total, "COP")} · ${point.count} ${point.count === 1 ? "producto" : "productos"}`);
+          const show = () => { guide.setAttribute("x1", xOf(point.index)); guide.setAttribute("x2", xOf(point.index)); guide.setAttribute("visibility", "visible"); };
+          hit.addEventListener("pointerenter", show);
+          hit.addEventListener("pointerleave", () => guide.setAttribute("visibility", "hidden"));
+          jumpToMonth(hit, point.month);
+          svg.append(hit);
+        });
+        wrap.append(svg);
+        return wrap;
+      }
+
       function renderYearIncomeChart(buckets, spendOf) {
         const host = $("#year-income-chart");
         host.replaceChildren();

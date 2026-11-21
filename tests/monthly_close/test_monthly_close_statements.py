@@ -515,6 +515,44 @@ def test_panel_shows_statement_checks_and_balances(store, start_panel, new_page)
     assert not errors
 
 
+def test_year_view_shows_how_investments_and_credits_moved(store, start_panel, new_page):
+    # Month-end balances: a fund that grows, a credit that goes down, and one of Manuela's.
+    balances = [
+        ("santiago", "FIDUCUENTA", "0003", "2025-12-31", 100_000_00), ("santiago", "FIDUCUENTA", "0003", "2026-02-28", 130_000_00),
+        ("santiago", "CREDITO", "0004", "2026-01-31", 900_000_00), ("santiago", "CREDITO", "0004", "2026-03-31", 850_000_00),
+        ("manuela", "FIDUCUENTA", "0005", "2026-02-28", 50_000_00),
+        # A product with no statement in the year is left out.
+        ("santiago", "CREDITO", "0006", "2025-06-30", 10_000_00),
+    ]
+    with store.connect() as db:
+        for owner, product, suffix, end, balance in balances:
+            db.execute(
+                """INSERT INTO statement_checks (identity,owner,product,suffix,period_start,period_end,movements,
+                matched,missing,balance_minor,checked_at) VALUES (?,?,?,?,?,?,0,0,0,?,?)""",
+                (f"{owner}{product}{suffix}{end}", owner, product, suffix, end[:8] + "01", end, balance, "2026-04-01T00:00:00"),
+            )
+    url = start_panel(store)
+    page = new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(f"{url}/?tab=year&year=2026&owner=hogar")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    investments, credits = page.locator("#investment-balances"), page.locator("#credit-balances")
+    expect(page.locator("#balances-card")).to_be_visible()
+    expect(investments.locator(".statement-head strong")).to_have_text(re.compile(r"180[.\s]?000,00"))
+    expect(credits.locator(".statement-head strong")).to_have_text(re.compile(r"850[.\s]?000,00"))
+    expect(credits.locator(".statement-head p")).to_contain_text(re.compile(r"bajó 50[.\s]?000,00"))
+    assert "*0006" not in credits.inner_text()
+    fund = investments.locator(".statement-row").filter(has_text="*0003")
+    expect(fund).to_contain_text(re.compile(r"subió 30[.\s]?000,00\sCOP desde el inicio del año"))
+    # One point per month up to the latest, carrying the last known balance forward.
+    tips = investments.locator("svg rect[data-tip]").evaluate_all("rects => rects.map(rect => rect.dataset.tip)")
+    assert tips[0].startswith("Enero de 2026: 100") and "1 producto" in tips[0]
+    assert re.search(r"Marzo de 2026: 180[.\s]?000,00\sCOP · 2 productos", tips[2])
+    page.locator("#owner-switch").get_by_role("button", name="Santiago").click()
+    assert "*0005" not in investments.inner_text()
+    assert not errors
+
 def test_payroll_deducted_instalment_adds_matching_payroll_income(store):
     credit = st.parse("CREDITO", "202602", CREDIT)
     report = st.reconcile([credit], [], date(2026, 1, 1))
