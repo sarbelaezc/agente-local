@@ -725,8 +725,9 @@ aviso del formulario de configuración inicial no se puede cerrar.
 - Meses en orden cronológico con nombre corto y la línea de cobertura del mes.
 - Cuatro cifras: **Gasto del mes** (con barra por titular y familiar),
   **Ingresos** (con barra por tipo de ingreso cuando hay más de uno, también en
-  Hogar), **Balance** (con una barra neutra que dice qué parte del gasto
-  cubren los ingresos) y **Por decidir** (lleva a Decisión; solo aparece si
+  Hogar), **Balance** (con una barra que dice qué parte del gasto cubren los
+  ingresos: verde si el balance es a favor, roja si es en contra; el texto lo
+  dice igual) y **Por decidir** (lleva a Decisión; solo aparece si
   queda algo pendiente, y sin ella las otras tres van en una fila). Debajo, en
   fichas pequeñas y solo si existen: primero lo que toca el gasto (retiro en
   efectivo, abonos de terceros) y luego lo que queda fuera (pagos a tarjetas,

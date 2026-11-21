@@ -204,8 +204,10 @@
     /* A tile with its detail open takes the whole row, so the list is never squeezed. */
     .metric.minor:has(> details[open]) { flex-basis: 100%; }
     .metric.minor details.inline-detail > summary { padding: 2px 0 0; }
-    /* How much of the spending the income covers: one neutral fill, the text says the figure. */
-    .split-bar.meter span { flex: none; background: color-mix(in srgb, var(--ink2) 70%, var(--surf)); }
+    /* How much of the spending the income covers: green when the balance is in favour, red
+       when it is against; the text beside it says the same, so colour is never alone. */
+    .split-bar.meter span { flex: none; background: var(--bad); }
+    .split-bar.meter.favor span { background: var(--good); }
     .metric.minor .label { font-size: 12.5px; letter-spacing: 0; text-transform: none; font-weight: 600; }
     .metric.minor strong { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: 0; font-variant-numeric: tabular-nums; overflow-wrap: normal; white-space: nowrap; }
     .metric.minor small { margin: 0; color: var(--mut); font-size: 12px; line-height: 1.4; }
@@ -1050,7 +1052,7 @@
         const text = share < 1
           ? `Los ingresos cubren el ${Math.round(share * 100)} % del gasto`
           : `Los ingresos superan el gasto en ${Math.round((share - 1) * 100)} %`;
-        const meter = el("div", "split-bar meter");
+        const meter = el("div", `split-bar meter${share >= 1 ? " favor" : ""}`);
         meter.setAttribute("role", "img");
         meter.setAttribute("aria-label", text);
         const fill = el("span");

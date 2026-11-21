@@ -846,6 +846,17 @@ def test_income_and_balance_cards_show_their_split_and_coverage(dashboard):
     balance = metrics.filter(has_text="Balance")
     expect(balance.get_by_role("img")).to_have_attribute("aria-label", "Los ingresos cubren el 67 % del gasto")
     expect(balance).to_contain_text("Los ingresos cubren el 67 % del gasto")
+    # Against: the bar takes the red of the theme; in favour it would take the green.
+    expect(balance.locator(".meter")).not_to_have_class(re.compile("favor"))
+    fill, red = balance.evaluate('''card => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--bad)';
+      card.append(probe);
+      const colours = [getComputedStyle(card.querySelector('.meter span')).backgroundColor, getComputedStyle(probe).color];
+      probe.remove();
+      return colours;
+    }''')
+    assert fill == red, (fill, red)
 
 
 def test_the_list_of_incomes_keeps_small_amounts_and_scrolls_inside_its_card(dashboard):
