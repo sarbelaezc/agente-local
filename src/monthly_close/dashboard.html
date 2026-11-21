@@ -60,7 +60,7 @@
     .brand-mark { display: none; }
     h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -.2px; }
     .eyebrow { margin: 2px 0 0; color: var(--ink2); font-size: 13px; }
-    .top-actions, .toolbar, .inline-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+    .top-actions, .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 
     /* Buttons: soft pills; the active or primary one turns ink */
     .button {
@@ -127,7 +127,7 @@
     /* Forms */
     .config-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
     .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-    .field > label, .field-label { font-weight: 600; font-size: 13.5px; }
+    .field > label { font-weight: 600; font-size: 13.5px; }
     .field input, .field select, .field textarea, .control {
       width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line);
       border-radius: 12px; background: var(--surf); color: var(--ink);
@@ -139,18 +139,17 @@
     .form-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 
     /* Navigation: sticky tabs and month chips, as in Manuela's dashboard */
-    /* The owner switch and the tabs stay at the top while scrolling; the currency scrolls away. */
+    /* The owner switch and the tabs stay at the top while scrolling. */
     .sticky-nav { position: sticky; top: 0; z-index: 5; display: grid; gap: 8px; margin: 4px 0 12px; padding: 8px 0; background: var(--bg); }
     html { scroll-padding-top: 124px; }
     .tabs { display: flex; gap: 6px; }
-    .nav-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
     .tab { flex: 1; min-height: 42px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 6px; background: var(--surf); color: var(--ink2); font-weight: 600; }
     .tab:hover { border-color: var(--ink2); }
     .tab[aria-selected="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
     .toolbar { justify-content: space-between; margin: 10px 0 6px; }
     .toolbar-group { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
     .control-label { color: var(--mut); font-size: 12.5px; font-weight: 600; }
-    /* Toolbar selects (currency, year) look like every other select on the page. */
+    /* The year select looks like every other select on the page. */
     .select-button { display: inline-flex; }
     .select-button select {
       min-width: 110px; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line);
@@ -214,7 +213,6 @@
 
     /* Charts and lists */
     .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
     .calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
     .weekday, .day-cell { text-align: center; }
     .weekday { padding: 2px 0; color: var(--mut); font-size: 11px; }
@@ -227,14 +225,12 @@
     /* Legend under a chart, flowing in rows like in Manuela's yearly view. */
     .legend-inline { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; color: var(--ink2); font-size: 12.5px; }
     .legend-inline .legend-label { color: var(--ink2); gap: 6px; }
-    .legend-row, .rank-row, .account-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 14px; }
+    .legend-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 14px; }
     .legend-label { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
-    .rank-row progress { height: 10px; accent-color: var(--s1); }
     .legend-value { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
     .legend-value small { color: var(--mut); min-width: 2.6em; text-align: right; font-size: 12px; }
-    .metric strong, .legend-value, td.numeric, .rank-row strong, .account-row strong, .detail-row strong,
+    .metric strong, .legend-value, td.numeric, .detail-row strong,
     .day-amount, .split-legend, .group-amount { font-variant-numeric: tabular-nums; }
-    .rank-row strong { font-weight: 600; }
     .swatch { width: 11px; height: 11px; flex: 0 0 auto; border-radius: 3px; background: var(--s1); }
     .chart-wrap { width: 100%; overflow-x: auto; }
     svg.chart { display: block; width: 100%; min-width: 280px; height: auto; overflow: visible; }
@@ -328,12 +324,11 @@
     .statement-detail { grid-column: 1 / -1; color: var(--ink2); font-size: 12.5px; line-height: 1.45; font-variant-numeric: tabular-nums; }
     .statement-row .status-pill { justify-self: end; white-space: nowrap; }
     .coverage-form { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(0, 2fr) auto; align-items: end; gap: 10px; }
-    .notice-line { display: flex; align-items: flex-start; gap: 9px; color: var(--ink2); font-size: 13px; line-height: 1.45; }
     .footer-note { margin-top: 20px; color: var(--mut); font-size: 12.5px; line-height: 1.5; }
     #panel-month > .card, #panel-month > section, #panel-year > article { margin-top: 12px; }
 
     @media (max-width: 860px) {
-      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .grid-2 { grid-template-columns: 1fr; }
       .legend-value { white-space: normal; justify-content: flex-end; }
     }
     @media (max-width: 600px) {
@@ -441,14 +436,12 @@
         </div>
         <p id="extraction-warning" class="hint" role="status" hidden></p>
         <div class="sticky-nav">
-          <div class="nav-row">
-            <div class="toolbar-group">
-              <span class="control-label" id="owner-label">Titular</span>
-              <div id="owner-switch" class="owner-switch" role="group" aria-labelledby="owner-label">
-                <button type="button" data-owner="santiago" aria-pressed="false">Santiago</button>
-                <button type="button" data-owner="manuela" aria-pressed="false">Manuela</button>
-                <button type="button" data-owner="hogar" aria-pressed="false">Hogar</button>
-              </div>
+          <div class="toolbar-group">
+            <span class="control-label" id="owner-label">Titular</span>
+            <div id="owner-switch" class="owner-switch" role="group" aria-labelledby="owner-label">
+              <button type="button" data-owner="santiago" aria-pressed="false">Santiago</button>
+              <button type="button" data-owner="manuela" aria-pressed="false">Manuela</button>
+              <button type="button" data-owner="hogar" aria-pressed="false">Hogar</button>
             </div>
           </div>
           <div class="tabs" role="tablist" aria-label="Vista del cierre">
@@ -628,7 +621,7 @@
         owner: ["santiago", "manuela", "hogar"].includes(initialParams.get("owner")) ? initialParams.get("owner") : "hogar",
         busy: false,
         months: [],
-        selectedDay: null, // { key: "month|owner|currency", day }
+        selectedDay: null, // { key: "month|owner", day }
         categoryColors: new Map(),
         pendingLimit: 50,
         historyLimit: 50,
@@ -796,7 +789,6 @@
       function sum(items) { return items.reduce((total, tx) => total + tx.amount_minor, 0); }
       // Third parties paying a member's card reduce that member's spending.
       function thirdParty(items) { return items.filter(tx => tx.decision === "third_party_payment" && !hiddenInView(tx)); }
-      function netSpend(items) { return sum(counted(items)) - sum(thirdParty(items)); }
       function monthOf(tx) { return typeof tx.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(tx.day) ? tx.day.slice(0, 7) : ""; }
       function monthLabel(key) {
         if (!monthPattern.test(key)) return key;
@@ -1539,8 +1531,8 @@
           if (date >= 1 && date <= days) grouped.set(date, (grouped.get(date) || 0) + tx.amount_minor);
         }
         const busiest = Math.max(1, ...grouped.values());
-        // A selected day belongs to one month, owner and currency; any change closes it.
-        const key = `${state.month}|${state.owner}|${state.currency}`;
+        // A selected day belongs to one month and owner; any change closes it.
+        const key = `${state.month}|${state.owner}`;
         if (!state.selectedDay || state.selectedDay.key !== key || !grouped.has(state.selectedDay.day)) state.selectedDay = null;
         for (let day = 1; day <= days; day++) {
           const date = new Date(year, month, day);
