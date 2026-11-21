@@ -743,12 +743,15 @@ aviso del formulario de configuración inicial no se puede cerrar.
 
 - Meses en orden cronológico con nombre corto y la línea de cobertura del mes.
 - Cuatro cifras: **Gasto del mes** (con barra por titular y familiar),
-  **Ingresos**, **Balance** y **Por decidir** (lleva a Decisión; solo aparece si
+  **Ingresos** (con barra por titular en Hogar, o por tipo si un titular tiene
+  más de uno), **Balance** (con una barra neutra que dice qué parte del gasto
+  cubren los ingresos) y **Por decidir** (lleva a Decisión; solo aparece si
   queda algo pendiente, y sin ella las otras tres van en una fila). Debajo, en
-  fichas pequeñas y solo si existen: inversiones, pagos a tarjetas, abonos de
-  terceros, movimientos entre titulares y retiro en efectivo. Cada ficha lleva el
-  nombre, la cifra y una nota, una debajo de otra; las fichas tienen el mismo
-  ancho y crecen para llenar cada fila (en el celular van de a dos por fila).
+  fichas pequeñas y solo si existen: primero lo que toca el gasto (retiro en
+  efectivo, abonos de terceros) y luego lo que queda fuera (pagos a tarjetas,
+  movimientos entre titulares, inversiones). Cada ficha lleva el nombre, la cifra
+  y una nota, una debajo de otra. Las filas se reparten parejas (siete fichas van
+  4 + 3, nunca 5 + 2) y llenan el ancho; en el celular van de a dos por fila.
 - Calendario por día (tocar un día muestra sus movimientos), dona por categoría
   (tocar una categoría abre su detalle), acumulado, días de la semana, medios de
   pago, ingresos, pagos por tarjeta y comercios frecuentes. «Comercios frecuentes»
@@ -769,9 +772,10 @@ aviso del formulario de configuración inicial no se puede cerrar.
 **Año**
 
 - Las mismas cuatro cifras para el año (Por decidir se oculta si todo está
-  decidido) y las mismas fichas pequeñas con el promedio de gasto por mes cerrado (sin el mes en
-  curso), el mes de mayor gasto, la inversión neta, retiros, efectivo, abonos y la
-  cobertura («X de N» meses revisados a mano o conciliados con los extractos).
+  decidido) y las mismas fichas pequeñas: primero el gasto (promedio por mes
+  cerrado, sin el mes en curso; el mes de mayor gasto; efectivo y abonos) y luego
+  la inversión neta, los retiros de inversión y la cobertura («X de N» meses
+  revisados a mano o conciliados con los extractos).
 - Gráfica de ingresos (azul) y gastos (naranja), dos colores que se distinguen
   también con daltonismo rojo-verde; categorías del año con barras y porcentaje, y
   columnas por categoría con los mismos colores que el mes. El mes en curso se ve

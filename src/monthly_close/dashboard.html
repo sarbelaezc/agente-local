@@ -192,7 +192,10 @@
     .split-legend span { display: inline-flex; align-items: center; gap: 5px; }
     /* Secondary figures: tiles of one width that grow to fill each row, whatever the length of each note. */
     .metric-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-    .metric.minor { flex: 1 1 210px; display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 10px 14px; border-radius: 12px; }
+    /* --per-row comes from the number of tiles, so rows stay balanced (7 tiles: 4 + 3, never 5 + 2). */
+    .metric.minor { flex: 1 1 calc((100% - (var(--per-row, 4) - 1) * 8px) / var(--per-row, 4)); display: flex; flex-direction: column; gap: 3px; min-width: 190px; padding: 10px 14px; border-radius: 12px; }
+    /* How much of the spending the income covers: one neutral fill, the text says the figure. */
+    .split-bar.meter span { flex: none; background: color-mix(in srgb, var(--ink2) 70%, var(--surf)); }
     .metric.minor .label { font-size: 12.5px; letter-spacing: 0; text-transform: none; font-weight: 600; }
     .metric.minor strong { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: 0; font-variant-numeric: tabular-nums; overflow-wrap: normal; white-space: nowrap; }
     .metric.minor small { margin: 0; color: var(--mut); font-size: 12px; line-height: 1.4; }
@@ -352,7 +355,7 @@
       .top-actions .button { min-height: 38px; padding: 7px 9px; font-size: 13px; }
       .config-form { grid-template-columns: 1fr; }
       .metrics, .month-summary .metrics, .month-summary .metrics.single-row { grid-template-columns: 1fr; gap: 10px; }
-      .metric.minor { flex-basis: 140px; padding: 10px 12px; }
+      .metric.minor { flex-basis: 140px; min-width: 140px; padding: 10px 12px; }
       .metric.minor strong { font-size: 14.5px; white-space: normal; }
       .toolbar { align-items: flex-start; }
       .toolbar-group { width: 100%; }
@@ -973,15 +976,36 @@
       // Bar and legend of a spending card: in the household view personal spending is shown
       // per member; family is one item.
       function appendSpendSplit(card, personal, family) {
-        const parts = state.owner === "hogar"
+        appendSplit(card, state.owner === "hogar"
           ? [
             ...safeArray(state.data.owners).map((owner, index) => [
               `Personal ${owner.label}`, personal.filter(tx => tx.owner === owner.id), index ? palette[3] : palette[0]
             ]),
             ["Familiar", family, palette[1]]
           ]
-          : [["Personal", personal, palette[0]], ["Familiar", family, palette[1]]];
-        if (sum(personal) + sum(family) > 0) {
+          : [["Personal", personal, palette[0]], ["Familiar", family, palette[1]]]);
+      }
+      // In Hogar, whose income it was, with each owner's colour of the spending bar; for one
+      // owner, its kinds when there is more than one. Each kind keeps its colour by the fixed
+      // order of the income categories, apart from the personal and family colours.
+      function appendIncomeSplit(card, incomes) {
+        if (sum(incomes) <= 0) return;
+        if (state.owner === "hogar") {
+          appendSplit(card, safeArray(state.data.owners).map((owner, index) => [
+            owner.label, incomes.filter(tx => tx.owner === owner.id), index ? palette[3] : palette[0]
+          ]));
+          return;
+        }
+        const kinds = [...incomeCategories(), "Sin tipo"];
+        const colors = [palette[2], palette[4], palette[5], palette[6]];
+        const typeOf = tx => kinds.includes(tx.category) ? tx.category : "Sin tipo";
+        const parts = kinds.map((kind, index) => [kind, incomes.filter(tx => typeOf(tx) === kind), colors[index % colors.length]])
+          .filter(([, rows]) => rows.length);
+        if (parts.length > 1) appendSplit(card, parts);
+      }
+      // A bar split in parts ([name, rows, colour]) and its legend with each amount and count.
+      function appendSplit(card, parts) {
+        if (parts.some(([, rows]) => sum(rows) > 0)) {
           const bar = el("div", "split-bar");
           bar.setAttribute("role", "img");
           bar.setAttribute("aria-label", parts.map(([name, rows]) => `${name} ${formatMoney(sum(rows))}`).join(", "));
@@ -1004,6 +1028,26 @@
           split.append(item);
         });
         card.append(split);
+      }
+      // Balance: how much of the spending the confirmed income covers.
+      function appendCoverageMeter(card, income, spend) {
+        if (income <= 0 || spend <= 0) return;
+        const share = income / spend;
+        const text = share < 1
+          ? `Los ingresos cubren el ${Math.round(share * 100)} % del gasto`
+          : `Los ingresos superan el gasto en ${Math.round((share - 1) * 100)} %`;
+        const meter = el("div", "split-bar meter");
+        meter.setAttribute("role", "img");
+        meter.setAttribute("aria-label", text);
+        const fill = el("span");
+        fill.style.width = `${Math.min(share, 1) * 100}%`;
+        meter.append(fill);
+        card.append(meter, el("div", "split-legend", text));
+      }
+      // Rows of tiles as even as possible: up to five per row.
+      function balanceStrip(strip) {
+        const count = strip.childElementCount;
+        strip.style.setProperty("--per-row", String(Math.ceil(count / Math.ceil(count / 5))));
       }
       // Headline cards of the month and year summaries. "Por decidir" opens the Decision tab
       // and only appears while something is pending; otherwise the other three share one row.
@@ -1412,6 +1456,7 @@
             : `${incomes.length} confirmados`
         );
         income.classList.add("hero");
+        appendIncomeSplit(income, incomes);
         if (incomes.length) income.append(inlineDetail(`Ver ${incomes.length === 1 ? "el ingreso" : `los ${incomes.length} ingresos`}`, incomes));
         if (paidBack.length) spend.append(inlineDetail(`Ver ${paidBack.length === 1 ? "el abono" : `los ${paidBack.length} abonos`} de terceros`, paidBack));
         const net = makeMetric(
@@ -1420,6 +1465,7 @@
             : `${balance >= 0 ? "A favor" : "En contra"} · ingresos confirmados − gasto`
         );
         net.classList.add("hero");
+        appendCoverageMeter(net, incomeTotal, total);
         const heroes = summaryHeroes([spend, income, net], pending, pendingIncomes);
 
         const strip = el("div", "metric-strip");
@@ -1428,13 +1474,15 @@
           chip.classList.add("minor");
           strip.append(chip);
         };
+        // What touches the spending first, then what stays out of it.
+        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
+        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
+        if (cardPayments.length) minor("Pagos a tarjetas", formatMoney(sum(cardPayments)), `${cardPayments.length} · no es gasto`);
+        if (between.length) minor("Entre Santiago y Manuela", formatMoney(sum(between)), `${between.length} · no cuentan en Hogar`);
         if (investments.length || withdrawals.length) {
           minor("Inversiones", formatMoney(netInvestments(inMonth)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo · fuera del gasto`);
         }
-        if (cardPayments.length) minor("Pagos a tarjetas", formatMoney(sum(cardPayments)), `${cardPayments.length} · no es gasto`);
-        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
-        if (between.length) minor("Entre Santiago y Manuela", formatMoney(sum(between)), `${between.length} · no cuentan en Hogar`);
-        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
+        balanceStrip(strip);
         $("#month-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
 
         $("#income-card").hidden = incomes.length === 0;
@@ -2003,6 +2051,7 @@
             + (pendingIncomes.length ? ` · ${pendingIncomes.length} por confirmar (${formatMoney(sum(pendingIncomes))})` : "")
         );
         income.classList.add("hero");
+        appendIncomeSplit(income, buckets.flatMap(bucket => bucket.incomes));
         const balance = yearIncome - yearSpend;
         const net = makeMetric(
           "Balance del año", formatMoney(balance),
@@ -2010,6 +2059,7 @@
             : `${balance >= 0 ? "A favor" : "En contra"} · ingresos confirmados − gasto${pending.length ? ` · sin contar ${formatMoney(sum(pending))} por decidir` : ""}`
         );
         net.classList.add("hero");
+        appendCoverageMeter(net, yearIncome, yearSpend);
         const heroes = summaryHeroes([spend, income, net], pending, pendingIncomes);
 
         const strip = el("div", "metric-strip");
@@ -2018,15 +2068,17 @@
           chip.classList.add("minor");
           strip.append(chip);
         };
+        // The spending first (a row of four), then investments and coverage.
         if (closed.length) minor("Promedio de gasto", formatMoney(average), `Por mes cerrado · ${closed.length} ${closed.length === 1 ? "mes" : "meses"}`);
         if (highest && bucketTotal(highest) > 0) minor("Mes de mayor gasto", formatMoney(bucketTotal(highest)), capitalize(monthLabel(highest.month)));
+        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
+        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
         if (investments.length || withdrawals.length) {
           minor("Inversión neta", formatMoney(netInvestments(items)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo · fuera del gasto`);
         }
         if (withdrawals.length) minor("Retiros de inversión", formatMoney(sum(withdrawals)), "Fuera del gasto");
-        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
-        if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
         if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed} ${coverage.elapsed === 1 ? "mes" : "meses"}`, "Revisados o conciliados");
+        balanceStrip(strip);
         $("#year-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
 
         const categoryHost = $("#year-categories");

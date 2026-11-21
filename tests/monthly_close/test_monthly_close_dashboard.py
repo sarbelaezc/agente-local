@@ -824,6 +824,28 @@ def test_cash_hint_shows_only_where_a_destination_can_be_cash(dashboard):
     expect(shop.get_by_text(hint, exact=False)).to_have_count(0)
 
 
+def test_income_and_balance_cards_show_their_split_and_coverage(dashboard):
+    page, store, month, _ = dashboard
+    store.import_message("in", [
+        {
+            "id": f"in{index}", "message_id": "in", "day": month + "-07", "merchant": f"Pagador {index}",
+            "account": "Ahorros", "amount_minor": amount, "currency": "COP", "category": category,
+            "kind": "income", "decision": "income", "reason": "Ingreso.",
+        } for index, (amount, category) in enumerate([(80000, "Nómina"), (20000, "Otros ingresos")])
+    ])
+    page.goto(page.url.split("?")[0] + f"?month={month}&owner=santiago")
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    metrics = page.locator("#month-metrics .metric.hero")
+    income = metrics.filter(has_text="Ingresos").first
+    # One owner: the kinds of income, each with its amount.
+    expect(income.locator(".split-legend")).to_contain_text("Nómina")
+    expect(income.locator(".split-legend")).to_contain_text("Otros ingresos")
+    # Spending decided is 1500,57: 1000,00 of income covers 67 % of it.
+    balance = metrics.filter(has_text="Balance")
+    expect(balance.get_by_role("img")).to_have_attribute("aria-label", "Los ingresos cubren el 67 % del gasto")
+    expect(balance).to_contain_text("Los ingresos cubren el 67 % del gasto")
+
+
 def test_secondary_figures_fill_each_row_without_overflowing(dashboard):
     page, _, _, _ = dashboard
     # The longest figures and notes the month and year views show, seven of them.
