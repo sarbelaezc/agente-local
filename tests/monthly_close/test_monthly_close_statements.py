@@ -551,6 +551,9 @@ def test_year_view_shows_how_investments_and_credits_moved(store, start_panel, n
               style.getPropertyValue('--s3').trim(), style.getPropertyValue('--s7').trim()];
     }""")
     assert colours[0] == colours[2] and colours[1] == colours[3]
+    # Changes wear the year table's colours: investments up and debt down are good.
+    expect(investments.locator(".statement-head .balance-change")).to_have_class(re.compile(r"\bpositive\b"))
+    expect(credits.locator(".statement-head .balance-change")).to_have_class(re.compile(r"\bpositive\b"))
     # Only totals by default: the products are folded.
     products = investments.locator("details.balance-products")
     expect(products.locator("summary")).to_have_text("2 productos")

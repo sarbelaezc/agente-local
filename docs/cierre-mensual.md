@@ -731,7 +731,9 @@ aviso del formulario de configuración inicial no se puede cerrar.
   más claro.
 - **Inversiones y créditos:** una gráfica de línea para cada grupo con el saldo
   al cierre de cada mes, hasta el mes en curso: verde azulado para inversiones y
-  morado para créditos, distintos del azul y el naranja de ingresos y gastos. Arriba está el saldo total del
+  morado para créditos, distintos del azul y el naranja de ingresos y gastos.
+  Cuánto subió o bajó cada saldo usa los colores del Balance del resumen por mes:
+  verde si favorece (inversiones que suben, créditos que bajan) y rojo si no. Arriba está el saldo total del
   último extracto y cuánto subió o bajó en el año.
   - El saldo de un mes suma el último extracto de cada producto hasta ese mes;
     un mes sin extracto nuevo repite el saldo anterior.
