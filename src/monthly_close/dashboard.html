@@ -314,6 +314,7 @@
     .balance-section .statement-head { margin-bottom: 4px; }
     .balance-focus { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; color: var(--ink2); font-size: 12.5px; }
     .balance-note { margin: 0 0 6px; color: var(--mut); font-size: 12.5px; line-height: 1.45; }
+    .balance-products > summary { color: var(--ink2); font-size: 13px; font-weight: 500; }
     button.balance-product { width: 100%; margin: 0; padding: 8px 6px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
     @media (hover: hover) { button.balance-product:hover { background: var(--soft); } }
     button.balance-product[aria-pressed="true"] { background: var(--soft); box-shadow: inset 3px 0 0 var(--s1); }
@@ -630,6 +631,7 @@
         data: null,
         openCategories: new Set(),
         balanceFocus: { investments: null, credits: null },
+        balanceListOpen: { investments: false, credits: false },
         editingTx: null,
         month: initialMonth && monthPattern.test(initialMonth) ? initialMonth : currentMonth(),
         year: initialYear && /^\d{4}$/.test(initialYear) ? initialYear : String(new Date().getFullYear()),
@@ -2068,10 +2070,10 @@
             back.type = "button";
             back.addEventListener("click", () => { state.balanceFocus[group] = null; renderYearBalances(); });
             focus.append(el("span", "", `Mostrando ${nameOf(endOf(chosen.list))}`), back);
-          } else {
+          } else if (state.balanceListOpen[group]) {
             focus.append(el("span", "", `Total de ${label.toLowerCase()} · toca un producto para ver solo el suyo`));
           }
-          host.append(focus);
+          if (focus.childElementCount) host.append(focus);
           // Total: a month counts the products known by then. The month a product starts to
           // count is marked, so its arrival is not read as money moving.
           const points = [], entries = [];
@@ -2088,6 +2090,16 @@
           host.append(balanceChart(points, chosen ? nameOf(endOf(chosen.list)) : label));
           if (entries.length) host.append(el("p", "balance-note", `${entries.join(" · ")}. Ese salto no es dinero que entró.`));
 
+          // The products stay folded until asked for; folding them goes back to the total.
+          const details = el("details", "balance-products");
+          details.open = state.balanceListOpen[group];
+          details.append(el("summary", "", `${series.length} ${series.length === 1 ? "producto" : "productos"}`));
+          details.addEventListener("toggle", () => {
+            if (details.open === state.balanceListOpen[group]) return;
+            state.balanceListOpen[group] = details.open;
+            if (!details.open) state.balanceFocus[group] = null;
+            renderYearBalances();
+          });
           const list = el("div", "statement-rows");
           series.forEach(({ key, list: items }) => {
             const first = startOf(items), last = endOf(items);
@@ -2105,7 +2117,8 @@
             });
             list.append(row);
           });
-          host.append(list);
+          details.append(list);
+          host.append(details);
         });
         card.hidden = state.currency !== "COP" || shown === 0;
       }

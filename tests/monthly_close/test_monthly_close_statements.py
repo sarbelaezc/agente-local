@@ -543,6 +543,11 @@ def test_year_view_shows_how_investments_and_credits_moved(store, start_panel, n
     expect(credits.locator(".statement-head strong")).to_have_text(re.compile(r"850[.\s]?000,00"))
     expect(credits.locator(".statement-head p")).to_contain_text(re.compile(r"bajó 50[.\s]?000,00"))
     assert "*0006" not in credits.inner_text()
+    # Only totals by default: the products are folded.
+    products = investments.locator("details.balance-products")
+    expect(products.locator("summary")).to_have_text("2 productos")
+    expect(products).not_to_have_attribute("open", "")
+    products.locator("summary").click()
     fund = investments.locator(".statement-row").filter(has_text="*0003")
     expect(fund).to_contain_text(re.compile(r"subió 30[.\s]?000,00\sCOP en el año · al 28 feb 2026"))
     late = investments.locator(".statement-row").filter(has_text="*0005")
@@ -566,6 +571,13 @@ def test_year_view_shows_how_investments_and_credits_moved(store, start_panel, n
     investments.get_by_role("button", name="Ver total").click()
     expect(fund).to_have_attribute("aria-pressed", "false")
     assert tips() == total
+    # Folding the products while one is shown goes back to the total.
+    fund.click()
+    investments.locator("details.balance-products > summary").click()
+    expect(investments.locator("details.balance-products")).not_to_have_attribute("open", "")
+    expect(investments.locator(".balance-focus")).to_have_count(0)
+    assert tips() == total
+    investments.locator("details.balance-products > summary").click()
     page.locator("#owner-switch").get_by_role("button", name="Santiago").click()
     assert "*0005" not in investments.inner_text()
     assert not errors

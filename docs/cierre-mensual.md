@@ -736,10 +736,11 @@ aviso del formulario de configuración inicial no se puede cerrar.
   - El mes en que un producto empieza a contarse lleva un punto hueco y una nota
     debajo («abr: empieza a contar Fiducuenta *2553»): ese salto no es dinero que
     entró.
-  - Debajo, cada producto muestra su saldo y su variación en el año, o desde su
-    primer extracto si empezó a mitad de año. Tocar un producto cambia la
-    gráfica a solo ese producto, con su propia escala. Tocarlo otra vez, o pulsar
-    «Ver total», vuelve al total.
+  - Por defecto solo se ven los totales. Debajo, «N productos» despliega cada
+    producto con su saldo y su variación en el año, o desde su primer extracto
+    si empezó a mitad de año. Tocar un producto cambia la gráfica a solo ese
+    producto, con su propia escala. Tocarlo otra vez, pulsar «Ver total» o
+    plegar la lista vuelve al total.
   - Tocar un mes de la gráfica muestra su saldo y abre ese mes.
   - Solo cuentan los productos con algún extracto en el año; en **Hogar** llevan
     la etiqueta del titular.
