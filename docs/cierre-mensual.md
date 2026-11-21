@@ -725,8 +725,9 @@ aviso del formulario de configuración inicial no se puede cerrar.
 - Meses en orden cronológico con nombre corto y la línea de cobertura del mes.
 - Cuatro cifras: **Gasto del mes** (con barra por titular y familiar),
   **Ingresos** (con barra por tipo de ingreso cuando hay más de uno, también en
-  Hogar), **Balance** (con una barra neutra que dice qué parte del gasto
-  cubren los ingresos) y **Por decidir** (lleva a Decisión; solo aparece si
+  Hogar), **Balance** (con una barra que dice qué parte del gasto cubren los
+  ingresos: verde si el balance es a favor, roja si es en contra; el texto lo
+  dice igual) y **Por decidir** (lleva a Decisión; solo aparece si
   queda algo pendiente, y sin ella las otras tres van en una fila). Debajo, en
   fichas pequeñas y solo si existen: primero lo que toca el gasto (retiro en
   efectivo, abonos de terceros) y luego lo que queda fuera (pagos a tarjetas,
@@ -737,8 +738,10 @@ aviso del formulario de configuración inicial no se puede cerrar.
   4 + 3, nunca 5 + 2) y llenan el ancho; en el celular van de a dos por fila.
   La ficha «Abonos de terceros» (en Mes y en Año) abre la lista de esos abonos;
   el Gasto solo muestra la resta en su nota. Con la lista abierta, la ficha ocupa
-  toda la fila y una lista larga se desplaza dentro de ella. «Ingresos» abre la
-  lista de sus ingresos igual.
+  toda la fila y una lista larga se desplaza dentro de ella. La lista de los
+  ingresos está en la tarjeta «Ingresos por tipo», bajo el reparto por tipo;
+  «Ver los N ingresos» en la cifra Ingresos lleva a esa tarjeta con la lista
+  abierta.
 - Calendario por día (tocar un día muestra sus movimientos), dona por categoría
   (tocar una categoría abre su detalle), acumulado, días de la semana, medios de
   pago, ingresos, pagos por tarjeta y comercios frecuentes. «Comercios frecuentes»

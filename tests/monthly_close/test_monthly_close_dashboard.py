@@ -846,9 +846,20 @@ def test_income_and_balance_cards_show_their_split_and_coverage(dashboard):
     balance = metrics.filter(has_text="Balance")
     expect(balance.get_by_role("img")).to_have_attribute("aria-label", "Los ingresos cubren el 67 % del gasto")
     expect(balance).to_contain_text("Los ingresos cubren el 67 % del gasto")
+    # Against: the bar takes the red of the theme; in favour it would take the green.
+    expect(balance.locator(".meter")).not_to_have_class(re.compile("favor"))
+    fill, red = balance.evaluate('''card => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--bad)';
+      card.append(probe);
+      const colours = [getComputedStyle(card.querySelector('.meter span')).backgroundColor, getComputedStyle(probe).color];
+      probe.remove();
+      return colours;
+    }''')
+    assert fill == red, (fill, red)
 
 
-def test_open_detail_of_a_summary_card_keeps_small_amounts_and_scrolls_inside(dashboard):
+def test_the_list_of_incomes_keeps_small_amounts_and_scrolls_inside_its_card(dashboard):
     page, store, month, _ = dashboard
     store.decide("0", "personal")  # nothing pending: the three cards share one row
     store.import_message("in", [
@@ -861,14 +872,13 @@ def test_open_detail_of_a_summary_card_keeps_small_amounts_and_scrolls_inside(da
     page.reload()
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     income = page.locator("#month-metrics .metric.hero").filter(has_text="Ingresos").first
-    income.locator(".inline-detail > summary").click()
-    sizes = income.evaluate("""card => ({
-      figure: parseFloat(getComputedStyle(card.querySelector(':scope > strong')).fontSize),
+    income.get_by_role("button", name="Ver los 14 ingresos").click()
+    sizes = page.locator("#income-card").evaluate("""card => ({
       amount: parseFloat(getComputedStyle(card.querySelector('.detail-row strong')).fontSize),
       list: card.querySelector('.detail-rows').scrollHeight > card.querySelector('.detail-rows').clientHeight,
     })""")
-    assert sizes["amount"] == 13 and sizes["figure"] > 20, sizes
-    # Fourteen movements scroll inside the card instead of stretching the row.
+    assert sizes["amount"] == 13, sizes
+    # Fourteen movements scroll inside the card instead of stretching it.
     assert sizes["list"], sizes
 
 

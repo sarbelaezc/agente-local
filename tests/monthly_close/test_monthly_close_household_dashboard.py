@@ -187,10 +187,15 @@ def test_month_view_is_interactive_like_manuelas_dashboard(household):
     assert page.locator("#weekday-chart .bar-row").count() == 7
     assert page.locator("#merchant-ranking .bar-fill").count() >= 2
 
-    # Incomes and third-party payments open from their cards.
+    # The income card takes you to its list in «Ingresos por tipo», opened and in view.
     income = page.locator("#month-metrics .metric").filter(has_text="Ingresos").first
-    income.locator("summary", has_text="Ver el ingreso").click()
-    assert "EMPRESA SINTETICA" in income.inner_text()
+    assert income.locator("summary").count() == 0
+    income.get_by_role("button", name="Ver el ingreso").click()
+    listing = page.locator("#income-card .inline-detail")
+    expect(listing).to_have_attribute("open", "")
+    expect(listing.get_by_text("EMPRESA SINTETICA")).to_be_in_viewport()
+    expect(listing.locator("summary")).to_be_focused()
+    # Third-party payments open from their tile.
     spending = page.locator("#month-metrics .metric").filter(has_text="Gasto del mes")
     assert spending.locator("summary").count() == 0  # the spending card only shows the subtraction
     paid_back = page.locator("#month-metrics .metric.minor").filter(has_text="Abonos de terceros")
