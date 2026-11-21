@@ -287,7 +287,7 @@ def _mark_own_transfers(events: list[dict], own_accounts: list[str] | None) -> l
         if event["kind"] == "transfer" and key.startswith("tr:") and key[3:] in own:
             event["kind"] = "own_transfer"
             event["reason"] = "Transferencia a una cuenta tuya registrada: confirma que no cuenta."
-        elif event["kind"] == "own_transfer" and key.startswith("qr:") and key[3:] not in own:
+        elif event["kind"] == "own_transfer" and key.startswith("qr:") and key[-4:] not in own:
             event["kind"] = "transfer"
             event["reason"] = QR_NOT_OWN_REASON
     return events

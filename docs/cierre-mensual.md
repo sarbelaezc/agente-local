@@ -401,15 +401,18 @@ local):
   sin cambiar su decisión, y cada cambio queda en la auditoría.
 
 **Completar destinos ya importados.** Los avisos nuevos guardan el destino del
-pago al importarse. Para los importados antes:
+pago al importarse, con la llave Bre-B o QR completa. Para los importados antes:
 
 ```powershell
 .\scripts\agente-local.ps1 backfill-destinations
 ```
 
-Vuelve a leer por Graph, en solo lectura y sin Ollama, los avisos de pagos
-salientes de Santiago sin destino. Solo completa destinos vacíos (auditados como
-`destination-backfill`); no cambia importes, categorías ni decisiones.
+Vuelve a leer, en solo lectura y sin Ollama, los avisos de pagos salientes de
+todos los buzones que no tienen destino o que guardaron una llave Bre-B o QR solo
+por sus últimos 4 dígitos. Completa el destino vacío o cambia la llave corta por
+la completa que termina en esos dígitos (auditado como `destination-backfill`);
+una regla del destino de la llave corta pasa a la llave completa
+(`group-rule-key-backfill`). No cambia importes, categorías ni decisiones.
 
 **Hora de cada movimiento.** El panel muestra la hora junto a la fecha en todas
 partes (tarjetas de la pestaña Decisión, detalle por categoría, ingresos, abonos de
@@ -866,8 +869,8 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 |---|---|
 | «Pagaste $X en la tarjeta de credito *NNNN desde la cuenta *NNNN, el DD/MM/AAAA» | Pago de tarjeta decidido «No cuenta» (no es gasto: el gasto son las compras). La cuenta queda `Desconocida` |
 | «Transferiste $X [por QR] desde tu cuenta *NNNN a la cuenta *NNNN, el …» | Transferencia pendiente a `cuenta *NNNN`, destino `tr:NNNN` |
-| «Transferiste $X a la llave @alias o número desde tu cuenta …» (Bre-B) | Destino `bb:@alias` o `bb:NNNN` |
-| «Pagaste $X por código QR desde tu cuenta … a la llave …» | Destino `qr:…` |
+| «Transferiste $X a la llave @alias o número desde tu cuenta …» (Bre-B) | Destino `bb:@alias` o `bb:` con el número completo de la llave |
+| «Pagaste $X por código QR desde tu cuenta … a la llave …» | Destino `qr:` con la llave completa |
 | «Retiraste $X de tu cuenta de inversión *XXXX …» | Destino `fd:XXXX` |
 | «NOMBRE hizo un abono por $X a tu tarjeta de crédito terminada en *N» | Pago a tarjeta pendiente: «Abono de tercero» si pagó otra persona, «No cuenta» si fuiste tú |
 | «transferiste $X a la llave K desde tu cuenta *N a NOMBRE» | Transferencia a NOMBRE con la llave y la hora |
@@ -876,7 +879,10 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 Las tres últimas frases se reconocen aunque el correo las parta en varias líneas
 (por ejemplo «…hizo» al final de una línea y «un abono por…» en la siguiente).
 
-De las cuentas y llaves numéricas se guardan solo los últimos 4 dígitos. Si la
+De las cuentas se guardan solo los últimos 4 dígitos; las llaves Bre-B y QR se
+guardan completas, como en lo importado del panel de Manuela, para que un mismo
+destino tenga la misma llave en avisos e importaciones. Una transferencia propia
+por QR se reconoce por los últimos 4 dígitos de la llave. Si la
 frase no dice el destino o es ambigua, no se asigna; no se adivinan formatos. Al
 modelo se le indica además que «transferiste» o «pagaste» nunca es ingreso y que
 el comercio es el destinatario nombrado, no el banco.
@@ -922,7 +928,8 @@ etiquetas principales:
 | `statement-import`, `statement-reclassify` | Movimiento importado de un extracto, o su tipo corregido |
 | `category-suggestions` | Sugerencias de categoría guardadas o recalculadas (solo el número) |
 | `decision-statement-phrase` | Línea de extracto decidida por un texto fijo confirmado (ver «Conciliar extractos») |
-| `destination-backfill` | Destino completado con `backfill-destinations` |
+| `destination-backfill` | Destino completado, o llave corta cambiada por la completa, con `backfill-destinations` |
+| `group-rule-key-backfill` | Regla de un destino pasada de la llave corta a la completa |
 | `time-backfill` | Hora completada al releer los avisos ya importados |
 | `qr-not-own-transfer` | Pago por QR que Ollama propuso como transferencia propia, vuelto transferencia |
 | `card-account-backfill` | Tarjeta corregida con `backfill-card-accounts` (con la anterior) |

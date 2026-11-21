@@ -29,9 +29,9 @@ def preferences(make_preferences) -> Preferences:
     ("Bancolombia: Transferiste $45,000 a la llave @Tienda.Ficticia desde tu cuenta *0001 a PERSONA FICTICIA el 01/03/2026",
      [(4500000, "bb:@tienda.ficticia")]),
     ("Transferiste $45,000 a la llave 3000000042 desde tu cuenta *0001 a PERSONA FICTICIA el 01/03/2026",
-     [(4500000, "bb:0042")]),
+     [(4500000, "bb:3000000042")]),
     ("Bancolombia: Pagaste $12,500 por codigo QR desde tu cuenta *0001 a la llave 3000000099 el 01/03/2026",
-     [(1250000, "qr:0099")]),
+     [(1250000, "qr:3000000099")]),
     ("Retiraste $200,000 de tu cuenta de inversion *ab12 fondo de inversion Fiducuenta el 01/03/2026",
      [(20000000, "fd:ab12")]),
     ("Compraste $ 1.234,56 en Tienda con Tarjeta A.", []),
@@ -143,6 +143,50 @@ def notice(body: str) -> Mail:
     return Mail("m-fixed", "avisos@example.test", "Alertas", RECEIVED, body)
 
 
+def test_backfill_turns_short_keys_into_whole_keys_and_moves_their_rule(preferences, tmp_path, monkeypatch):
+    store = Store(tmp_path / "close.sqlite3")
+    store.configure(preferences.to_dict())
+    store.import_message("msg-q", [{**santiago_row("q", 1250000), "message_id": "msg-q", "group_key": "qr:0099"}])
+    store.import_message("msg-o", [{**santiago_row("o", 4500000), "message_id": "msg-o", "group_key": "bb:1111"}])
+    store.decide_group("santiago", "qr:0099", "personal", remember=True, category="Compras")
+    bodies = {
+        "msg-q": "Pagaste $12,500 por codigo QR desde tu cuenta *0001 a la llave 3000000099 el 01/03/2026",
+        # The whole key must end in the stored digits: another key is never taken for it.
+        "msg-o": "Transferiste $45,000 a la llave 3000002222 desde tu cuenta *0001 a PERSONA el 01/03/2026",
+    }
+
+    class Reader:
+        _received = {key: RECEIVED for key in bodies}
+
+        def walk_folders(self, limit, visit):
+            for key in bodies:
+                visit(Candidate(key, "avisos@example.test", "Alertas"))
+            return []
+
+        def read(self, candidate):
+            return Mail(candidate.item_id, candidate.sender, candidate.subject, RECEIVED, bodies[candidate.item_id])
+
+    @contextmanager
+    def fake_source(*args):
+        yield Reader()
+
+    monkeypatch.setattr(app, "open_source", fake_source)
+    result = app.backfill_destinations(store, tmp_path, {"max_messages": 100}, preferences)
+    assert (result["notices"], result["updated"]) == (2, 1)
+    rows = {row["id"]: row for row in store.state()["transactions"]}
+    assert (rows["q"]["group_key"], rows["q"]["decision"], rows["q"]["category"]) == ("qr:3000000099", "personal", "Compras")
+    assert rows["o"]["group_key"] == "bb:1111"
+    with store.connect() as db:
+        rules = [tuple(row) for row in db.execute("SELECT group_key, decision, category FROM group_rules")]
+        audit = db.execute("SELECT value FROM audit WHERE action='destination-backfill'").fetchone()[0]
+    assert rules == [("qr:3000000099", "personal", "Compras")]
+    assert audit == "qr:0099 -> qr:3000000099"
+    # A later payment to the whole key follows the moved rule.
+    store.import_message("msg-n", [{**santiago_row("n", 700), "message_id": "msg-n", "group_key": "qr:3000000099"}])
+    later = {row["id"]: row for row in store.state()["transactions"]}["n"]
+    assert (later["decision"], later["category"]) == ("personal", "Compras")
+
+
 def test_card_abono_by_someone_else_is_a_card_payment_never_income(preferences):
     events = extract(notice(
         "Bancolombia: PERSONA FICTICIA hizo un abono por $482,000 a tu tarjeta de credito "
@@ -211,7 +255,7 @@ def test_qr_payment_to_a_key_that_is_not_own_is_never_an_own_transfer(preference
     )
     model = FakeExtractionModel(merchant="USUARIO", kind="own_transfer", category="Otros gastos")
     event = extract(mail, preferences, model, ["0001"])[0]
-    assert (event["kind"], event["group_key"]) == ("transfer", "qr:4817")
+    assert (event["kind"], event["group_key"]) == ("transfer", "qr:3000004817")
     own_key = extract(mail, preferences, model, ["4817"])[0]
     assert own_key["kind"] == "own_transfer"
 
@@ -224,7 +268,7 @@ def test_stored_qr_own_transfers_become_transfers_keeping_the_decision(preferenc
     store.import_message("msg-q", [
         {**santiago_row("q", 100, kind="own_transfer"), "group_key": "qr:4817"},
         {**santiago_row("f", 200, kind="own_transfer"), "group_key": "qr:9966", "decision": "family"},
-        {**santiago_row("o", 300, kind="own_transfer"), "group_key": "qr:0099"},
+        {**santiago_row("o", 300, kind="own_transfer"), "group_key": "qr:3000000099"},
         {**santiago_row("t", 400, kind="own_transfer"), "group_key": "tr:5555"},
     ])
     rows = {row["id"]: row for row in Store(path).state()["transactions"]}

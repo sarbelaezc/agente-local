@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Iterator
 
 from shared.local_panel import remote_device
-from monthly_close.destinations import QR_NOT_OWN_REASON
+from monthly_close.destinations import QR_NOT_OWN_REASON, is_short_key
 from monthly_close.domain import (
     COUNTERPART_KINDS, DECISIONS, HOUSEHOLD, INCOME_CATEGORIES, INCOME_KINDS, LOAN_DECISIONS, NON_EXPENSES,
     OWNERS, Preferences, clean_text, owner_id,
@@ -238,7 +238,7 @@ class Store:
         rows = db.execute(
             """SELECT id FROM transactions t WHERE kind='own_transfer' AND group_key LIKE 'qr:%'
             AND NOT EXISTS (SELECT 1 FROM owner_accounts a
-                WHERE a.owner=t.owner AND a.suffix=substr(t.group_key, 4))""",
+                WHERE a.owner=t.owner AND a.suffix=substr(t.group_key, -4))""",
         ).fetchall()
         for row in rows:
             db.execute(
@@ -1220,21 +1220,50 @@ class Store:
     def set_destinations(self, destinations: dict[str, str]) -> int:
         """Record destinations read again from the original notices.
 
-        Only movements without one change; amounts, decisions and categories stay as
-        they are. Each change is audited, and transfers to a registered account of the
-        other member are then marked as money between members.
+        Movements without a destination get one, and a Bre-B or QR key stored by its last
+        four digits gets the whole key that ends in them; a destination rule of the short
+        key moves to the whole one. Amounts, decisions and categories stay as they are.
+        Each change is audited, and transfers to a registered account of the other member
+        are then marked as money between members.
         """
         changed: list[str] = []
+        upgraded: set[tuple[str, str, str]] = set()
         with self.connect() as db:
             for event_id, key in destinations.items():
                 if not isinstance(key, str) or not re.fullmatch(r"(tr|bb|qr|fd):[\w@.\-]{1,60}", key):
                     raise ValueError("Destino invalido.")
+                row = db.execute("SELECT owner,group_key FROM transactions WHERE id=?", (event_id,)).fetchone()
+                if row is None:
+                    continue
+                old = row["group_key"]
+                if old is not None and not (
+                    is_short_key(old) and key != old and key[:3] == old[:3] and key.endswith(old[3:])
+                ):
+                    continue
+                db.execute("UPDATE transactions SET group_key=? WHERE id=?", (key, event_id))
+                self._audit(db, "destination-backfill", event_id, key if old is None else f"{old} -> {key}")
+                changed.append(event_id)
+                if old is not None:
+                    upgraded.add((row["owner"], old, key))
+            for owner, old, key in sorted(upgraded):
                 if db.execute(
-                    "UPDATE transactions SET group_key=? WHERE id=? AND group_key IS NULL",
-                    (key, event_id),
-                ).rowcount:
-                    self._audit(db, "destination-backfill", event_id, key)
-                    changed.append(event_id)
+                    "SELECT 1 FROM transactions WHERE owner=? AND group_key=?", (owner, old),
+                ).fetchone():
+                    continue  # another movement still uses the short key
+                rule = db.execute(
+                    "SELECT 1 FROM group_rules WHERE owner=? AND group_key=?", (owner, old),
+                ).fetchone()
+                if rule is None:
+                    continue
+                if db.execute(
+                    "SELECT 1 FROM group_rules WHERE owner=? AND group_key=?", (owner, key),
+                ).fetchone():
+                    db.execute("DELETE FROM group_rules WHERE owner=? AND group_key=?", (owner, old))
+                else:
+                    db.execute(
+                        "UPDATE group_rules SET group_key=? WHERE owner=? AND group_key=?", (key, owner, old),
+                    )
+                self._audit(db, "group-rule-key-backfill", f"{owner}/{old}", key)
             self._flag_between_owners(db, changed)
         return len(changed)
 
