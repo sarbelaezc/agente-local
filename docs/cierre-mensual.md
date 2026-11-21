@@ -738,7 +738,7 @@ aviso del formulario de configuración inicial no se puede cerrar.
   - El saldo de un mes suma el último extracto de cada producto hasta ese mes;
     un mes sin extracto nuevo repite el saldo anterior.
   - El mes en que un producto empieza a contarse lleva un punto hueco y una nota
-    debajo («abr: empieza a contar Fiducuenta *2553»): ese salto no es dinero que
+    debajo («En abril de 2026 empieza a contar Fiducuenta *2553»): ese salto no es dinero que
     entró.
   - Por defecto solo se ven los totales. Debajo, «N productos» despliega cada
     producto con su saldo y su variación en el año, o desde su primer extracto

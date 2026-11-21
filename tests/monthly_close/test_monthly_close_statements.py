@@ -572,7 +572,7 @@ def test_year_view_shows_how_investments_and_credits_moved(store, start_panel, n
     total = tips()
     assert re.search(r"Enero de 2026: 100[.\s]?000,00", total[0])
     assert re.search(r"Febrero de 2026: 180[.\s]?000,00\sCOP · 2 productos · empieza a contar", total[1])
-    expect(investments.locator(".balance-note")).to_contain_text("feb: empieza a contar Fiducuenta *0005 (Manuela)")
+    expect(investments.locator(".balance-note")).to_contain_text("En febrero de 2026 empieza a contar Fiducuenta *0005 (Manuela).")
     # Choosing a product shows only its balance; choosing it again, or "Ver total", goes back.
     fund.click()
     expect(fund).to_have_attribute("aria-pressed", "true")

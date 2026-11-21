@@ -2093,10 +2093,10 @@
               ? series.filter(({ list }) => latestBy(list, `${month}-31`) && !latestBy(list, `${months[index - 1].month}-31`))
               : [];
             points.push({ index, month, total: known.reduce((total, check) => total + check.balance_minor, 0), count: known.length, arrived: arrived.length > 0 });
-            arrived.forEach(({ list }) => entries.push(`${monthNames[index].slice(0, 3)}: empieza a contar ${nameOf(endOf(list))}${state.owner === "hogar" ? ` (${ownerLabel(endOf(list).owner)})` : ""}`));
+            arrived.forEach(({ list }) => entries.push(`En ${monthLabel(month)} empieza a contar ${nameOf(endOf(list))}${state.owner === "hogar" ? ` (${ownerLabel(endOf(list).owner)})` : ""}`));
           });
           host.append(balanceChart(points, chosen ? nameOf(endOf(chosen.list)) : label, cssColor(colorName), stroke));
-          if (entries.length) host.append(el("p", "balance-note", `${entries.join(" · ")}. Ese salto no es dinero que entró.`));
+          if (entries.length) host.append(el("p", "balance-note", `${entries.join(". ")}. Ese salto no es dinero que entró.`));
 
           // The products stay folded until asked for; folding them goes back to the total.
           const details = el("details", "balance-products");
