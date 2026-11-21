@@ -722,7 +722,9 @@ aviso del formulario de configuración inicial no se puede cerrar.
   (tocar una categoría abre su detalle), acumulado, días de la semana, medios de
   pago, ingresos, pagos por tarjeta y comercios frecuentes. «Comercios frecuentes»
   agrupa variantes del mismo comercio (por ejemplo `UBER RIDES` y `UBER *TRIP`
-  como «Uber»); lo guardado conserva el texto del aviso.
+  como «Uber»); lo guardado conserva el texto del aviso. «Pagos por tarjeta»
+  nombra cada tarjeta por sus dígitos («Tarjeta *1234»), y los nombres que el
+  aviso escribe en minúscula se muestran con mayúscula inicial.
 - **Detalle por categoría** separa gastos, inversiones, ingresos y pagos de
   tarjeta, e indica cuántos movimientos faltan por decidir. Tocar un movimiento
   abre debajo su tarjeta de decisión, la misma de la pestaña Decisión, para
