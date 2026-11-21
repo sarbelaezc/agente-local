@@ -848,6 +848,30 @@ def test_income_and_balance_cards_show_their_split_and_coverage(dashboard):
     expect(balance).to_contain_text("Los ingresos cubren el 67 % del gasto")
 
 
+def test_open_detail_of_a_summary_card_keeps_small_amounts_and_scrolls_inside(dashboard):
+    page, store, month, _ = dashboard
+    store.decide("0", "personal")  # nothing pending: the three cards share one row
+    store.import_message("in", [
+        {
+            "id": f"in{index}", "message_id": "in", "day": month + "-07", "merchant": "Descuento de nómina: cuota quincenal",
+            "account": "Ahorros", "amount_minor": 190000000 + index, "currency": "COP", "category": "Nómina",
+            "kind": "income", "decision": "income", "reason": "Ingreso.",
+        } for index in range(14)
+    ])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    income = page.locator("#month-metrics .metric.hero").filter(has_text="Ingresos").first
+    income.locator(".inline-detail > summary").click()
+    sizes = income.evaluate("""card => ({
+      figure: parseFloat(getComputedStyle(card.querySelector(':scope > strong')).fontSize),
+      amount: parseFloat(getComputedStyle(card.querySelector('.detail-row strong')).fontSize),
+      list: card.querySelector('.detail-rows').scrollHeight > card.querySelector('.detail-rows').clientHeight,
+    })""")
+    assert sizes["amount"] == 13 and sizes["figure"] > 20, sizes
+    # Fourteen movements scroll inside the card instead of stretching the row.
+    assert sizes["list"], sizes
+
+
 def test_secondary_figures_fill_each_row_without_overflowing(dashboard):
     page, _, _, _ = dashboard
     # The longest figures and notes the month and year views show, seven of them.

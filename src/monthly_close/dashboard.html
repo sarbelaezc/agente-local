@@ -178,12 +178,13 @@
     .month-summary { margin: 0 0 12px; }
     .month-summary .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
     .month-summary .metrics.single-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .month-summary .metrics.single-row .hero strong { font-size: clamp(22px, 2.4vw, 32px); overflow-wrap: normal; }
+    .month-summary .metrics.single-row .hero > strong { font-size: clamp(22px, 2.4vw, 32px); overflow-wrap: normal; }
     .metric { padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--surf); }
     .metric .label { display: block; color: var(--ink2); font-size: 13px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
-    .metric strong { display: block; margin-top: 6px; font-size: 22px; font-weight: 750; letter-spacing: -.5px; overflow-wrap: anywhere; }
+    /* Only a card's own figure is big; the numbers of its detail list keep the list's size. */
+    .metric > strong { display: block; margin-top: 6px; font-size: 22px; font-weight: 750; letter-spacing: -.5px; overflow-wrap: anywhere; }
     .metric small { display: block; margin-top: 8px; color: var(--ink2); font-size: 13px; }
-    .metric.hero strong { font-size: clamp(28px, 3.4vw, 40px); line-height: 1.05; letter-spacing: -1px; }
+    .metric.hero > strong { font-size: clamp(28px, 3.4vw, 40px); line-height: 1.05; letter-spacing: -1px; }
     .metric.action { display: flex; flex-direction: column; justify-content: flex-start; cursor: pointer; text-align: left; font: inherit; color: inherit; }
     .metric.action:hover { border-color: var(--ink2); }
     .split-bar { display: flex; gap: 2px; height: 10px; margin-top: 12px; border-radius: 4px; overflow: hidden; background: var(--soft); }
@@ -256,6 +257,12 @@
     .bar-row .bar-fill { height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--s1); }
     .bar-row strong { font-weight: 600; font-variant-numeric: tabular-nums; }
     .metric details.inline-detail { margin-top: 6px; }
+    /* A long list scrolls inside its card instead of stretching the whole row. */
+    .detail-row.stacked { align-items: baseline; }
+    .detail-row .detail-text { display: grid; gap: 1px; }
+    .detail-row .detail-title { color: var(--ink); overflow-wrap: anywhere; }
+    .detail-row .detail-sub { color: var(--mut); font-size: 12px; }
+    .metric .inline-detail .detail-rows { max-height: 280px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
     .metric details.inline-detail > summary { padding: 4px 0; color: var(--ink2); font-size: 13px; font-weight: 500; }
     .metric .inline-detail .detail-row strong, .metric .inline-detail .flag-tag { display: inline; margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0; white-space: nowrap; }
 
@@ -964,9 +971,12 @@
         detail.append(el("summary", "", summary));
         const body = el("div", "detail-rows");
         rows.slice().sort(byWhen).forEach(tx => {
-          const row = el("div", "detail-row");
-          const text = el("span", "", `${movementWhen(tx)} · ${itemText(tx.merchant)} · ${itemText(tx.category)}`);
-          appendFlags(text, tx);
+          // Two lines: who and how much, then when, the category and the tags in grey.
+          const row = el("div", "detail-row stacked");
+          const text = el("span", "detail-text");
+          const sub = el("span", "detail-sub", `${movementWhen(tx)} · ${itemText(tx.category)}`);
+          appendFlags(sub, tx);
+          text.append(el("span", "detail-title", itemText(tx.merchant)), sub);
           row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
           body.append(row);
         });
