@@ -555,6 +555,11 @@ nombre a la izquierda y su saldo o estado a la derecha.
 Un extracto sin movimientos no muestra conciliación. Cada titular ve sus
 extractos; **Hogar** los ve todos, con la etiqueta del titular.
 
+Cada bloque aparece plegado: solo su título con el total, o en Tarjetas y
+cuentas cuántos extractos hay y si todos cuadran. Se abre con un clic. Un bloque
+con algún extracto que trajo movimientos sin aviso aparece abierto. El panel
+recuerda lo que abres o cierras en cada mes mientras sigue abierto.
+
 ## Conciliación automática del mes
 
 Después de cada lectura (`scan`, `import`, la tarea programada), de

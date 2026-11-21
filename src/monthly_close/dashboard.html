@@ -321,6 +321,12 @@
     button.balance-product[aria-pressed="true"] { background: var(--soft); box-shadow: inset 3px 0 0 var(--balance-color, var(--s1)); }
     /* Statements card: one block per kind of product, one two-line row per statement. */
     .statement-section + .statement-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+    /* Each block folds to its heading; it opens on its own when a statement needs a look. */
+    .statement-section > summary { list-style: none; padding: 2px 0; font-weight: inherit; }
+    .statement-section > summary::-webkit-details-marker { display: none; }
+    .statement-section > summary h4::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 10px 2px 2px; border-right: 2px solid var(--mut); border-bottom: 2px solid var(--mut); transform: rotate(-45deg); transition: transform .15s ease; }
+    .statement-section[open] > summary h4::before { transform: rotate(45deg); }
+    @media (prefers-reduced-motion: reduce) { .statement-section > summary h4::before { transition: none; } }
     .statement-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; }
     .statement-head h4 { margin: 0; color: var(--ink); font-size: 14px; }
     .statement-head strong { font-size: 16px; font-variant-numeric: tabular-nums; }
@@ -633,6 +639,8 @@
         openCategories: new Set(),
         balanceFocus: { investments: null, credits: null },
         balanceListOpen: { investments: false, credits: false },
+        // Statement blocks the person opened or closed, by "month|block".
+        statementOpen: new Map(),
         editingTx: null,
         month: initialMonth && monthPattern.test(initialMonth) ? initialMonth : currentMonth(),
         year: initialYear && /^\d{4}$/.test(initialYear) ? initialYear : String(new Date().getFullYear()),
@@ -1516,15 +1524,27 @@
           const rows = inMonth.filter(belongs);
           const known = withTotal ? Array.from(latest.values()).filter(belongs) : [];
           if (!rows.length && !known.length) return;
-          const section = el("section", "statement-section");
+          // Folded to its heading and total; a statement with movements no notice had opens it.
+          const unmatched = rows.filter(check => check.missing).length;
+          const key = `${state.month}|${label}`;
+          const section = el("details", "statement-section");
+          section.open = state.statementOpen.has(key) ? state.statementOpen.get(key) : unmatched > 0;
+          section.addEventListener("toggle", () => state.statementOpen.set(key, section.open));
+          const summary = el("summary");
           const head = el("div", "statement-head");
           head.append(el("h4", "", label));
           if (known.length) {
             const total = known.reduce((sumValue, check) => sumValue + check.balance_minor, 0);
             head.append(el("strong", "", formatMoney(total, "COP")),
               el("p", "", `${known.length} ${known.length === 1 ? "producto" : "productos"} · saldo al ${formatDate(known.map(check => check.period_end).sort().pop())}`));
-          } else if (note) head.append(el("p", "", note));
-          section.append(head);
+          } else if (note) {
+            const count = `${rows.length} ${rows.length === 1 ? "extracto" : "extractos"}`;
+            head.append(el("p", "", unmatched
+              ? `${note} · ${count}, ${unmatched} con movimientos sin aviso`
+              : `${note} · ${count}, ${rows.length === 1 ? "cuadra" : "todos cuadran"}`));
+          }
+          summary.append(head);
+          section.append(summary);
           const list = el("div", "statement-rows");
           rows.forEach(check => list.append(statementRow(check)));
           if (!rows.length) list.append(el("p", "hint", "Sin extractos con corte en este mes."));

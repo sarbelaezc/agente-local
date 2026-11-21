@@ -537,22 +537,46 @@ def test_panel_shows_statement_checks_and_balances(store, start_panel, new_page)
     visa = st.parse("TARJETA_VISA", "202601", CARD)
     visa.owner = "manuela"
     report = st.reconcile(statements + [visa], [], date(2026, 1, 1))
-    store.record_statements(report.checks(), [])
+    checks = report.checks()
+    for check in checks:
+        if check["product"] == "HIPOTECARIO":
+            check["matched"], check["missing"] = check["movements"], 0
+    store.record_statements(checks, [])
     url = start_panel(store)
     page = new_page()
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.goto(f"{url}/?month=2026-01&currency=COP&owner=santiago")
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    blocks = page.locator("#statements-card details.statement-section")
+    # Each block folds to its heading and total; one with movements no notice had opens itself.
+    opened = {
+        blocks.nth(index).locator("h4").inner_text(): blocks.nth(index).evaluate("node => node.open")
+        for index in range(blocks.count())
+    }
+    assert opened == {"Inversiones": True, "Créditos": False}
     text = page.locator("#statements-card").inner_text()
     assert "Inversiones" in text and "Créditos" in text
     assert re.search(r"1[.\s]?204[.\s]?950,00", text)
+    assert "Hipotecario" not in text
+    # The person's choice is kept while the panel redraws.
+    blocks.filter(has_text="Créditos").locator("summary").click()
+    page.locator("#owner-switch").get_by_role("button", name="Hogar").click()
+    page.locator("#owner-switch").get_by_role("button", name="Santiago").click()
+    text = page.locator("#statements-card").inner_text()
+    assert "Hipotecario" in text
     assert "Fiducuenta *0003" in text and "Visa" not in text
     page.locator("#owner-switch").get_by_role("button", name="Manuela").click()
+    summary = page.locator("#statements-card summary").filter(has_text="Tarjetas y cuentas")
+    expect(summary).to_contain_text(re.compile(r"1 extracto, (cuadra|1 con movimientos sin aviso)"))
+    if not summary.evaluate("node => node.parentElement.open"):
+        summary.click()
     text = page.locator("#statements-card").inner_text()
     assert "Visa *0002" in text and "Fiducuenta" not in text
     page.locator("#owner-switch").get_by_role("button", name="Hogar").click()
     card = page.locator("#statements-card")
+    for block in card.locator("details.statement-section:not([open]) > summary").all():
+        block.click()
     text = card.inner_text()
     assert "Tarjetas y cuentas" in text and "Inversiones" in text and "Créditos" in text
     # In the household view each statement carries its owner's tag.
