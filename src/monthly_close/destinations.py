@@ -10,6 +10,9 @@ import re
 
 from monthly_close.domain import amount_minor
 
+QR_NOT_OWN_REASON = (
+    "Pago por QR a una llave que no es una cuenta tuya registrada: confirma si es gasto personal o familiar."
+)
 AMOUNT = r"(?P<amount>\$\s?\d[\d.,]*\d|\$\s?\d)"
 ACCOUNT = r"\*?\s?\d[\d\s]*?"
 PATTERNS = (

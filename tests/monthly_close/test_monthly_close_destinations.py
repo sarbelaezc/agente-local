@@ -11,6 +11,7 @@ from monthly_close.domain import Preferences
 from monthly_close.extraction import Mail, extract
 from monthly_close.outlook import Candidate
 from monthly_close.store import Store
+from builders import SENDER, FakeExtractionModel
 
 RECEIVED = "2026-03-01T15:00:00Z"
 
@@ -200,6 +201,55 @@ def test_transfer_to_an_own_registered_account_is_an_own_transfer(preferences):
     assert extract(mail, preferences, NoModel())[0]["kind"] == "transfer"
     event = extract(mail, preferences, NoModel(), ["5586"])[0]
     assert (event["kind"], event["group_key"]) == ("own_transfer", "tr:5586")
+
+
+def test_qr_payment_to_a_key_that_is_not_own_is_never_an_own_transfer(preferences):
+    """The model may read the payer's name and call a QR payment an own transfer."""
+    mail = Mail(
+        "m-qr", SENDER, "Alertas", RECEIVED,
+        "USUARIO, pagaste $ 1.234,56 por codigo QR desde tu cuenta *0001 a la llave 3000004817",
+    )
+    model = FakeExtractionModel(merchant="USUARIO", kind="own_transfer", category="Otros gastos")
+    event = extract(mail, preferences, model, ["0001"])[0]
+    assert (event["kind"], event["group_key"]) == ("transfer", "qr:4817")
+    own_key = extract(mail, preferences, model, ["4817"])[0]
+    assert own_key["kind"] == "own_transfer"
+
+
+def test_stored_qr_own_transfers_become_transfers_keeping_the_decision(preferences, tmp_path):
+    path = tmp_path / "close.sqlite3"
+    store = Store(path)
+    store.configure(preferences.to_dict())
+    store.set_owner_account("santiago", "0099")
+    store.import_message("msg-q", [
+        {**santiago_row("q", 100, kind="own_transfer"), "group_key": "qr:4817"},
+        {**santiago_row("f", 200, kind="own_transfer"), "group_key": "qr:9966", "decision": "family"},
+        {**santiago_row("o", 300, kind="own_transfer"), "group_key": "qr:0099"},
+        {**santiago_row("t", 400, kind="own_transfer"), "group_key": "tr:5555"},
+    ])
+    rows = {row["id"]: row for row in Store(path).state()["transactions"]}
+    assert {key: (row["kind"], row["decision"]) for key, row in rows.items()} == {
+        "q": ("transfer", None), "f": ("transfer", "family"),
+        "o": ("own_transfer", None), "t": ("own_transfer", None),
+    }
+    Store(path).decide("q", "personal", "Otros gastos")
+    assert {row["id"]: row["decision"] for row in Store(path).state()["transactions"]}["q"] == "personal"
+
+
+def test_a_lone_movement_gets_the_hour_its_notice_arrived(preferences):
+    mail = Mail("m-hour", SENDER, "Alertas", RECEIVED, "Compraste $ 1.234,56 en Tienda con Tarjeta A.")
+    event = extract(mail, preferences, FakeExtractionModel())[0]
+    assert (event["day"], event["time"]) == ("2026-03-01", "10:00")  # 15:00 UTC in Bogota
+    stated = extract(notice(
+        "Bancolombia: USUARIO, transferiste $69,244.00 a la llave @ficticia547 desde tu cuenta *0001 "
+        "a PERSONA DE PRUEBA el 01/03/26 a las 09:41."
+    ), preferences, NoModel())[0]
+    assert stated["time"] == "09:41"  # the hour the notice states wins
+    earlier = extract(notice(
+        "Bancolombia: USUARIO, transferiste $69,244.00 a la llave @ficticia547 desde tu cuenta *0001 "
+        "a PERSONA DE PRUEBA el 27/02/26"
+    ), preferences, NoModel())[0]
+    assert earlier["time"] is None  # another day: the arrival hour says nothing about it
 
 
 def test_merge_category_moves_movements_and_rules_and_removes_it(preferences, tmp_path):

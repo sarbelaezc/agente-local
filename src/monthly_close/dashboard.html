@@ -830,12 +830,20 @@
       }
       function failureReason(field) {
         const reasons = {
-          merchant: "el comercio que propuso Ollama no aparece en el aviso",
-          amount_text: "el monto que propuso Ollama no aparece en el aviso",
-          events: "el aviso dice que salió dinero, pero no se extrajo ningún movimiento",
-          correction: "la propuesta no coincidía con el aviso y la corrección cambió otros datos o quitó movimientos",
+          merchant: "El comercio que propuso Ollama no aparece en el aviso",
+          amount_text: "El monto que propuso Ollama no aparece en el aviso",
+          events: "El aviso dice que salió dinero, pero no se extrajo ningún movimiento",
+          correction: "La propuesta no coincidía con el aviso y la corrección cambió otros datos o quitó movimientos",
         };
-        return reasons[field] || `el campo ${field} no coincide con el aviso`;
+        return reasons[field] || `El campo ${field} no coincide con el aviso`;
+      }
+      // The date of a movement, with its hour when known: the same in every list and card.
+      function movementWhen(tx) {
+        if (!tx.day) return "Sin fecha";
+        return typeof tx.time === "string" && tx.time ? `${formatDate(tx.day)} · ${tx.time}` : formatDate(tx.day);
+      }
+      function byWhen(a, b) {
+        return `${a.day || ""} ${a.time || ""}`.localeCompare(`${b.day || ""} ${b.time || ""}`);
       }
       function formatDate(value) {
         if (typeof value !== "string") return "Fecha no disponible";
@@ -940,9 +948,9 @@
         const detail = el("details", "inline-detail");
         detail.append(el("summary", "", summary));
         const body = el("div", "detail-rows");
-        rows.slice().sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
+        rows.slice().sort(byWhen).forEach(tx => {
           const row = el("div", "detail-row");
-          const text = el("span", "", `${tx.day ? formatDate(tx.day) : "Sin fecha"} · ${itemText(tx.merchant)} · ${itemText(tx.category)}`);
+          const text = el("span", "", `${movementWhen(tx)} · ${itemText(tx.merchant)} · ${itemText(tx.category)}`);
           appendFlags(text, tx);
           row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
           body.append(row);
@@ -1274,7 +1282,7 @@
           if (index === 0 || months[index - 1].slice(0, 4) !== month.slice(0, 4)) button.append(el("span", "chip-year", month.slice(0, 4)));
           button.type = "button";
           button.dataset.month = month;
-          button.setAttribute("aria-label", monthLabel(month));
+          button.setAttribute("aria-label", capitalize(monthLabel(month)));
           button.setAttribute("aria-pressed", String(month === state.month));
           button.addEventListener("click", () => goToMonth(month));
           chips.append(button);
@@ -1283,7 +1291,7 @@
         const coverageSelect = $("#coverage-month");
         coverageSelect.replaceChildren();
         months.slice().reverse().forEach(month => {
-          const option = el("option", "", monthLabel(month));
+          const option = el("option", "", capitalize(monthLabel(month)));
           option.value = month;
           option.selected = month === state.month;
           coverageSelect.append(option);
@@ -1414,7 +1422,7 @@
         if (cardPayments.length) minor("Pagos a tarjetas", formatMoney(sum(cardPayments)), `${cardPayments.length} · no es gasto`);
         if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
         if (between.length) minor("Entre Santiago y Manuela", formatMoney(sum(between)), `${between.length} · no cuentan en Hogar`);
-        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "ya incluido en el gasto");
+        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
         $("#month-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
 
         $("#income-card").hidden = incomes.length === 0;
@@ -1558,7 +1566,7 @@
         for (let day = 1; day <= days; day++) {
           const date = new Date(year, month, day);
           const today = date.toDateString() === new Date().toDateString() ? " today" : "";
-          const label = `${weekdayNames[(date.getDay() + 6) % 7]}, ${day} ${monthLabel(state.month)}`;
+          const label = `${capitalize(weekdayNames[(date.getDay() + 6) % 7])}, ${day} de ${monthLabel(state.month)}`;
           if (!grouped.has(day)) {
             const cell = el("div", `day-cell${today}`);
             cell.setAttribute("aria-label", label);
@@ -1600,7 +1608,8 @@
         rows.forEach(tx => {
           const row = el("div", "detail-row");
           const scope = tx.decision === "family" ? "Familiar" : "Personal";
-          const text = el("span", "", `${itemText(tx.merchant)} · ${itemText(tx.category)} · ${scope}`);
+          const hour = typeof tx.time === "string" && tx.time ? `${tx.time} · ` : "";
+          const text = el("span", "", `${hour}${itemText(tx.merchant)} · ${itemText(tx.category)} · ${scope}`);
           appendFlags(text, tx);
           row.append(text, el("strong", "", formatMoney(tx.amount_minor)));
           body.append(row);
@@ -1741,7 +1750,7 @@
       }
 
       // Name, proportional bar and amount, as in Manuela's rankings.
-      function barRow(name, amount, max, tipText = `${name}: ${formatMoney(amount)}`) {
+      function barRow(name, amount, max, tipText = `${capitalize(name)}: ${formatMoney(amount)}`) {
         const row = setTip(el("div", "bar-row"), tipText);
         const track = el("div", "bar-track");
         const fill = el("div", "bar-fill");
@@ -1832,13 +1841,13 @@
             const pending = rows.filter(tx => tx.decision == null).length;
             detail.append(el("summary", "", `${category} · ${totalOf(rows)} · ${rows.length} movimientos${pending ? ` · ${pending} por decidir` : ""}`));
             const body = el("div", "detail-rows");
-            rows.sort((a, b) => String(a.day || "").localeCompare(String(b.day || ""))).forEach(tx => {
+            rows.sort(byWhen).forEach(tx => {
               const row = el("button", "detail-row");
               row.type = "button";
               row.dataset.txId = tx.id;
               row.setAttribute("aria-expanded", "false");
-              row.setAttribute("aria-label", `Cambiar ${itemText(tx.merchant)} del ${tx.day ? formatDate(tx.day) : "día sin fecha"}, ${formatMoney(tx.amount_minor)}, ${statusOf(tx)}`);
-              const text = el("span", "", `${tx.day ? formatDate(tx.day) : "Sin fecha"} · ${itemText(tx.merchant)} · ${statusOf(tx)}`);
+              row.setAttribute("aria-label", `Cambiar ${itemText(tx.merchant)} del ${tx.day ? movementWhen(tx) : "día sin fecha"}, ${formatMoney(tx.amount_minor)}, ${statusOf(tx)}`);
+              const text = el("span", "", `${movementWhen(tx)} · ${itemText(tx.merchant)} · ${statusOf(tx)}`);
               appendFlags(text, tx);
               const amount = el("span", "detail-amount");
               const chevron = el("span", "detail-chevron", "▾");
@@ -1980,15 +1989,15 @@
           chip.classList.add("minor");
           strip.append(chip);
         };
-        if (closed.length) minor("Promedio de gasto", formatMoney(average), `por mes cerrado · ${closed.length} ${closed.length === 1 ? "mes" : "meses"}`);
+        if (closed.length) minor("Promedio de gasto", formatMoney(average), `Por mes cerrado · ${closed.length} ${closed.length === 1 ? "mes" : "meses"}`);
         if (highest && bucketTotal(highest) > 0) minor("Mes de mayor gasto", formatMoney(bucketTotal(highest)), capitalize(monthLabel(highest.month)));
         if (investments.length || withdrawals.length) {
           minor("Inversión neta", formatMoney(netInvestments(items)), `${investments.length} aportes − ${withdrawals.length} retiros · neto, no saldo · fuera del gasto`);
         }
-        if (withdrawals.length) minor("Retiros de inversión", formatMoney(sum(withdrawals)), "fuera del gasto");
-        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "ya incluido en el gasto");
+        if (withdrawals.length) minor("Retiros de inversión", formatMoney(sum(withdrawals)), "Fuera del gasto");
+        if (cash.length) minor("Retiro en efectivo", formatMoney(sum(cash)), "Ya incluido en el gasto");
         if (paidBack.length) minor("Abonos de terceros", formatMoney(sum(paidBack)), `${paidBack.length} · restan del gasto`);
-        if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed}`, "meses transcurridos revisados o conciliados");
+        if (coverage.elapsed) minor("Cobertura", `${coverage.reviewed} de ${coverage.elapsed} ${coverage.elapsed === 1 ? "mes" : "meses"}`, "Revisados o conciliados");
         $("#year-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
 
         const categoryHost = $("#year-categories");
@@ -2246,7 +2255,7 @@
               x: left + band * index + band * .12 + position * (barWidth + 2), y: top + chartHeight - barHeight,
               width: barWidth, height: barHeight, fill: colors[position], "fill-opacity": inProgress ? .45 : 1
             });
-            setTip(rect, `${monthLabel(bucket.month)}${inProgress ? " (en curso)" : ""} · ${name}: ${formatMoney(amount)}`);
+            setTip(rect, `${capitalize(monthLabel(bucket.month))}${inProgress ? " (en curso)" : ""} · ${name}: ${formatMoney(amount)}`);
             jumpToMonth(rect, bucket.month);
             svg.append(rect);
           });
@@ -2311,7 +2320,7 @@
                 x, y: top + chartHeight - stackedHeight - segmentHeight, width: barWidth, height: segmentHeight,
                 fill: categoryColor(category), "fill-opacity": inProgress ? .45 : 1
               });
-              setTip(rect, `${monthLabel(bucket.month)}${inProgress ? " (en curso)" : ""} · ${category}: ${formatMoney(amount)}`);
+              setTip(rect, `${capitalize(monthLabel(bucket.month))}${inProgress ? " (en curso)" : ""} · ${category}: ${formatMoney(amount)}`);
               jumpToMonth(rect, bucket.month);
               svg.append(rect);
             }
@@ -2553,7 +2562,7 @@
           el("span", "label", "Por decidir"),
           el("strong", "", String(pending.length)),
           el("small", "", pending.length
-            ? `${pending.length === 1 ? "destino" : "destinos"} por decidir · ${pendingMovements} ${pendingMovements === 1 ? "movimiento" : "movimientos"} · ${formatMoney(pendingAmount)} sin sumar al gasto`
+            ? `${pending.length === 1 ? "Destino" : "Destinos"} por decidir · ${pendingMovements} ${pendingMovements === 1 ? "movimiento" : "movimientos"} · ${formatMoney(pendingAmount)} sin sumar al gasto`
             : "No hay destinos por decidir.")
         );
         const host = $("#pending-list");
@@ -3007,12 +3016,11 @@
       function makeDecisionCard(tx, isPrevious, onSaved = null) {
         const card = el("article", "decision-card");
         const meta = el("div", "decision-meta");
-        meta.append(el("span", "", formatDate(tx.day)), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
+        meta.append(el("span", "", movementWhen(tx)), el("span", "", `${itemText(tx.category)} · ${txCurrency(tx)}`));
         const title = el("h3", "", itemText(tx.merchant));
         card.append(meta, title, el("strong", "", formatMoney(tx.amount_minor, txCurrency(tx))));
         const flags = el("p", "hint");
         appendFlags(flags, tx);
-        if (typeof tx.time === "string" && tx.time) flags.prepend(document.createTextNode(`Hora ${tx.time}`));
         if (flags.childNodes.length) card.append(flags);
         if (txCurrency(tx) === "USD" && Number.isSafeInteger(tx.cop_amount_minor)) {
           card.append(el("p", "hint", `Estimado: ${formatMoney(tx.cop_amount_minor, "COP")} · Tasa manual: ${tx.exchange_rate} COP por USD.`));

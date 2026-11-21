@@ -310,6 +310,7 @@ def test_existing_database_migration_preserves_rows_and_decisions(tmp_path, pref
     path = tmp_path / "legacy.sqlite3"
     event = extract(mail, preferences, FakeExtractionModel())[0]
     event["decision"] = "family"
+    event.pop("time")  # the legacy table has no hour column
     with sqlite3.connect(path) as db:
         db.executescript(SCHEMA)
         db.execute(

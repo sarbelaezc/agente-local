@@ -205,7 +205,7 @@ def test_months_live_under_the_tabs_and_only_in_the_month_view(household):
     months = chips.locator("button").evaluate_all("items => items.map(item => item.dataset.month)")
     assert months[0] == MONTH
     assert months == sorted(months)
-    expect(chips.locator("button").first).to_have_attribute("aria-label", "marzo de 2026")
+    expect(chips.locator("button").first).to_have_attribute("aria-label", "Marzo de 2026")
     assert chips.locator("button").first.inner_text().startswith("Mar")
     assert "2026" in chips.locator("button").first.inner_text()
     assert "2026" not in chips.locator("button").nth(1).inner_text()  # same year: no repeat
@@ -238,7 +238,7 @@ def test_destination_card_decides_every_pending_payment_with_audit(household):
     page, store, _ = household
     page.locator("#tab-decisions").click()
     summary = page.locator("#decision-summary").inner_text()
-    assert "1" in summary and "destino por decidir" in summary
+    assert "1" in summary and "Destino por decidir" in summary
     card = page.locator("#pending-list .group-card")
     assert card.count() == 1
     assert "Transferencia a la cuenta *55550009999" in card.inner_text()
