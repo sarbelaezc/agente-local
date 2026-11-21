@@ -633,32 +633,37 @@ def backfill_destinations(
 def backfill_card_accounts(
     store: Store, data_dir: Path, settings: dict, preferences: Preferences, read_only: bool,
 ) -> dict:
-    """Read Santiago's notices again (read-only, no Ollama) and correct the card by its digits.
+    """Read every mailbox's notices again (read-only, no Ollama) and correct the card by its digits.
 
     Applies the same rule as a new import: a notice read by the model that names the last
-    four digits of exactly one known card gets that card. Read-only mode only counts what
-    would change; otherwise the database is copied first and each change is audited.
+    four digits of exactly one of its owner's known cards gets that card. Read-only mode
+    only counts what would change; otherwise the database is copied first and each change
+    is audited.
     """
-    known = card_accounts(store, "santiago", preferences)
-    with store.connect() as db:
-        rows = db.execute(
-            "SELECT id,message_id,day,account FROM transactions WHERE owner='santiago' "
-            "AND id NOT LIKE 'stmt:%' AND message_id NOT LIKE 'statement:%' AND kind<>'income'",
-        ).fetchall()
-    result = {"notices": len({row["message_id"] for row in rows}), "read": 0, "changes": {}, "updated": 0, "backup": None}
-    if not known:
-        return result
+    result = {"notices": 0, "read": 0, "changes": {}, "updated": 0, "backup": None}
     changes: dict[str, str] = {}
     pairs: Counter = Counter()
+    for box in load_mailboxes(settings):
+        known = card_accounts(store, box.owner, preferences)
+        with store.connect() as db:
+            rows = db.execute(
+                "SELECT id,message_id,day,account FROM transactions WHERE owner=? AND instr(message_id, ':')=0 "
+                "AND id NOT LIKE 'stmt:%' AND kind<>'income'", (box.owner,),
+            ).fetchall()
+        result["notices"] += len({row["message_id"] for row in rows})
+        if not known:
+            continue
+        own = box.preferences(preferences)
 
-    def correct(mail, notice_rows) -> None:
-        card = card_named_in(mail, preferences, known)
-        for row in notice_rows:
-            if card and row["account"] != card:
-                changes[row["id"]] = card
-                pairs[f"{row['account']} -> {card}"] += 1
+        def correct(mail, notice_rows, known=known, own=own) -> None:
+            card = card_named_in(mail, own, known)
+            for row in notice_rows:
+                if card and row["account"] != card:
+                    changes[row["id"]] = card
+                    pairs[f"{row['account']} -> {card}"] += 1
 
-    result.update(read=reread_notices(data_dir, settings, preferences, rows, correct), changes=dict(pairs))
+        result["read"] += reread_notices(data_dir, settings, own, rows, correct, box)
+    result["changes"] = dict(pairs)
     if not read_only:
         result["updated"], backup = store.set_card_accounts(changes)
         result["backup"] = backup.name if backup else None
