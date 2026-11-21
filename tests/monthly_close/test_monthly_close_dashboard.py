@@ -923,3 +923,23 @@ def test_pending_destinations_are_ordered_oldest_first(dashboard):
     titles = page.locator("#pending-list > article h3").all_inner_texts()
     order = [title for title in titles if title in {"RECIENTE GRANDE", "ANTIGUO PEQUENO", "MEDIO"}]
     assert order == ["ANTIGUO PEQUENO", "MEDIO", "RECIENTE GRANDE"]
+
+
+def test_income_and_spending_bars_use_colours_apart_for_colour_blindness(dashboard):
+    page, store, month, _ = dashboard
+    store.import_message("pay", [{
+        "id": "pay", "message_id": "pay", "day": month + "-03", "merchant": "EMPRESA", "account": "Cuenta A",
+        "amount_minor": 500000, "currency": "COP", "category": "Nómina", "kind": "income",
+        "decision": None, "reason": "Revisar.",
+    }])
+    store.decide("pay", "income")
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.locator("#tab-year").click()
+    fills = page.evaluate("""() => {
+      const style = getComputedStyle(document.documentElement);
+      const bars = [...document.querySelectorAll('#year-income-chart-svg rect[data-tip]')];
+      const fillOf = name => bars.find(bar => bar.dataset.tip.includes(name)).getAttribute('fill');
+      return [fillOf('Ingresos'), fillOf('Gastos'), style.getPropertyValue('--s1').trim(), style.getPropertyValue('--s2').trim()];
+    }""")
+    assert fills[0] == fills[2] and fills[1] == fills[3]

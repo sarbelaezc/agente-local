@@ -2210,7 +2210,8 @@
           svg.append(label);
         }
         const band = chartWidth / 12;
-        const colors = [cssColor("--s6"), cssColor("--s2")];
+        // Blue for income and orange for spending: a pair that stays apart with red-green colour blindness.
+        const colors = [cssColor("--s1"), cssColor("--s2")];
         const current = currentMonth();
         buckets.forEach((bucket, index) => {
           const barWidth = band * .34;

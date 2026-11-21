@@ -725,7 +725,8 @@ aviso del formulario de configuración inicial no se puede cerrar.
   decidido) y chips con el promedio de gasto por mes cerrado (sin el mes en
   curso), el mes de mayor gasto, la inversión neta, retiros, efectivo, abonos y la
   cobertura («X de N» meses revisados a mano o conciliados con los extractos).
-- Gráfica de ingresos y gastos, categorías del año con barras y porcentaje, y
+- Gráfica de ingresos (azul) y gastos (naranja), dos colores que se distinguen
+  también con daltonismo rojo-verde; categorías del año con barras y porcentaje, y
   columnas por categoría con los mismos colores que el mes. El mes en curso se ve
   más claro.
 - **Inversiones y créditos:** una gráfica de línea para cada grupo con el saldo
