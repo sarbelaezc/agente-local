@@ -1011,6 +1011,17 @@ tablas. No cambia importes, decisiones ni auditoría.
   una decisión guardada desde el celular, con su nombre en la columna `device` de
   la auditoría.
   Revocado con `devices -Revoke`, el celular volvió a pedir un código al recargar.
+- Cambios del panel de la versión 0.4.0 (2026-11-21), revisados por el usuario con
+  datos reales:
+  - Decisiones: tasa en la tarjeta de un destino con compras en dólares, reglas
+    que proponen su decisión cuando solo falta la tasa, y Decisión sin los
+    botones por titular.
+  - Panel: vista en el celular, mensajes flotantes, aviso que se cierra, titular
+    fijo junto a las pestañas y todo en COP sin selector de moneda.
+  - Pestaña Mes: edición de un movimiento desde el detalle por categoría y
+    «Extractos y saldos» por tipo de producto.
+  - Pestaña Año: inversiones y créditos con detalle por producto, y los colores
+    de «Ingresos y gastos».
 
 **Pendiente**
 
