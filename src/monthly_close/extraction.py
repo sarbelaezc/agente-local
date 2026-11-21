@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from shared.local_model import JsonModel
-from monthly_close.destinations import assign_destinations
+from monthly_close.destinations import QR_NOT_OWN_REASON, assign_destinations
 from monthly_close.statements import is_statement_notice
 from monthly_close.domain import (
     INCOME_CATEGORIES, KINDS, NON_EXPENSES, Preferences, amount_minor, clean_text,
@@ -274,13 +274,20 @@ def _account_transfers(mail: Mail, preferences: Preferences, source: str) -> lis
 
 
 def _mark_own_transfers(events: list[dict], own_accounts: list[str] | None) -> list[dict]:
-    """A transfer to one of the person's own accounts is money moved, not spent."""
+    """A transfer to one of the person's own accounts is money moved, not spent.
+
+    The model may also call a QR payment an own transfer because the notice names the
+    payer; a QR key that is not a registered own account is a payment to someone else.
+    """
     own = set(own_accounts or [])
     for event in events:
         key = event.get("group_key") or ""
         if event["kind"] == "transfer" and key.startswith("tr:") and key[3:] in own:
             event["kind"] = "own_transfer"
             event["reason"] = "Transferencia a una cuenta tuya registrada: confirma que no cuenta."
+        elif event["kind"] == "own_transfer" and key.startswith("qr:") and key[3:] not in own:
+            event["kind"] = "transfer"
+            event["reason"] = QR_NOT_OWN_REASON
     return events
 
 

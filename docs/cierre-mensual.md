@@ -394,6 +394,11 @@ local):
   destino, que vale para pagos futuros a ese destino.
 - Las cuentas propias también se le indican a Ollama, para que una transferencia a
   ellas quede como transferencia propia.
+- Un pago por QR solo queda como transferencia propia si la llave termina en una
+  cuenta registrada del mismo titular. Si Ollama lo propone así por otra llave (por
+  ejemplo, porque el aviso nombra a quien paga), queda como transferencia pendiente,
+  que admite Gasto personal. Al abrir el cierre se corrigen igual los ya guardados,
+  sin cambiar su decisión, y cada cambio queda en la auditoría.
 
 **Completar destinos ya importados.** Los avisos nuevos guardan el destino del
 pago al importarse. Para los importados antes:

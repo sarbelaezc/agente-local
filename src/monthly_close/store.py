@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterator
 
 from shared.local_panel import remote_device
+from monthly_close.destinations import QR_NOT_OWN_REASON
 from monthly_close.domain import (
     COUNTERPART_KINDS, DECISIONS, HOUSEHOLD, INCOME_CATEGORIES, INCOME_KINDS, LOAN_DECISIONS, NON_EXPENSES,
     OWNERS, Preferences, clean_text, owner_id,
@@ -226,6 +227,26 @@ class Store:
                 db.execute("ALTER TABLE audit ADD COLUMN device TEXT")
             if backup is not None:
                 self._audit(db, "migrate-household", self.path.name, backup.name)
+            self._reclassify_qr_own_transfers(db)
+
+    def _reclassify_qr_own_transfers(self, db: sqlite3.Connection) -> int:
+        """Turn QR payments the model called own transfers back into transfers.
+
+        Only a QR key that is not a registered account of the same owner changes; the
+        decision, amount and category stay, and each change is audited.
+        """
+        rows = db.execute(
+            """SELECT id FROM transactions t WHERE kind='own_transfer' AND group_key LIKE 'qr:%'
+            AND NOT EXISTS (SELECT 1 FROM owner_accounts a
+                WHERE a.owner=t.owner AND a.suffix=substr(t.group_key, 4))""",
+        ).fetchall()
+        for row in rows:
+            db.execute(
+                "UPDATE transactions SET kind='transfer', reason=? WHERE id=?",
+                (QR_NOT_OWN_REASON, row["id"]),
+            )
+            self._audit(db, "qr-not-own-transfer", row["id"], "own_transfer -> transfer")
+        return len(rows)
 
     def _backup(self, db: sqlite3.Connection) -> Path:
         """Copy the database next to it before a schema change; never overwrite a copy."""
