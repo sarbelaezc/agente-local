@@ -910,14 +910,17 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 | «Pagaste $X en la tarjeta de credito *NNNN desde la cuenta *NNNN, el DD/MM/AAAA» | Pago de tarjeta decidido «No cuenta» (no es gasto: el gasto son las compras). La cuenta queda `Desconocida` |
 | «Transferiste $X [por QR] desde tu cuenta *NNNN a la cuenta *NNNN, el …» | Transferencia pendiente a `cuenta *NNNN`, destino `tr:` con el número completo que escribe el aviso |
 | «Transferiste $X a la llave @alias o número desde tu cuenta …» (Bre-B) | Destino `bb:@alias` o `bb:` con el número completo de la llave |
-| «Pagaste $X por código QR desde tu cuenta … a la llave …» | Destino `qr:` con la llave completa |
+| «Pagaste $X por código QR desde tu cuenta *N a la llave K el DD/MM/AAAA a las HH:MM» | Transferencia pendiente «Pago QR a llave K» con la hora, destino `qr:` con la llave completa |
 | «Retiraste $X de tu cuenta de inversión *XXXX …» | Destino `fd:XXXX` |
 | «NOMBRE hizo un abono por $X a tu tarjeta de crédito terminada en *N» | Pago a tarjeta pendiente: «Abono de tercero» si pagó otra persona, «No cuenta» si fuiste tú |
 | «transferiste $X a la llave K desde tu cuenta *N a NOMBRE» | Transferencia a NOMBRE con la llave y la hora |
+| «Pagaste $X a NOMBRE desde tu producto *N el DD/MM/AAAA HH:MM:SS» | Compra pendiente a NOMBRE con la hora; confirma su categoría |
 | «recibiste una transferencia de NOMBRE por $X» | Ingreso pendiente con el nombre de quien envía |
 
-Las tres últimas frases se reconocen aunque el correo las parta en varias líneas
-(por ejemplo «…hizo» al final de una línea y «un abono por…» en la siguiente).
+Las frases desde «NOMBRE hizo un abono» se reconocen aunque el correo las parta
+en varias líneas (por ejemplo «…hizo» al final de una línea y «un abono por…» en
+la siguiente). Ollama tomaba «Pagaste … desde tu cuenta» o «desde tu producto»
+por un pago de tarjeta y no devolvía nada; por eso esas dos frases se leen sin él.
 
 Las cuentas y las llaves Bre-B y QR de destino se guardan completas, como las
 escribe el aviso y como en lo importado del panel de Manuela, para que un mismo
@@ -1012,6 +1015,10 @@ tablas. No cambia importes, decisiones ni auditoría.
 - Gmail de Manuela (2026-11-16): inicio de sesión en modo Testing, recorrido de
   solo lectura (3 avisos cotejados en Gmail) y primera importación con un posible
   duplicado y una transferencia propia, ambos pendientes.
+- Gmail de Manuela desde el 1 de enero (2026-11-22): 609 avisos leídos con espera
+  por la cuota de Google y barra de avance en los dos buzones; 422 movimientos del
+  archivo completados con su aviso conservando sus decisiones, 7 posibles
+  duplicados pendientes; la segunda ejecución solo leyó cambios.
 - Extractos del banco de 2026: leídos sin errores; una segunda ejecución no
   importó nada. Extractos de Protección (2026-11-16): 10 de pensión voluntaria en
   los dos formatos y 2 de cesantías, encadenados sin diferencias mayores a $10.
@@ -1097,9 +1104,9 @@ tablas. No cambia importes, decisiones ni auditoría.
   dos tienen extractos de septiembre y octubre). Probado solo sobre una copia de la
   base y con datos sintéticos.
 
-- Leer el Gmail de Manuela desde el 1 de enero y completar con sus avisos los
-  movimientos que vinieron por archivo: probado solo con datos sintéticos.
-- La barra de avance de Gmail en una ejecución real.
+- Releer la cola de revisión de Manuela con las frases de pago por QR y de pago
+  desde un producto: probadas en solo lectura sobre sus 54 avisos en cola, sin
+  importar todavía.
 - La primera ejecución real de la tarea programada.
 - Cuánto dura en la práctica la sesión de Gmail en Testing, y si pasar la app a
   producción lo evita.
