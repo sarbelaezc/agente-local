@@ -106,13 +106,13 @@ SPECIAL_CATEGORIES = {
 }
 
 
+# A corrected payment of a credit register is looked for this many days around the old one,
+# less than a fortnight so it never reaches the next instalment.
+CORRECTION_DAYS = 10
 # Movements brought once from a member's exported files, before her mailbox was read.
 # A notice matching exactly one of them completes it; matching several, it stays pending
 # with this note and no rule decides it: a person compares them.
 FILE_IMPORT_PREFIX = "{owner}-import:"
-# A corrected payment of a credit register is looked for this many days around the old one,
-# less than a fortnight so it never reaches the next instalment.
-CORRECTION_DAYS = 10
 DUPLICATE_NOTE = "Posible duplicado"
 NOT_DUPLICATE = f"(note IS NULL OR note NOT LIKE '{DUPLICATE_NOTE}%')"
 

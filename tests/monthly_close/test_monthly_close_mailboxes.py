@@ -8,6 +8,7 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 
+from builders import file_imported
 from monthly_close import gmail_client
 from monthly_close import main as app
 from monthly_close.gmail_client import GmailClient, GmailError, validate_gmail_url
@@ -510,13 +511,12 @@ def insert_imported(
 ) -> str:
     """A movement as the one-off import of a member's exported files left it."""
     identifier = f"{owner}:{day}:{amount}:{legacy}"
-    with store.connect() as db:
-        db.execute(
-            """INSERT INTO transactions (id,message_id,day,merchant,account,amount_minor,currency,
-            category,kind,decision,reason,owner,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (identifier, f"{owner}-import:{day}:{amount}:{legacy}", day, "Comercio del archivo",
-             "TC *0001", amount, "COP", category, kind, "family", "importado", owner, "Nota de ella"),
-        )
+    file_imported(store, [{
+        "id": identifier, "message_id": f"{owner}-import:{day}:{amount}:{legacy}", "owner": owner,
+        "day": day, "merchant": "Comercio del archivo", "account": "TC *0001", "amount_minor": amount,
+        "currency": "COP", "category": category, "kind": kind, "decision": "family",
+        "reason": "importado", "note": "Nota de ella",
+    }])
     return identifier
 
 

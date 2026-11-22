@@ -65,6 +65,7 @@ def file_imported(store, rows: list[dict]) -> None:
                 [values[column] for column in FILE_IMPORT_COLUMNS],
             )
 
+
 class FakeExtractionModel:
     """Stands in for Ollama's notice extraction and checks the prompt keeps the email untrusted."""
 

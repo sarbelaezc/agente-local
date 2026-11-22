@@ -122,7 +122,7 @@ abrir el panel.
   programada ni al redirigir la salida, y nunca muestra contenido.
 - **Límite de consultas de Gmail.** Google limita las consultas por minuto de
   cada usuario. Si Gmail responde que se agotó esa cuota, el agente lo dice
-  (`Gmail pidio esperar por su limite de consultas; se reintenta en 15 s.`) y
+  (`Gmail pidio esperar o fallo un momento; se reintenta en 15 s.`) y
   reintenta tras 15, 30, 60 y 60 segundos. Si sigue agotada, se detiene sin
   guardar la posición del buzón. Un 403 por cualquier otro motivo, como falta de
   permisos, detiene la ejecución sin reintentar.

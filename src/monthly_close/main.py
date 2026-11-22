@@ -343,7 +343,7 @@ def _walk(
         def wait(seconds: float) -> None:
             progress.clear()
             print(
-                f"{box.provider.capitalize()} pidio esperar por su limite de consultas; "
+                f"{box.provider.capitalize()} pidio esperar o fallo un momento; "
                 f"se reintenta en {seconds:.0f} s.", flush=True,
             )
 
