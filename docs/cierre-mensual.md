@@ -380,6 +380,11 @@ movimiento de un aviso se compara con ellos por día, importe y moneda:
   audita como `mailbox-complete-file-import`.
 - **Coincide con varios.** Entra **pendiente** con la nota «Posible duplicado…»
   y ninguna regla lo decide. Si es el mismo dinero, elige «No cuenta».
+
+Si decides un posible duplicado como gasto, ingreso o inversión y otro movimiento
+del mismo titular, día, valor y moneda ya cuenta, el panel pregunta antes de
+guardar («Posible duplicado: ya cuenta un movimiento del …»), también al decidir un
+destino completo. Cancelar no guarda nada; «No cuenta» se guarda sin preguntar.
 - **No coincide con ninguno.** Entra como cualquier aviso nuevo.
 
 Los movimientos del archivo sin aviso en el correo se quedan como están. Los que
