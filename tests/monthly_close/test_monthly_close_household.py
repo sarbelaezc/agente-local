@@ -105,6 +105,20 @@ def test_santiago_summary_does_not_change_and_household_has_no_double_count(stor
     assert len(audit_rows(store, "between-owners-account")) == 1
 
 
+def test_only_the_newest_database_copies_are_kept(tmp_path):
+    path = tmp_path / "close.sqlite3"
+    copies = [f"close.sqlite3.backup-2026112{day}T120000000000Z" for day in range(5)]
+    for name in copies:
+        (tmp_path / name).write_bytes(b"copia")
+    others = ["close.sqlite3.backup-manual", "otra.sqlite3.backup-20261120T120000000000Z"]
+    for name in others:
+        (tmp_path / name).write_bytes(b"no tocar")
+
+    Store(path)
+
+    assert sorted(p.name for p in tmp_path.glob("*.backup-*")) == sorted(copies[-3:] + others)
+
+
 def test_destination_decision_is_atomic_audited_and_can_be_remembered(store):
     for event_id in ("p1", "p2"):
         store.import_message(event_id, [santiago_event(event_id, 1000, merchant="Café Central")])

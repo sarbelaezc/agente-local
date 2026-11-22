@@ -142,7 +142,7 @@ ignora. Para guardarlo en otro lugar, define la variable de entorno
 
 | Ruta | Contenido |
 |---|---|
-| `.local\MonthlyCloseAgent\` | `runtime.json`, `close.sqlite3` (movimientos, decisiones, reglas y auditoría), sesiones de Microsoft y Google, `statements.json` (contraseñas de los extractos de cada titular), `credit_ledgers.json` y `last-close.txt` |
+| `.local\MonthlyCloseAgent\` | `runtime.json`, `close.sqlite3` (movimientos, decisiones, reglas y auditoría) y sus 3 copias más recientes, sesiones de Microsoft y Google, `statements.json` (contraseñas de los extractos de cada titular), `credit_ledgers.json` y `last-close.txt` |
 | `.local\MailInvoiceAgent\` | Sesión de Microsoft de facturas, estados de lotes, decisiones de carpetas, copias del Excel (las 5 más recientes) y `tessdata` |
 | `.local\red-local\` | Solo si usas `-Red`: el certificado de la red de casa y su clave, el certificado del servidor y los dispositivos emparejados de cada panel (solo un resumen de su sesión) |
 | `…\logs\` (en cada carpeta) | Un registro por ejecución; se conservan los 10 más recientes |

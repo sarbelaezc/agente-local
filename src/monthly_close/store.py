@@ -114,6 +114,8 @@ CORRECTION_DAYS = 10
 # with this note and no rule decides it: a person compares them.
 FILE_IMPORT_PREFIX = "{owner}-import:"
 DUPLICATE_NOTE = "Posible duplicado"
+# Copies of the database kept next to it, newest first (schema changes and manual changes).
+BACKUPS_KEPT = 3
 NOT_DUPLICATE = f"(note IS NULL OR note NOT LIKE '{DUPLICATE_NOTE}%')"
 
 # Movements of a notice that a reprocessing run must leave alone: everything except
@@ -233,6 +235,17 @@ class Store:
             if backup is not None:
                 self._audit(db, "migrate-household", self.path.name, backup.name)
             self._reclassify_qr_own_transfers(db)
+        self._prune_backups()
+
+    def _prune_backups(self) -> None:
+        """Keep only the newest copies of the database: they hold real financial records."""
+        name = re.compile(re.escape(self.path.name) + r"\.backup-\d{8}T\d{12}Z")
+        copies = sorted(path for path in self.path.parent.glob(self.path.name + ".backup-*") if name.fullmatch(path.name))
+        for path in copies[:-BACKUPS_KEPT]:
+            try:
+                path.unlink()
+            except PermissionError:
+                continue  # open elsewhere; the next start removes it
 
     def _reclassify_qr_own_transfers(self, db: sqlite3.Connection) -> int:
         """Turn QR payments the model called own transfers back into transfers.

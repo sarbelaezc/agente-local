@@ -1004,6 +1004,11 @@ etiquetas principales:
 agente la copia a `close.sqlite3.backup-<fecha UTC>` antes de añadir columnas y
 tablas. No cambia importes, decisiones ni auditoría.
 
+**Copias de la base.** Cada vez que se abre la base se conservan solo las 3
+copias `close.sqlite3.backup-<fecha UTC>` más recientes, sean de una migración o
+hechas a mano antes de un cambio, porque contienen los movimientos reales. Otros
+archivos de la carpeta nunca se tocan.
+
 ## Privacidad y límites
 
 - `scan` lista remitente, asunto, fecha e identificador de los mensajes de las
