@@ -7,6 +7,7 @@ import json
 from argparse import Namespace
 from contextlib import nullcontext
 from datetime import date, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,8 @@ def test_scan_resumes_failed_notice_without_rereading_completed_or_losing_decisi
     fail = [True]
 
     class Reader:
+        client = SimpleNamespace(on_wait=None)
+
         def __init__(self, *args):
             pass
 
@@ -78,6 +81,7 @@ def test_scan_queues_invalid_evidence_continues_and_retries_without_losing_decis
 
     class Reader:
         active_folder = ("dinero", "banco")
+        client = SimpleNamespace(on_wait=None)
 
         def __init__(self, *args):
             pass
@@ -165,6 +169,8 @@ def test_scan_does_not_continue_after_other_failures(tmp_path, preferences, monk
     reads = []
 
     class Reader:
+        client = SimpleNamespace(on_wait=None)
+
         def __init__(self, *args):
             pass
 
@@ -361,3 +367,5 @@ def test_progress_of_an_incremental_walk_fills_from_the_start_and_shows_the_gmai
     assert "]   1% | Gmail | 2026-01-05 | 1 avisos" in screen.getvalue()
     progress.update(("Gmail",), date(2026, 10, 31))
     assert "[########################] 100% | Gmail | 2026-10-31 | 2 avisos" in screen.getvalue()
+    progress.folder(("Dinero", "Bancolombia"), 3, 5)
+    assert "[##########..............]  40% | Dinero / Bancolombia | Carpeta 3/5" in screen.getvalue()

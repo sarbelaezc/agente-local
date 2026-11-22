@@ -421,6 +421,56 @@ def test_gmail_token_is_never_sent_outside_the_gmail_api(url):
     assert sent == []
 
 
+class Answer:
+    def __init__(self, status: int, payload: dict | None = None, headers: dict | None = None) -> None:
+        self.status_code, self._payload, self.headers = status, payload or {}, headers or {}
+
+    def json(self):
+        return self._payload
+
+
+class Answers:
+    def __init__(self, *answers: Answer) -> None:
+        self.answers, self.requests = list(answers), 0
+
+    def get(self, url, params=None, headers=None):
+        self.requests += 1
+        return self.answers.pop(0)
+
+    def close(self):
+        pass
+
+
+QUOTA = Answer(403, {"error": {
+    "code": 403, "message": "Quota exceeded for quota metric 'Queries' and limit 'Units per minute per user'.",
+    "errors": [{"reason": "rateLimitExceeded"}],
+}})
+PROFILE = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
+
+
+def test_gmail_waits_out_its_per_minute_quota_and_says_so():
+    sleeps, told = [], []
+    http = Answers(QUOTA, Answer(429), Answer(200, {"historyId": "1"}))
+    client = GmailClient(lambda: "token", http=http, sleep=sleeps.append)
+    client.on_wait = told.append
+    assert client.get_json(PROFILE) == {"historyId": "1"}
+    assert sleeps == told == [15.0, 30.0]
+
+    http = Answers(*[QUOTA] * 5)
+    with pytest.raises(GmailError, match="403"):
+        GmailClient(lambda: "token", http=http, sleep=lambda seconds: None).get_json(PROFILE)
+    assert http.requests == 5  # four waits of the minute's quota, then it stops
+
+
+def test_a_gmail_permission_refusal_is_never_repeated():
+    denied = Answer(403, {"error": {"code": 403, "message": "Request had insufficient authentication scopes.",
+                                     "errors": [{"reason": "insufficientPermissions"}]}})
+    http = Answers(denied)
+    with pytest.raises(GmailError, match="insufficient"):
+        GmailClient(lambda: "token", http=http, sleep=lambda seconds: pytest.fail("no wait")).get_json(PROFILE)
+    assert http.requests == 1
+
+
 def test_gmail_session_is_required_and_only_read_only_scopes_are_kept(tmp_path):
     with pytest.raises(GmailError, match="login"):
         gmail_client.silent_token(tmp_path / "gmail_token_manuela.json")

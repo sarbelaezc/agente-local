@@ -47,7 +47,7 @@ def validate_graph_url(url: str) -> str:
     return url
 
 
-def _retry_after(response) -> float:
+def retry_after(response) -> float:
     try:
         return max(0.0, min(float(response.headers.get("Retry-After", "5")), 60.0))
     except (TypeError, ValueError):
@@ -72,6 +72,7 @@ class GraphClient:
 
     service = "Graph"
     error: type[GraphError] = GraphError
+    retries = 3
 
     @staticmethod
     def validate(url: str) -> str:
@@ -79,15 +80,21 @@ class GraphClient:
 
     def __init__(
         self, token: Callable[[], str], http: httpx.Client | None = None,
-        sleep: Callable[[float], None] = time.sleep, retries: int = 3,
+        sleep: Callable[[float], None] = time.sleep, retries: int | None = None,
     ) -> None:
         self._token = token
         self._http = http or httpx.Client(timeout=30, follow_redirects=False)
         self._sleep = sleep
-        self._retries = retries
+        self._retries = self.retries if retries is None else retries
+        # Told the seconds before each wait the API asked for, so a long pause is visible.
+        self.on_wait: Callable[[float], None] | None = None
 
     def close(self) -> None:
         self._http.close()
+
+    def _wait(self, response, attempt: int) -> float | None:
+        """Seconds to wait before repeating this GET, or None when the answer is final."""
+        return retry_after(response) if response.status_code in RETRYABLE else None
 
     def _get(self, url: str, params: dict | None):
         self.validate(url)
@@ -102,8 +109,11 @@ class GraphClient:
                     self._sleep(5.0 * (attempt + 1))
                     continue
                 raise self.error(f"No se pudo contactar con {self.service}.") from exc
-            if response.status_code in RETRYABLE and attempt < self._retries:
-                self._sleep(_retry_after(response))
+            wait = self._wait(response, attempt)
+            if wait is not None and attempt < self._retries:
+                if self.on_wait is not None:
+                    self.on_wait(wait)
+                self._sleep(wait)
                 continue
             break
         if response.status_code != 200:

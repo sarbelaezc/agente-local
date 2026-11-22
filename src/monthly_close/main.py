@@ -181,6 +181,12 @@ class Progress:
         if self.enabled:
             self._draw(checked / max(total, 1), f"{label} | Revisando lista: {checked}/{total} mensajes")
 
+    def folder(self, folder: tuple[str, ...] | None, position: int, total: int) -> None:
+        """A folder starts: shown even when it brings no notice."""
+        if self.enabled:
+            label = " / ".join(folder or ("?",))[:34]
+            self._draw((position - 1) / max(total, 1), f"{label} | Carpeta {position}/{total}")
+
     def _draw(self, done: float, detail: str) -> None:
         filled = round(done * self.WIDTH)
         line = f"[{'#' * filled}{'.' * (self.WIDTH - filled)}] {done:4.0%} | {detail}"
@@ -331,6 +337,17 @@ def _walk(
     with open_source(data_dir, settings, preferences.approved_senders, box) as reader:
         if box.provider == "gmail":
             reader.on_listed = lambda checked, total: progress.listing("Gmail", checked, total)
+        else:
+            reader.on_folder = lambda position, total: progress.folder(reader.active_folder, position, total)
+
+        def wait(seconds: float) -> None:
+            progress.clear()
+            print(
+                f"{box.provider.capitalize()} pidio esperar por su limite de consultas; "
+                f"se reintenta en {seconds:.0f} s.", flush=True,
+            )
+
+        reader.client.on_wait = wait
 
         def visit(candidate: Candidate) -> bool | None:
             if candidate.sender not in preferences.approved_senders:

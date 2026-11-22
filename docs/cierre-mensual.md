@@ -114,10 +114,18 @@ abrir el panel.
   buzones (`[#####......] 36% | dinero / bancolombia | 2026-08-02 | 2 avisos`). El
   porcentaje es la parte del rango ya leída según la fecha de los avisos: con
   fechas se lee del más nuevo al más viejo y, sin fechas, del más viejo al más
-  nuevo. Antes de abrir avisos, Gmail revisa los datos básicos de cada mensaje
-  (remitente, asunto y fecha), y la barra lo muestra
+  nuevo. En Outlook, al empezar cada carpeta la barra muestra cuál es
+  (`40% | Dinero / Bancolombia | Carpeta 3/5`), aunque no traiga avisos. Antes
+  de abrir avisos, Gmail revisa los datos básicos de cada mensaje (remitente,
+  asunto y fecha), y la barra lo muestra
   (`25% | Gmail | Revisando lista: 3/12 mensajes`). No aparece en la tarea
   programada ni al redirigir la salida, y nunca muestra contenido.
+- **Límite de consultas de Gmail.** Google limita las consultas por minuto de
+  cada usuario. Si Gmail responde que se agotó esa cuota, el agente lo dice
+  (`Gmail pidio esperar por su limite de consultas; se reintenta en 15 s.`) y
+  reintenta tras 15, 30, 60 y 60 segundos. Si sigue agotada, se detiene sin
+  guardar la posición del buzón. Un 403 por cualquier otro motivo, como falta de
+  permisos, detiene la ejecución sin reintentar.
 - Al terminar de leer los avisos, cada `scan`, `import` o `scheduled` (sin
   `-ReadOnly`) concilia los extractos si existe `statements.json` e importa los
   registros de créditos si existe `credit_ledgers.json`. Un fallo en cualquier
