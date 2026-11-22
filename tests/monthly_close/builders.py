@@ -46,6 +46,25 @@ def statement_line(event_id: str, merchant: str, **overrides) -> dict:
     }
 
 
+
+FILE_IMPORT_COLUMNS = (
+    "id", "message_id", "owner", "day", "time", "merchant", "account", "account_label", "amount_minor",
+    "currency", "category", "kind", "decision", "reason", "group_key", "note", "category_uncertain",
+)
+
+
+def file_imported(store, rows: list[dict]) -> None:
+    """Movements as the one-off import of Manuela's exported files left them in the database."""
+    defaults = {"time": None, "account_label": None, "group_key": None, "note": None, "category_uncertain": 0}
+    with store.connect() as db:
+        for row in rows:
+            values = {**defaults, **row}
+            db.execute(
+                f"INSERT INTO transactions ({','.join(FILE_IMPORT_COLUMNS)}) "
+                f"VALUES ({','.join('?' * len(FILE_IMPORT_COLUMNS))})",
+                [values[column] for column in FILE_IMPORT_COLUMNS],
+            )
+
 class FakeExtractionModel:
     """Stands in for Ollama's notice extraction and checks the prompt keeps the email untrusted."""
 

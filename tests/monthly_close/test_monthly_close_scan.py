@@ -343,5 +343,21 @@ def test_progress_bar_follows_notice_dates_and_stays_silent_off_a_terminal():
     piped = io.StringIO()
     quiet = app.Progress(date(2026, 1, 1), date(2026, 11, 1), stream=piped)
     quiet.update(("dinero",), date(2026, 6, 2))
+    quiet.listing("Gmail", 1, 2)
     quiet.clear()
     assert piped.getvalue() == ""
+
+
+def test_progress_of_an_incremental_walk_fills_from_the_start_and_shows_the_gmail_listing():
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    screen = Terminal()
+    progress = app.Progress(date(2026, 1, 1), date(2026, 11, 1), stream=screen, oldest_first=True)
+    progress.listing("Gmail", 3, 12)
+    assert "[######..................]  25% | Gmail | Revisando lista: 3/12 mensajes" in screen.getvalue()
+    progress.update(("Gmail",), date(2026, 1, 5))
+    assert "]   1% | Gmail | 2026-01-05 | 1 avisos" in screen.getvalue()
+    progress.update(("Gmail",), date(2026, 10, 31))
+    assert "[########################] 100% | Gmail | 2026-10-31 | 2 avisos" in screen.getvalue()

@@ -269,7 +269,7 @@ def test_loan_instalment_counts_only_as_personal_family_or_nothing(store):
     with pytest.raises(ValueError, match="cuota"):
         store.decide(loan["id"], "investment")
     store.decide(loan["id"], "family")
-    assert store.monthly_totals("santiago")["2026-01"]["family"] == 150000000
+    assert "familiar 1500000.00" in store.summary("2026-01")
     assert store.state()["statement_checks"][0]["balance_minor"] == 15000000000
 
 
@@ -681,8 +681,7 @@ def test_payroll_deducted_instalment_adds_matching_payroll_income(store):
     assert [(t["decision"], t["category"], t["amount_minor"], t["day"]) for t in twins] == [
         ("income", "Nómina", loan["amount_minor"], loan["day"]),
     ]
-    totals = store.monthly_totals("santiago")["2026-02"]
-    assert totals["income"] - totals["net"] == 0  # the deduction no longer counts twice
+    assert "balance 0.00" in store.summary("2026-02")  # the deduction no longer counts twice
     store.decide(loan["id"], "family")  # deciding again does not duplicate it
     assert sum(r["id"].startswith("payroll:") for r in store.state()["transactions"]) == 1
     store.decide(loan["id"], "exclude")
@@ -973,7 +972,7 @@ def test_own_card_payment_wording_is_decided_not_counted_only_on_card_statements
     with store.connect() as db:
         audit = db.execute("SELECT target,value FROM audit WHERE action='decision-statement-phrase'").fetchall()
     assert sorted(map(tuple, audit)) == [("stmt:amex", "exclude: ABONO SUCURSAL VIRTUAL"), ("stmt:visa", "exclude: ABONO SUCURSAL VIRTUAL")]
-    assert store.monthly_totals("santiago").get("2026-01", {}).get("personal", 0) == 0
+    assert "COP: personal 0.00;" in store.summary("2026-01")
 
     # A person's later change stands: recording statements again does not decide it back.
     store.decide("stmt:amex", "third_party_payment")

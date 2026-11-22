@@ -16,7 +16,7 @@ Para instalar y configurar, ver [configuracion.md](configuracion.md).
   - [Ingresos](#ingresos)
   - [Inversiones y retiros](#inversiones-y-retiros)
   - [Avisos sin extraer](#avisos-sin-extraer)
-  - [Movimientos de Manuela por archivo](#movimientos-de-manuela-por-archivo)
+  - [Movimientos de Manuela que vinieron por archivo](#movimientos-de-manuela-que-vinieron-por-archivo)
   - [Cuentas y transferencias entre titulares](#cuentas-y-transferencias-entre-titulares)
   - [Conciliar extractos](#conciliar-extractos)
   - [Conciliación automática del mes](#conciliación-automática-del-mes)
@@ -110,9 +110,14 @@ abrir el panel.
 - **Reanudar.** Si una ejecución con fechas se interrumpe, repetirla con el mismo
   rango no vuelve a abrir los avisos ya completados. El progreso se guarda como
   huellas, sin asuntos ni cuerpos, y se borra al terminar.
-- **Progreso.** En una terminal interactiva se ve una barra por carpeta
-  (`[#####......] 36% | dinero / bancolombia | 2026-08-02 | 2 avisos`). No aparece
-  en la tarea programada ni al redirigir la salida, y nunca muestra contenido.
+- **Progreso.** En una terminal interactiva se ve una barra por carpeta en los dos
+  buzones (`[#####......] 36% | dinero / bancolombia | 2026-08-02 | 2 avisos`). El
+  porcentaje es la parte del rango ya leída según la fecha de los avisos: con
+  fechas se lee del más nuevo al más viejo y, sin fechas, del más viejo al más
+  nuevo. Antes de abrir avisos, Gmail revisa los datos básicos de cada mensaje
+  (remitente, asunto y fecha), y la barra lo muestra
+  (`25% | Gmail | Revisando lista: 3/12 mensajes`). No aparece en la tarea
+  programada ni al redirigir la salida, y nunca muestra contenido.
 - Al terminar de leer los avisos, cada `scan`, `import` o `scheduled` (sin
   `-ReadOnly`) concilia los extractos si existe `statements.json` e importa los
   registros de créditos si existe `credit_ledgers.json`. Un fallo en cualquier
@@ -349,36 +354,30 @@ lo reintenta); si no trae ninguno, descártalo.
 Los fallos de sesión, de Graph o de Gmail, y cualquier otra validación, sí
 detienen la ejecución.
 
-## Movimientos de Manuela por archivo
+## Movimientos de Manuela que vinieron por archivo
 
-Los movimientos de Manuela hasta su último día exportado de su panel anterior
-entran por archivo. Desde ese día, si su Gmail está configurado, el agente lo lee
-directamente.
+Todos los movimientos de los dos titulares se obtienen del correo, cada uno con su
+API (Outlook de Santiago por Microsoft Graph y Gmail de Manuela por la API de
+Gmail), desde la misma fecha de inicio y con la misma información. El agente no
+importa archivos.
 
-```powershell
-.\scripts\agente-local.ps1 import-manuela
-```
+La base local conserva los movimientos de Manuela que llegaron una sola vez desde
+los archivos exportados de su panel anterior (con identificador `manuela:<id>`),
+con las decisiones, categorías y notas que ella aprobó. Al leer su Gmail, cada
+movimiento de un aviso se compara con ellos por día, importe y moneda:
 
-Lee de `.local\ImportManuela\` los archivos `movimientos_manuela.normalizado.json`,
-`decisiones_manuela.json` y, si existe, `paridad_totales_manuela.json`.
+- **Coincide con uno solo.** Ese movimiento pasa a venir del aviso: toma su
+  identificador de mensaje, su comercio, su cuenta y su hora, y conserva la
+  decisión, la categoría y la nota de Manuela. No se crea un movimiento nuevo. Se
+  audita como `mailbox-complete-file-import`.
+- **Coincide con varios.** Entra **pendiente** con la nota «Posible duplicado…»
+  y ninguna regla lo decide. Si es el mismo dinero, elige «No cuenta».
+- **No coincide con ninguno.** Entra como cualquier aviso nuevo.
 
-- Valida todo antes de escribir. Si un registro falla, no importa nada e indica
-  solo su número, nunca su contenido. Escribe todo en una transacción.
-- Es idempotente: lo que ya existe (`manuela:<id>`) se omite.
-- Lo que Manuela ya había decidido entra decidido y auditado como
-  `decision-manuela`. Los pagos a destinos se deciden con su decisión por destino,
-  que se guarda como regla; si una persona ya cambió esa regla, no se sobrescribe.
-- Las compras en moneda extranjera entran en COP tal como las convirtió Manuela
-  (4.000 COP/USD), con la nota «aprox.».
-- Las categorías dudosas quedan como «Categoría por confirmar» hasta que alguien
-  decida ese movimiento.
-- Al terminar compara los totales de cada mes con el archivo de paridad y se
-  detiene con error si alguno no coincide (descontando la diferencia aprobada del
-  cajero).
-- **Día de corte.** El Gmail de Manuela empieza en el último día del archivo, ese
-  día incluido. Un movimiento del buzón con el mismo día, importe y moneda que uno
-  del archivo entra **pendiente** con la nota «Posible duplicado…»; ninguna regla
-  lo decide. Si es el mismo dinero, elige «No cuenta».
+Los movimientos del archivo sin aviso en el correo se quedan como están. Los que
+traían una categoría dudosa siguen marcados «Categoría por confirmar» hasta que
+alguien los decida. Reprocesar un aviso con `-ReprocessEmpty` nunca borra el
+movimiento del archivo que ese aviso completó.
 
 ## Cuentas y transferencias entre titulares
 
@@ -534,8 +533,7 @@ recuerda lo que abres o cierras en cada mes mientras sigue abierto.
 
 ## Conciliación automática del mes
 
-Después de cada lectura (`scan`, `import`, la tarea programada), de
-`import-manuela` y de cada
+Después de cada lectura (`scan`, `import`, la tarea programada) y de cada
 decisión en el panel, el agente revisa los meses ya cerrados (anteriores al mes en
 curso). Un mes queda **Conciliado** si se cumple todo:
 
@@ -883,8 +881,8 @@ Sin `-Start` ni `-End`, `scan`, `import` y la tarea leen solo lo que cambió:
   La primera sincronización lista la carpeta completa y descarta, sin abrirlos, los
   avisos anteriores al inicio. Los mensajes borrados o movidos se ignoran.
 - **Gmail** guarda el `historyId` del buzón y luego pide solo lo añadido.
-- **Inicio.** La primera vez, desde el 1 de enero del año local (o desde el último
-  día importado por archivo para ese titular). No hay fecha de fin.
+- **Inicio.** La primera vez, desde el 1 de enero del año local, igual para los dos
+  buzones. No hay fecha de fin.
 - **Fallos.** La posición de cada carpeta se guarda solo después de procesar todos
   sus avisos, así que un fallo repite esos cambios sin duplicar nada. Si Graph o
   Gmail rechazan una posición caducada, esa carpeta o ese buzón se sincroniza de
@@ -970,7 +968,8 @@ etiquetas principales:
 | `qr-not-own-transfer` | Pago por QR que Ollama propuso como transferencia propia, vuelto transferencia |
 | `card-account-backfill` | Tarjeta corregida por los dígitos del aviso al releer los avisos ya importados (con la anterior) |
 | `payroll-deduction-income` | Ingreso espejo de una cuota descontada de la nómina |
-| `mailbox-possible-duplicate` | Posible duplicado entre el Gmail de Manuela y su archivo |
+| `mailbox-complete-file-import` | Movimiento del archivo de Manuela completado con su aviso de Gmail (con el mensaje) |
+| `mailbox-possible-duplicate` | Aviso de Gmail de Manuela igual a varios movimientos de su archivo, dejado pendiente |
 | `reprocess-replace-card-payments` | Pagos de tarjeta reemplazados por `-ReprocessEmpty` |
 | `category-merge-local-user` | Categoría unida con `merge-category` |
 | `scheduled-close` | Cierre de la tarea programada |
@@ -1005,9 +1004,6 @@ tablas. No cambia importes, decisiones ni auditoría.
 - Gmail de Manuela (2026-11-16): inicio de sesión en modo Testing, recorrido de
   solo lectura (3 avisos cotejados en Gmail) y primera importación con un posible
   duplicado y una transferencia propia, ambos pendientes.
-- Importación de Manuela: paridad mes a mes con su panel (salvo la diferencia
-  aprobada del cajero); la segunda importación no cambió nada; los totales de
-  Santiago quedaron idénticos.
 - Extractos del banco de 2026: leídos sin errores; una segunda ejecución no
   importó nada. Extractos de Protección (2026-11-16): 10 de pensión voluntaria en
   los dos formatos y 2 de cesantías, encadenados sin diferencias mayores a $10.
@@ -1093,6 +1089,9 @@ tablas. No cambia importes, decisiones ni auditoría.
   dos tienen extractos de septiembre y octubre). Probado solo sobre una copia de la
   base y con datos sintéticos.
 
+- Leer el Gmail de Manuela desde el 1 de enero y completar con sus avisos los
+  movimientos que vinieron por archivo: probado solo con datos sintéticos.
+- La barra de avance de Gmail en una ejecución real.
 - La primera ejecución real de la tarea programada.
 - Cuánto dura en la práctica la sesión de Gmail en Testing, y si pasar la app a
   producción lo evita.

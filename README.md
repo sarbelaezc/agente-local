@@ -76,7 +76,6 @@ estas opciones a los comandos de Python.
 | `scan [-Start … -End …] [-ReadOnly] [-ReprocessEmpty]` | Lee los buzones: sin fechas, solo lo nuevo; con fechas, el rango completo | Sí, salvo con `-ReadOnly` |
 | `pilot [-ReadOnly]` | Prueba la lectura con un solo aviso | Sí, salvo con `-ReadOnly` |
 | `summary -Month AAAA-MM [-Owner santiago\|manuela\|hogar]` | Resumen de un mes en la terminal | No |
-| `import-manuela [-SourceDir <carpeta>]` | Importa los movimientos exportados del panel de Manuela | No |
 | `owner-account -Owner <titular> -Suffix NNNN` | Registra una cuenta (últimos 4 dígitos) de un titular | No |
 | `payroll-deduction -Owner <titular> -Suffix NNNN` | Marca un crédito cuyas cuotas se descuentan de la nómina | No |
 | `merge-category -FromCategory <a> -ToCategory <b>` | Une una categoría de gasto a otra | No |
@@ -96,7 +95,10 @@ También puedes habilitarlo solo para la terminal actual con
 
 - **Alcance.** Lee en solo lectura los avisos del banco del Outlook de Santiago
   (Microsoft Graph) y del Gmail de Manuela (API de Gmail), además de los extractos
-  PDF del banco y de Protección. Ollama propone los movimientos; tú decides en el
+  PDF del banco y de Protección. Los movimientos de los dos titulares se obtienen
+  del correo, desde la misma fecha y con la misma información; los que Manuela
+  trajo una vez por archivo se completan con sus avisos. Ollama propone los
+  movimientos; tú decides en el
   panel si cada uno es gasto personal, familiar, ingreso, inversión o no cuenta.
   El panel muestra el mes, el año y los pendientes por titular (Santiago, Manuela
   u Hogar).
@@ -142,7 +144,6 @@ ignora. Para guardarlo en otro lugar, define la variable de entorno
 |---|---|
 | `.local\MonthlyCloseAgent\` | `runtime.json`, `close.sqlite3` (movimientos, decisiones, reglas y auditoría), sesiones de Microsoft y Google, `statements.json` (contraseñas de los extractos de cada titular), `credit_ledgers.json` y `last-close.txt` |
 | `.local\MailInvoiceAgent\` | Sesión de Microsoft de facturas, estados de lotes, decisiones de carpetas, copias del Excel (las 5 más recientes) y `tessdata` |
-| `.local\ImportManuela\` | Archivos exportados del panel de Manuela |
 | `.local\red-local\` | Solo si usas `-Red`: el certificado de la red de casa y su clave, el certificado del servidor y los dispositivos emparejados de cada panel (solo un resumen de su sesión) |
 | `…\logs\` (en cada carpeta) | Un registro por ejecución; se conservan los 10 más recientes |
 | `config\settings.yaml` | Configuración de facturas (también ignorada por Git) |

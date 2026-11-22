@@ -7,6 +7,8 @@ from datetime import datetime
 import pytest
 from playwright.sync_api import expect
 
+from builders import file_imported
+
 
 MONTH = "2026-03"
 
@@ -36,12 +38,12 @@ def household(make_store, start_panel, new_page):
         "kind": "transfer", "decision": None, "reason": "Revisar.",
     }])
     store.decide("s2", "family")
-    store.import_external("manuela", "manuela", [
+    file_imported(store, [
         member("m1", 20000, "purchase", "personal", category_uncertain=1),
         member("m22", 5000, "card_payment", "third_party_payment", category="Pagos de otras personas"),
         member("m333", 3000, "transfer", None, category="Otros gastos", group_key="tr:55550009999"),
         member("m4444", 7000, "transfer", None, category="Otros gastos", group_key="tr:55550009999"),
-    ], {})
+    ])
     url = start_panel(store)
     page = new_page(viewport={"width": 1280, "height": 1000})
     page.set_default_timeout(3000)
@@ -107,7 +109,7 @@ def test_year_view_shows_income_for_each_member_and_household(household):
         "account": "Tarjeta A", "amount_minor": 300000, "currency": "COP", "category": "Nómina",
         "kind": "income", "decision": "income", "reason": "Revisar.",
     }])
-    store.import_external("manuela", "manuela", [member("m55555", 50000, "income", "income", category="Nómina")], {})
+    file_imported(store, [member("m55555", 50000, "income", "income", category="Nómina")])
     page.reload()
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
     page.locator("#tab-year").click()
@@ -271,11 +273,11 @@ def test_destination_card_decides_every_pending_payment_with_audit(household):
 def tiles_page(make_store, start_panel, new_page, **options):
     """A month with two secondary tiles side by side: third-party payments and card payments."""
     store = make_store()
-    store.import_external("manuela", "manuela", [
+    file_imported(store, [
         member("m1", 20000, "purchase", "personal"),
         member("m22", 5000, "card_payment", "third_party_payment", category="Pagos de otras personas"),
         member("m333", 9000, "card_payment", "exclude", category="Pago de tarjeta"),
-    ], {})
+    ])
     page = new_page(viewport={"width": 1280, "height": 1000}, **options)
     page.goto(f"{start_panel(store)}/?month={MONTH}&currency=COP")
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
