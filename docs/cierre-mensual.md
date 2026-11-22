@@ -508,6 +508,7 @@ de producto, así que el buzón dice de quién es cada uno:
 |---|---|---|---|
 | Pensión voluntaria | «Extracto Pensiones Voluntarias Protección S.A.» | `<id>_PensionVoluntaria_AAAAMM.pdf` | Mensual |
 | Cesantías | «Extracto de Cesantias Protección.» | `<id>_PensionesCesantias_AAAAMM.pdf` | Semestral |
+| Pensión obligatoria | «Extracto de Pensiones Obligatorias Protección S.A» | `<id>_PensionesObligatorias_AAAAMM.pdf` | Trimestral |
 
 - Solo guardan cifras, no movimientos: no duplican los avisos de aportes ni
   cambian el gasto. Por producto y período: saldo inicial, aportes, retiros
@@ -516,6 +517,12 @@ de producto, así que el buzón dice de quién es cada uno:
 - Las cifras deben sumar el saldo final con una diferencia de hasta $10, porque
   Protección redondea a pesos. Una diferencia mayor o un concepto que falte detiene
   todo sin guardar nada.
+- La pensión obligatoria no imprime un saldo inicial. El saldo final es «Mi saldo
+  total ahorrado», que debe ser la suma del resumen de toda la vida laboral
+  (aportes obligatorios, voluntarios, rendimientos y bono) y coincidir con «Aportes
+  totales» y «Rendimientos totales». Los aportes son los obligatorios del trimestre
+  más los voluntarios netos, y el saldo inicial es el saldo final menos esos aportes
+  y los rendimientos del trimestre.
 - Los correos de Protección no se envían a Ollama: se marcan como procesados sin
   movimientos, porque la información la aporta el PDF.
 
@@ -527,7 +534,7 @@ nombre a la izquierda y su saldo o estado a la derecha.
   («✓ 21/21») indica que todos los movimientos coinciden. Una naranja («⚠ 3
   pendientes») indica que algunos solo venían en el extracto: entraron como
   pendientes y debajo se indica cuántos coinciden.
-- **Inversiones** (Fiducuenta, pensión voluntaria y cesantías) y **Créditos**: el
+- **Inversiones** (Fiducuenta, pensión voluntaria, cesantías y pensión obligatoria) y **Créditos**: el
   total del último saldo conocido de cada producto hasta ese mes, con la fecha
   del saldo. Protección muestra además aportes, retiros y rendimientos.
 
@@ -1022,6 +1029,9 @@ tablas. No cambia importes, decisiones ni auditoría.
 - Extractos del banco de 2026: leídos sin errores; una segunda ejecución no
   importó nada. Extractos de Protección (2026-11-16): 10 de pensión voluntaria en
   los dos formatos y 2 de cesantías, encadenados sin diferencias mayores a $10.
+- Pensión obligatoria de Manuela (2026-11-22): 8 extractos trimestrales de 2025 y
+  2026 leídos en solo lectura; el saldo inicial deducido de cada trimestre coincide
+  con el saldo final del anterior con diferencias de hasta $1.
 - Destinos de pagos ya importados, releyendo los avisos de todos los buzones:
   quedó guardado el destino de casi todos, con la llave completa, sin cambiar
   importes ni decisiones.

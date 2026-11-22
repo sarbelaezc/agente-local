@@ -1570,9 +1570,10 @@
       const productNames = {
         CTA_AHORROS: "Cuenta de ahorros", TARJETA_MASTERCARD: "Mastercard", TARJETA_AMEX: "Amex",
         TARJETA_VISA: "Visa", FIDUCUENTA: "Fiducuenta", CREDITO: "Crédito", HIPOTECARIO: "Hipotecario",
-        PROTECCION_VOLUNTARIA: "Pensión voluntaria Protección", PROTECCION_CESANTIAS: "Cesantías Protección"
+        PROTECCION_VOLUNTARIA: "Pensión voluntaria Protección", PROTECCION_CESANTIAS: "Cesantías Protección",
+        PROTECCION_OBLIGATORIA: "Pensión obligatoria Protección"
       };
-      const investmentProducts = ["FIDUCUENTA", "PROTECCION_VOLUNTARIA", "PROTECCION_CESANTIAS"];
+      const investmentProducts = ["FIDUCUENTA", "PROTECCION_VOLUNTARIA", "PROTECCION_CESANTIAS", "PROTECCION_OBLIGATORIA"];
       // Protección statements carry the period figures instead of movements to reconcile.
       function investmentFigures(check) {
         const figure = (label, value) => Number.isSafeInteger(value) ? `${label} ${formatMoney(value, "COP")}` : "";

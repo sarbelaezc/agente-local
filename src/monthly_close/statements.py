@@ -20,15 +20,19 @@ from pypdf.errors import PdfReadError
 
 FILE_NAME = re.compile(r"Extracto_\d+_(?P<period>\d{6})_(?P<product>[A-Z_]+?)_\w{4}\.pdf")
 # Protección names its attachments "<id>_PensionVoluntaria_202610.pdf".
-PROTECCION_FILE = re.compile(r"[0-9A-Za-z]+_(?P<kind>PensionVoluntaria|PensionesCesantias)_(?P<period>\d{6})\.pdf")
+PROTECCION_KINDS = r"PensionVoluntaria|PensionesCesantias|PensionesObligatorias"
+PROTECCION_FILE = re.compile(rf"[0-9A-Za-z]+_(?P<kind>{PROTECCION_KINDS})_(?P<period>\d{{6}})\.pdf")
 # Any statement attachment the reader may download: Bancolombia's or Protección's.
-STATEMENT_NAME = re.compile(
-    r"(?:Extracto_\d+_\d{6}_[A-Z_]+?_\w{4}|[0-9A-Za-z]+_(?:PensionVoluntaria|PensionesCesantias)_\d{6})\.pdf"
-)
-PROTECCION_PRODUCTS = {"PensionVoluntaria": "PROTECCION_VOLUNTARIA", "PensionesCesantias": "PROTECCION_CESANTIAS"}
+STATEMENT_NAME = re.compile(rf"(?:Extracto_\d+_\d{{6}}_[A-Z_]+?_\w{{4}}|[0-9A-Za-z]+_(?:{PROTECCION_KINDS})_\d{{6}})\.pdf")
+PROTECCION_PRODUCTS = {
+    "PensionVoluntaria": "PROTECCION_VOLUNTARIA", "PensionesCesantias": "PROTECCION_CESANTIAS",
+    "PensionesObligatorias": "PROTECCION_OBLIGATORIA",
+}
 # Protección's statement e-mails: their PDF is read here, so the mail itself is no notice.
 PROTECCION_SENDER = "afp_proteccion@proteccion.com"
-PROTECCION_SUBJECT = re.compile(r"^Extracto (?:Pensiones Voluntarias|de Cesantias) Protecci[oó]n", re.I)
+PROTECCION_SUBJECT = re.compile(
+    r"^Extracto (?:Pensiones Voluntarias|de Cesantias|de Pensiones Obligatorias) Protecci[oó]n", re.I,
+)
 PRODUCTS = {
     "CTA_AHORROS": "Cuenta de ahorros",
     "TARJETA_MASTERCARD": "Tarjeta de crédito Master",
@@ -39,6 +43,7 @@ PRODUCTS = {
     "HIPOTECARIO": "Crédito hipotecario",
     "PROTECCION_VOLUNTARIA": "Pensión voluntaria Protección",
     "PROTECCION_CESANTIAS": "Cesantías Protección",
+    "PROTECCION_OBLIGATORIA": "Pensión obligatoria Protección",
 }
 MAX_PDF_BYTES = 10 * 1024 * 1024
 # Protección's PDFs make pypdf warn about every embedded font (fontTools is not
@@ -522,6 +527,45 @@ def parse_severance(text: str) -> Statement:
     return _figures(statement, opening, abs(contributions), abs(withdrawals), final)
 
 
+# The lifetime summary: obligatory contributions, voluntary ones, returns, pension bond
+# and total savings, five amounts on one line.
+OBLIGATORY_SUMMARY = re.compile(rf"(?:{PESOS}\s*){{5}}")
+
+
+def parse_obligatory(text: str) -> Statement:
+    """Protección obligatory pension, a quarterly statement without an opening balance.
+
+    The lifetime summary must add up to the total savings and agree with the labelled
+    lifetime totals. The opening balance is what remains after the quarter's
+    contributions and returns; it chains to the previous quarter's total savings.
+    """
+    lines = _lines(text)
+    index = next((i for i, line in enumerate(lines) if re.search(r"^\S.* PO\d+ ", line)), None)
+    if not index:
+        raise StatementError("Periodo del extracto de pensión obligatoria no reconocido.")
+    start, end = _spanish_day(lines[index - 1]), _spanish_day(lines[index].split(" PO")[0])
+    summary = next((line for line in lines if OBLIGATORY_SUMMARY.fullmatch(line)), None)
+    if summary is None:
+        raise StatementError("Resumen del extracto de pensión obligatoria no encontrado.")
+    mandatory, voluntary, returns, bond, final = (_pesos(item) for item in re.findall(PESOS, summary))
+    figures = {
+        "contributions": _labelled(lines, r"Aportes obligatorios abonados a mi cuenta de ahorro individual en el trimestre"),
+        "returns": _labelled(lines, r"Mis rendimientos del trimestre"),
+        "voluntary": _labelled(lines, r"Mis aportes voluntarios netos del trimestre"),
+        "total_contributions": _labelled(lines, r"Aportes totales en mi cuenta de ahorro individual"),
+        "total_returns": _labelled(lines, r"Mis rendimientos totales en mi cuenta de ahorro individual"),
+    }
+    if any(value is None for value in figures.values()):
+        raise StatementError("Resumen del extracto de pensión obligatoria incompleto.")
+    if not _adds_up(mandatory + voluntary + returns + bond, final) or (
+        figures["total_contributions"], figures["total_returns"]) != (mandatory, returns):
+        raise StatementError("El resumen del extracto de pensión obligatoria no cuadra con su saldo final.")
+    put_in = abs(figures["contributions"]) + max(figures["voluntary"], 0)
+    taken_out = max(-figures["voluntary"], 0)
+    opening = final - put_in + taken_out - figures["returns"]
+    return _figures(Statement("PROTECCION_OBLIGATORIA", "", start, end), opening, put_in, taken_out, final)
+
+
 def parse(product: str, period: str, text: str) -> Statement:
     if product == "CTA_AHORROS":
         return parse_savings(text)
@@ -537,6 +581,8 @@ def parse(product: str, period: str, text: str) -> Statement:
         return parse_voluntary(text)
     if product == "PROTECCION_CESANTIAS":
         return parse_severance(text)
+    if product == "PROTECCION_OBLIGATORIA":
+        return parse_obligatory(text)
     raise StatementError("Producto de extracto no soportado.")
 
 
