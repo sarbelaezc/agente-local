@@ -354,18 +354,28 @@ def test_progress_bar_follows_notice_dates_and_stays_silent_off_a_terminal():
     assert piped.getvalue() == ""
 
 
-def test_progress_of_an_incremental_walk_fills_from_the_start_and_shows_the_gmail_listing():
+def test_one_bar_covers_the_whole_run_and_never_goes_back():
+    """Two mailboxes share the bar: Outlook by folders, Gmail half list and half notices."""
     class Terminal(io.StringIO):
         def isatty(self):
             return True
 
     screen = Terminal()
-    progress = app.Progress(date(2026, 1, 1), date(2026, 11, 1), stream=screen, oldest_first=True)
-    progress.listing("Gmail", 3, 12)
-    assert "[######..................]  25% | Gmail | Revisando lista: 3/12 mensajes" in screen.getvalue()
-    progress.update(("Gmail",), date(2026, 1, 5))
-    assert "]   1% | Gmail | 2026-01-05 | 1 avisos" in screen.getvalue()
-    progress.update(("Gmail",), date(2026, 10, 31))
-    assert "[########################] 100% | Gmail | 2026-10-31 | 2 avisos" in screen.getvalue()
-    progress.folder(("Dinero", "Bancolombia"), 3, 5)
-    assert "[##########..............]  40% | Dinero / Bancolombia | Carpeta 3/5" in screen.getvalue()
+    progress = app.Progress(date(2026, 1, 1), date(2026, 11, 1), stream=screen, oldest_first=True, mailboxes=2)
+    bar = lambda: screen.getvalue().rsplit(chr(13), 1)[-1]  # noqa: E731
+
+    progress.mailbox(0, "santiago")
+    progress.folder(("Dinero",), 2, 4)
+    assert bar().startswith("[###.....................]  12% | santiago · Dinero | Carpeta 2/4")
+    progress.update(("Dinero",), date(2026, 11, 1))  # the second folder read to the end
+    assert bar().startswith("[######..................]  25% | santiago · Dinero | 2026-11-01 | 1 avisos")
+    progress.folder(("Spam",), 3, 4)
+    progress.update(("Spam",), date(2026, 1, 1))  # an older notice never moves the bar back
+    assert "25%" in bar()
+
+    progress.mailbox(1, "manuela")
+    progress.listing("Gmail", 6, 12)
+    assert bar().startswith("[###############.........]  62% | manuela · Gmail | Revisando lista: 6/12 mensajes")
+    progress.listing("Gmail", 12, 12)
+    progress.update(("Gmail",), date(2026, 11, 1))
+    assert bar().startswith("[########################] 100% | manuela · Gmail | 2026-11-01")

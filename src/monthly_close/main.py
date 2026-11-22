@@ -145,23 +145,34 @@ def due_close_month(now: datetime, timezone: str, last_closed: str | None) -> st
 
 
 class Progress:
-    """One-line terminal bar: how much of the range each folder has been read, by notice date.
+    """One terminal bar for the whole run, never going back.
 
-    A full walk reads newest first, so the bar fills from the end of the range towards its
-    start; an incremental walk reads oldest first and fills from the start. Before a Gmail
-    walk, listing shows how many messages' metadata were checked. It only draws on an
-    interactive terminal and never prints mail content.
+    Each mailbox gets an equal share; within it, each Outlook folder an equal part, and
+    Gmail half for checking its list and half for its notices. Within a part, notice dates
+    tell how much of the range was read (a full walk reads newest first, an incremental
+    one oldest first). It only draws on an interactive terminal and never prints mail content.
     """
 
     WIDTH = 24
 
-    def __init__(self, start: date, end: date, stream=None, oldest_first: bool = False) -> None:
+    def __init__(
+        self, start: date, end: date, stream=None, oldest_first: bool = False, mailboxes: int = 1,
+    ) -> None:
         self.start, self.end = start, end
         self.oldest_first = oldest_first
         self.stream = sys.stderr if stream is None else stream
         self.enabled = bool(getattr(self.stream, "isatty", lambda: False)())
         self.notices = 0
         self.length = 0
+        self.mailboxes = max(mailboxes, 1)
+        self.position = 0  # mailboxes finished
+        self.name = ""
+        self.part = (0.0, 1.0)  # (offset, width) of the current part within the mailbox
+        self.done = 0.0
+
+    def mailbox(self, position: int, name: str) -> None:
+        """Mailbox number position (0-based) starts."""
+        self.position, self.name, self.part = position, name, (0.0, 1.0)
 
     def update(self, folder: tuple[str, ...] | None, day: date, counted: bool = True) -> None:
         if counted:
@@ -170,22 +181,32 @@ class Progress:
             return
         span = max((self.end - self.start).days, 1)
         read = (day - self.start).days if self.oldest_first else (self.end - day).days
-        label = " / ".join(folder or ("?",))[:34]
-        self._draw(
+        self._advance(
             min(max(read / span, 0.0), 1.0),
-            f"{label} | {max(min(day, self.end), self.start).isoformat()} | {self.notices} avisos",
+            f"{self._label(folder)} | {max(min(day, self.end), self.start).isoformat()} | {self.notices} avisos",
         )
 
     def listing(self, label: str, checked: int, total: int) -> None:
         """Progress of the metadata a reader checks before it can visit any notice."""
+        self.part = (0.0, 0.5)
         if self.enabled:
-            self._draw(checked / max(total, 1), f"{label} | Revisando lista: {checked}/{total} mensajes")
+            self._advance(checked / max(total, 1), f"{self._label((label,))} | Revisando lista: {checked}/{total} mensajes")
+        if checked >= total:
+            self.part = (0.5, 0.5)  # the notices come next
 
     def folder(self, folder: tuple[str, ...] | None, position: int, total: int) -> None:
         """A folder starts: shown even when it brings no notice."""
+        self.part = ((position - 1) / max(total, 1), 1 / max(total, 1))
         if self.enabled:
-            label = " / ".join(folder or ("?",))[:34]
-            self._draw((position - 1) / max(total, 1), f"{label} | Carpeta {position}/{total}")
+            self._advance(0.0, f"{self._label(folder)} | Carpeta {position}/{total}")
+
+    def _label(self, folder: tuple[str, ...] | None) -> str:
+        return (f"{self.name} · " if self.name else "") + " / ".join(folder or ("?",))[:34]
+
+    def _advance(self, fraction: float, detail: str) -> None:
+        offset, width = self.part
+        self.done = max(self.done, (self.position + offset + width * fraction) / self.mailboxes)
+        self._draw(self.done, detail)
 
     def _draw(self, done: float, detail: str) -> None:
         filled = round(done * self.WIDTH)
@@ -287,10 +308,12 @@ def scan(
     check_sessions(data_dir, boxes, relogin_minutes)
     model = None if read_only else OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
     mode = ScanMode(read_only, reprocess_empty, incremental)
-    for box in boxes:
+    progress = Progress(start, end, oldest_first=incremental, mailboxes=len(boxes))
+    for position, box in enumerate(boxes):
         if len(boxes) > 1:
             print(f"Buzon {box.name} ({box.provider}, titular {box.owner}) desde {start.isoformat()}.", flush=True)
-        _scan_mailbox(store, data_dir, settings, box, preferences, start, end, mode, model)
+        progress.mailbox(position, box.name if len(boxes) > 1 else "")
+        _scan_mailbox(store, data_dir, settings, box, preferences, start, end, mode, model, progress)
 
 
 @dataclass(frozen=True)
@@ -302,7 +325,7 @@ class ScanMode:
 
 def _scan_mailbox(
     store: Store, data_dir: Path, settings: dict, box: Mailbox, preferences: Preferences,
-    start: date, end: date, mode: ScanMode, model,
+    start: date, end: date, mode: ScanMode, model, progress: Progress,
 ) -> None:
     scope = hashlib.sha256(json.dumps(
         [start.isoformat(), end.isoformat(), settings, preferences.to_dict()]
@@ -312,7 +335,6 @@ def _scan_mailbox(
         sort_keys=True, ensure_ascii=False,
     ).encode()).hexdigest()
     failed_ids: set[str] = set()
-    progress = Progress(start, end, oldest_first=mode.incremental)
     clear_progress = _ClearProgress(progress)
     extraction_log = logging.getLogger("monthly_close.extraction")
     extraction_log.addFilter(clear_progress)

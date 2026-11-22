@@ -110,16 +110,17 @@ abrir el panel.
 - **Reanudar.** Si una ejecución con fechas se interrumpe, repetirla con el mismo
   rango no vuelve a abrir los avisos ya completados. El progreso se guarda como
   huellas, sin asuntos ni cuerpos, y se borra al terminar.
-- **Progreso.** En una terminal interactiva se ve una barra por carpeta en los dos
-  buzones (`[#####......] 36% | dinero / bancolombia | 2026-08-02 | 2 avisos`). El
-  porcentaje es la parte del rango ya leída según la fecha de los avisos: con
-  fechas se lee del más nuevo al más viejo y, sin fechas, del más viejo al más
-  nuevo. En Outlook, al empezar cada carpeta la barra muestra cuál es
-  (`40% | Dinero / Bancolombia | Carpeta 3/5`), aunque no traiga avisos. Antes
-  de abrir avisos, Gmail revisa los datos básicos de cada mensaje (remitente,
-  asunto y fecha), y la barra lo muestra
-  (`25% | Gmail | Revisando lista: 3/12 mensajes`). No aparece en la tarea
-  programada ni al redirigir la salida, y nunca muestra contenido.
+- **Progreso.** En una terminal interactiva se ve una sola barra para todo el
+  recorrido, que nunca retrocede
+  (`[#########...] 37% | santiago · Dinero / Bancolombia | 2026-08-02 | 12 avisos`).
+  Cada buzón ocupa una parte igual. En Outlook esa parte se reparte entre sus
+  carpetas, y cada carpeta se anuncia al empezar aunque no traiga avisos
+  (`Carpeta 3/15`). En Gmail, la mitad es la revisión de los datos básicos de cada
+  mensaje (`Revisando lista: 3/12 mensajes`) y la otra mitad la lectura de los
+  avisos. Dentro de cada parte avanza según la fecha de los avisos: con fechas se
+  lee del más nuevo al más viejo y, sin fechas, del más viejo al más nuevo. No
+  aparece en la tarea programada ni al redirigir la salida, y nunca muestra
+  contenido.
 - **Límite de consultas de Gmail.** Google limita las consultas por minuto de
   cada usuario. Si Gmail responde que se agotó esa cuota, el agente lo dice
   (`Gmail pidio esperar o fallo un momento; se reintenta en 15 s.`) y
