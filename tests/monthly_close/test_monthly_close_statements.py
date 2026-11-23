@@ -269,7 +269,7 @@ def test_loan_instalment_counts_only_as_personal_family_or_nothing(store):
     with pytest.raises(ValueError, match="cuota"):
         store.decide(loan["id"], "investment")
     store.decide(loan["id"], "family")
-    assert store.monthly_totals("santiago")["2026-01"]["family"] == 150000000
+    assert "familiar 1500000.00" in store.summary("2026-01")
     assert store.state()["statement_checks"][0]["balance_minor"] == 15000000000
 
 
@@ -681,8 +681,7 @@ def test_payroll_deducted_instalment_adds_matching_payroll_income(store):
     assert [(t["decision"], t["category"], t["amount_minor"], t["day"]) for t in twins] == [
         ("income", "Nómina", loan["amount_minor"], loan["day"]),
     ]
-    totals = store.monthly_totals("santiago")["2026-02"]
-    assert totals["income"] - totals["net"] == 0  # the deduction no longer counts twice
+    assert "balance 0.00" in store.summary("2026-02")  # the deduction no longer counts twice
     store.decide(loan["id"], "family")  # deciding again does not duplicate it
     assert sum(r["id"].startswith("payroll:") for r in store.state()["transactions"]) == 1
     store.decide(loan["id"], "exclude")
@@ -797,18 +796,38 @@ Saldo Final
 $ 20.000.000 $ 1.000.000 $ 0 $ -99.999 $ 20.900.001
 """
 
+# The real layout: lifetime summary (obligatory, voluntary, returns, bond, total), the
+# period on two lines next to the statement number, and the quarter's labelled figures.
+OBLIGATORY = """Extracto de Pensión Obligatoria
+Mis aportes obligatorios Mis aportes voluntarios Netos Mis rendimientos Mi saldo total ahorrado
+Aportes Obligatorios Aportes Voluntarios
+$ 40.000.000  $ 0  $ 10.000.000  $ 0  $ 50.000.000
+Período del
+extracto
+Julio 01 de 2026
+Septiembre 30 de 2026 PO123456789 Octubre 15 de 2026
+Aportes totales en mi cuenta de ahorro individual $ 40.000.000
+Mis rendimientos totales en mi cuenta de ahorro individual $ 10.000.000
+Aportes obligatorios abonados a mi cuenta de ahorro individual en el trimestre $ 1.500.000
+Mis rendimientos del trimestre $ 500.000
+Mis aportes voluntarios netos del trimestre $ 0
+Comisión de administración de mis aportes voluntarios del trimestre $ 0
+"""
+
 
 def test_protection_attachment_names_and_statement_mails_are_recognised():
     assert st.identify("0A81F6F5012E_PensionVoluntaria_202610.pdf") == ("PROTECCION_VOLUNTARIA", "202610")
     assert st.identify("0A81F716DA_PensionesCesantias_202609.pdf") == ("PROTECCION_CESANTIAS", "202609")
+    assert st.identify("0A81F6F5BA_PensionesObligatorias_202610.pdf") == ("PROTECCION_OBLIGATORIA", "202610")
     assert st.identify("Extracto_1_202601_FIDUCUENTA_0003.pdf") == ("FIDUCUENTA", "202601")
     assert st.identify("PensionVoluntaria_202610.pdf") is None and st.identify("otro.pdf") is None
     assert all(st.STATEMENT_NAME.fullmatch(name) for name in (
         "0A81F6F5012E_PensionVoluntaria_202610.pdf", "Extracto_1_202601_FIDUCUENTA_0003.pdf",
+        "0A81F6F5BA_PensionesObligatorias_202610.pdf",
     ))
     for subject in (
         "Extracto Pensiones Voluntarias Protección S.A.", "Extracto Pensiones Voluntarias Proteccion S.A",
-        "Extracto de Cesantias Protección.",
+        "Extracto de Cesantias Protección.", "Extracto de Pensiones Obligatorias Protección S.A",
     ):
         assert st.is_statement_notice("AFP_Proteccion@proteccion.com", subject)
     assert not st.is_statement_notice("afp_proteccion@proteccion.com", "Recibimos tu aporte")
@@ -845,10 +864,23 @@ def test_severance_statement_reads_its_summary_including_a_negative_valuation():
     ) == (2_000_000_000, 100_000_000, 0, -9_999_900, 2_090_000_100)
 
 
+def test_obligatory_statement_deduces_its_opening_from_the_quarter():
+    statement = st.parse("PROTECCION_OBLIGATORIA", "202610", OBLIGATORY)
+    assert (statement.product, statement.suffix) == ("PROTECCION_OBLIGATORIA", "")
+    assert (statement.period_start, statement.period_end) == (date(2026, 7, 1), date(2026, 9, 30))
+    assert (
+        statement.opening_minor, statement.contributions_minor, statement.withdrawals_minor,
+        statement.returns_minor, statement.balance_minor,
+    ) == (4_800_000_000, 150_000_000, 0, 50_000_000, 5_000_000_000)
+    assert statement.movements == []
+
+
 @pytest.mark.parametrize("product,text,old,new", [
     ("PROTECCION_VOLUNTARIA", VOLUNTARY_CURRENT, "$ 10,320,000\nAportes", "$ 10,320,011\nAportes"),
     ("PROTECCION_VOLUNTARIA", VOLUNTARY_PREVIOUS, "Saldo final\n$ 11,320,000", "Saldo final\n$ 11,321,000"),
     ("PROTECCION_CESANTIAS", SEVERANCE, "$ 20.900.001", "$ 20.900.050"),
+    ("PROTECCION_OBLIGATORIA", OBLIGATORY, "$ 0  $ 50.000.000", "$ 0  $ 50.000.100"),
+    ("PROTECCION_OBLIGATORIA", OBLIGATORY, "individual $ 10.000.000", "individual $ 10.000.001"),
 ])
 def test_protection_figures_that_do_not_add_up_beyond_rounding_are_refused(product, text, old, new):
     assert old in text
@@ -861,6 +893,9 @@ def test_protection_figures_that_do_not_add_up_beyond_rounding_are_refused(produ
     ("PROTECCION_VOLUNTARIA", VOLUNTARY_PREVIOUS, "Rendimiento neto $ 900,000\n"),
     ("PROTECCION_VOLUNTARIA", VOLUNTARY_CURRENT, "Período: 30 de Septiembre 2026 a\n"),
     ("PROTECCION_CESANTIAS", SEVERANCE, "Saldo del periodo comprendido entre: 2026/04/01 a 2026/09/30\n"),
+    ("PROTECCION_OBLIGATORIA", OBLIGATORY, "Mis rendimientos del trimestre $ 500.000\n"),
+    ("PROTECCION_OBLIGATORIA", OBLIGATORY, "Septiembre 30 de 2026 PO123456789 Octubre 15 de 2026\n"),
+    ("PROTECCION_OBLIGATORIA", OBLIGATORY, "$ 40.000.000  $ 0  $ 10.000.000  $ 0  $ 50.000.000\n"),
 ])
 def test_incomplete_protection_statements_are_refused(product, text, missing):
     assert missing in text
@@ -872,18 +907,21 @@ def test_reconcile_stores_protection_figures_without_importing_movements(store, 
     texts = {
         "0A81F6F5_PensionVoluntaria_202610.pdf": VOLUNTARY_CURRENT,
         "0A81F716_PensionesCesantias_202609.pdf": SEVERANCE,
+        "0A81F6BA_PensionesObligatorias_202610.pdf": OBLIGATORY,
         "0A81F6F5_PensionVoluntaria_202512.pdf": VOLUNTARY_PREVIOUS,  # before the start: skipped
     }
     result = run_reconcile(store, tmp_path, preferences, monkeypatch, texts)
-    assert result == {"statements": 2, "matched": 0, "missing": 0, "imported": 0, "balances": 2, "reclassified": 0, "categories_proposed": 0, "duplicates": 0}
+    assert result == {"statements": 3, "matched": 0, "missing": 0, "imported": 0, "balances": 3, "reclassified": 0, "categories_proposed": 0, "duplicates": 0}
     assert store.state()["transactions"] == []
     checks = {check["product"]: check for check in store.state()["statement_checks"]}
     assert checks["PROTECCION_VOLUNTARIA"]["contributions_minor"] == 50_000_000
     assert checks["PROTECCION_VOLUNTARIA"]["returns_minor"] == -18_000_000
     assert checks["PROTECCION_CESANTIAS"]["balance_minor"] == 2_090_000_100
+    obligatory = checks["PROTECCION_OBLIGATORIA"]
+    assert (obligatory["opening_minor"], obligatory["returns_minor"]) == (4_800_000_000, 50_000_000)
     # Repeating it changes nothing.
     run_reconcile(store, tmp_path, preferences, monkeypatch, texts)
-    assert len(store.state()["statement_checks"]) == 2
+    assert len(store.state()["statement_checks"]) == 3
 
 
 def test_a_protection_statement_mail_is_never_sent_to_ollama(preferences):
@@ -973,7 +1011,7 @@ def test_own_card_payment_wording_is_decided_not_counted_only_on_card_statements
     with store.connect() as db:
         audit = db.execute("SELECT target,value FROM audit WHERE action='decision-statement-phrase'").fetchall()
     assert sorted(map(tuple, audit)) == [("stmt:amex", "exclude: ABONO SUCURSAL VIRTUAL"), ("stmt:visa", "exclude: ABONO SUCURSAL VIRTUAL")]
-    assert store.monthly_totals("santiago").get("2026-01", {}).get("personal", 0) == 0
+    assert "COP: personal 0.00;" in store.summary("2026-01")
 
     # A person's later change stands: recording statements again does not decide it back.
     store.decide("stmt:amex", "third_party_payment")
@@ -1050,3 +1088,75 @@ def test_rules_never_decide_a_statement_line_marked_as_possible_duplicate(store)
         db.execute("UPDATE transactions SET note=? WHERE id='stmt:dup'", (DUPLICATE_NOTE + " de prueba",))
     store.add_rule("TIENDA DOBLE", "Compras", "personal")
     assert store.state()["transactions"][0]["decision"] is None
+
+
+def test_a_fund_addition_never_matches_a_withdrawal_of_the_same_value_and_day():
+    """Both happened on one day; matching only by value left two withdrawals and no addition."""
+    day = date(2026, 5, 26)
+    fund = st.Statement("FIDUCUENTA", "3del", date(2026, 5, 1), date(2026, 5, 31), [
+        st.Movement(day, "ADICION", 100, "COP", "investment"),
+        st.Movement(day, "RETIRO TRASLA", -100, "COP", "investment_withdrawal"),
+    ])
+    base = {"owner": "santiago", "day": "2026-05-26", "amount_minor": 100, "currency": "COP", "kind": "unknown"}
+    notice = {**base, "id": "out", "merchant": "Retiraste $1.00", "decision": "investment_withdrawal"}
+    candidates = st.pair_internal([fund])
+    matched, missing = st.match_existing(candidates, [notice])
+    assert [(c.movement.description, row) for c, row in matched] == [("RETIRO TRASLA", "out")]
+    assert [c.movement.description for c in missing] == ["ADICION"]
+    added = {**base, "id": "in", "merchant": "Fondo", "kind": "investment", "decision": "investment"}
+    matched, missing = st.match_existing(candidates, [added, notice])
+    assert {c.movement.description: row for c, row in matched} == {"ADICION": "in", "RETIRO TRASLA": "out"}
+    assert missing == []
+    # The model called this withdrawal an investment; the person's decision says what it is.
+    mistyped = {**notice, "kind": "investment"}
+    matched, _missing = st.match_existing(candidates, [mistyped])
+    assert [(c.movement.description, row) for c, row in matched] == [("RETIRO TRASLA", "out")]
+
+
+def test_equal_lines_of_one_statement_are_different_movements_but_not_across_statements():
+    def statement(end, *movements):
+        return st.Statement("CTA_AHORROS", "0001", date(2026, 5, 1), end, list(movements))
+
+    top_up = st.Movement(date(2026, 5, 27), "RECARGA", 100, "COP", "purchase")
+    first = statement(date(2026, 5, 31), top_up, top_up)
+    candidates = st.pair_internal([first, statement(date(2026, 6, 30), top_up)])
+    assert len(candidates) == 2 and len({st.line_id(c) for c in candidates}) == 2
+    # The first one keeps the id it had before equal lines were told apart.
+    assert st.line_id(candidates[0]) == st.line_id(st.Candidate(first, top_up))
+    # Each takes its own notice; with one notice, the other is imported.
+    row = {"id": "a", "owner": "santiago", "day": "2026-05-27", "amount_minor": 100, "currency": "COP",
+           "kind": "purchase", "merchant": "RECARGA", "decision": "personal"}
+    matched, missing = st.match_existing(candidates, [row])
+    assert (len(matched), len(missing)) == (1, 1)
+    # Running it again finds both and imports nothing.
+    imported = {**row, "id": st.line_id(missing[0])}
+    assert st.match_existing(candidates, [row, imported])[1] == []
+    # An equal line of the next day keeps its own row.
+    next_day = st.Candidate(first, st.Movement(date(2026, 5, 28), "RECARGA", 100, "COP", "purchase"))
+    later = {**row, "id": st.line_id(next_day), "day": "2026-05-28"}
+    matched, missing = st.match_existing([*candidates, next_day], [row, later])
+    assert (next_day, later["id"]) in [(c, i) for c, i in matched] and missing == [candidates[1]]
+
+
+def test_money_entering_savings_never_matches_money_leaving_it():
+    day = date(2026, 9, 23)
+    savings = st.Statement("CTA_AHORROS", "0001", date(2026, 9, 1), date(2026, 9, 30), [
+        st.Movement(day, "CONSIGNACION", -100, "COP", "income"),
+        st.Movement(day, "TRANSF A ALGUIEN", 100, "COP", "transfer"),
+        st.Movement(day, "TRASLADO", 300, "COP", "unknown"),
+    ])
+    base = {"owner": "santiago", "day": "2026-09-23", "currency": "COP", "merchant": "X"}
+    spent = {**base, "id": "spent", "amount_minor": 100, "kind": "transfer", "decision": "personal"}
+    received = {**base, "id": "received", "amount_minor": 100, "kind": "income", "decision": None}
+    unsure = {**base, "id": "unsure", "amount_minor": 300, "kind": "unknown", "decision": None}
+    candidates = [c for c in (st.Candidate(savings, m) for m in savings.movements)]
+    matched, missing = st.match_existing(candidates, [spent, received, unsure])
+    assert {c.movement.description: row for c, row in matched} == {
+        "CONSIGNACION": "received", "TRANSF A ALGUIEN": "spent", "TRASLADO": "unsure",
+    }
+    assert missing == []
+    pending = {**spent, "id": "pending", "decision": None}
+    matched, missing = st.match_existing(candidates, [pending, received, unsure])
+    assert dict((c.movement.description, row) for c, row in matched)["CONSIGNACION"] == "received" and missing == []
+    matched, missing = st.match_existing(candidates, [spent, unsure])
+    assert [c.movement.description for c in missing] == ["CONSIGNACION"]

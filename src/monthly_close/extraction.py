@@ -106,13 +106,15 @@ class EvidenceError(ValueError):
 def extract(
     mail: Mail, preferences: Preferences, model: JsonModel, own_accounts: list[str] | None = None,
     known_credits: list[dict] | None = None, card_accounts: dict[str, str] | None = None,
+    other_cards: frozenset[str] = frozenset(), own_cards: frozenset[str] = frozenset(),
 ) -> list[dict]:
     """Extract evidence-backed proposals; no model proposal is a human approval.
 
     own_accounts are the last four digits of the person's own accounts (for example a
     Nequi wallet), so the model can recognise a transfer between them. card_accounts maps
     the last four digits of known credit cards to their account: when the notice names
-    exactly one of them, that is the account, whatever the model proposed.
+    exactly one of them, that is the account, whatever the model proposed. own_cards and
+    other_cards are the cards the statements of the person and of the other member show.
     """
     if mail.sender.lower() not in preferences.approved_senders:
         raise ValueError("Remitente no autorizado. No se envia contenido a Ollama.")
@@ -121,9 +123,11 @@ def extract(
         return []
     received = received_local(mail.received, preferences.timezone)
     source = _source(mail)
-    fixed = _fixed_events(mail, preferences, source)
+    fixed = _fixed_events(mail, preferences, source, other_cards, own_cards)
     if fixed:
         return _notice_time(_mark_own_transfers(assign_destinations(fixed, source), own_accounts), received)
+    if INVESBOT_NO_MOVEMENT.search(source):
+        return []  # the money is in its own contribution notice and the statement
     context = {
         "accounts": preferences.accounts,
         "own_account_suffixes": sorted(own_accounts or []),
@@ -208,7 +212,7 @@ INCOME_CUE = re.compile(r"\b(?:recib\w+|consign\w+|nomina|te (?:pagaron|transfir
 # The bank states money left the account, with its amount. A card debt payment is excluded:
 # the model is told to drop those, and the fixed-sentence reader records the dated ones.
 MONEY_LEFT = re.compile(
-    r"\b(?:transferiste|compraste|retiraste|enviaste|pagaste(?![^.\n]{0,60}tarjeta\s+de\s+cr))\b"
+    r"\b(?:le\s+informa\s+recarga\b[^.\n$]{0,60}|transferiste|compraste|retiraste|enviaste|pagaste(?![^.\n]{0,60}tarjeta\s+de\s+cr))\b"
     r"[^.\n]{0,25}?(?:[$\u20ac\u00a3]|\b(?:COP|USD|EUR))\s*\d",
     re.IGNORECASE,
 )
@@ -232,14 +236,29 @@ CARD_PAYMENT = re.compile(
 CARD_PAYMENT_CATEGORY = "Pago de tarjeta"
 
 
-def _card_payments(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+def _card_payments(
+    mail: Mail, preferences: Preferences, source: str, other_cards: frozenset[str] = frozenset(),
+    own_cards: frozenset[str] = frozenset(),
+) -> list[dict]:
     """Card debt payments, read from the bank's fixed sentence without the model.
 
     Amount, card and date are copied from the notice. They are recorded as excluded
-    non-expenses: the purchases made with the card are what counts as spending.
+    non-expenses: the purchases made with the card are what counts as spending. Paying a
+    card of the other member, or one in no statement, is money given away: a pending
+    transfer. With no card statements of the person yet, an unknown card is taken as theirs.
     """
     proposals: dict[str, dict] = {}
     for match in CARD_PAYMENT.finditer(source):
+        card = match["card"][-4:]
+        if card in other_cards or (own_cards and card not in own_cards):
+            whose = "del otro titular" if card in other_cards else "que no esta en tus extractos"
+            identifier, event = _fixed_event(
+                mail, preferences, source, match["card"], match["amount"], _notice_day(match["day"]),
+                "transfer", preferences.categories[-1],
+                f"Pago a una tarjeta {whose}, leido del aviso sin Ollama. Confirma si es gasto tuyo.",
+            )
+            proposals[identifier] = event
+            continue
         identifier, event = _fixed_event(
             mail, preferences, source, match["card"], match["amount"], _notice_day(match["day"]),
             "card_payment", CARD_PAYMENT_CATEGORY,
@@ -326,6 +345,7 @@ def _fixed_event(mail: Mail, preferences: Preferences, source: str, merchant: st
     }
 
 
+SAVINGS_ACCOUNT = "Cuenta de ahorros"
 AMOUNT_TEXT = r"(?P<amount>\$\s?\d[\d.,]*\d|\$\s?\d)"
 
 
@@ -380,6 +400,114 @@ def _key_transfers(mail: Mail, preferences: Preferences, source: str) -> list[di
         )
         for match in KEY_TRANSFER.finditer(source)
     )
+    return list(proposals.values())
+
+
+QR_PAYMENT = _sentence(
+    r"pagaste\s+" + AMOUNT_TEXT + r" por c[oó]digo QR desde tu cuenta \*?\d{4} a la llave (?P<key>@[\w.\-]+|\d+)"
+    r" el (?P<day>\d{2}/\d{2}/\d{2,4})(?: a las (?P<time>\d{2}:\d{2}))?"
+)
+
+
+def _qr_payments(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """A QR payment: "pagaste $X por codigo QR desde tu cuenta *N a la llave K el D".
+
+    The model reads "pagaste ... desde tu cuenta" as a card payment and drops it. The
+    notice names nobody, so the merchant is the key, as in Manuela's exported records.
+    """
+    proposals = dict(
+        _fixed_event(
+            mail, preferences, source, f"Pago QR a llave {match['key']}", match["amount"],
+            _notice_day(match["day"]), "transfer", preferences.categories[-1],
+            f"Pago por QR a la llave {match['key']}, leido del aviso sin Ollama. "
+            "Confirma si es gasto personal, familiar o no cuenta.",
+            time=match["time"],
+        )
+        for match in QR_PAYMENT.finditer(source)
+    )
+    return list(proposals.values())
+
+
+PRODUCT_PAYMENT = _sentence(
+    r"pagaste\s+" + AMOUNT_TEXT + r" a (?P<name>[^$]{2,80}?) desde tu producto \*?\d{4}"
+    r" el (?P<day>\d{2}/\d{2}/\d{4})(?: (?P<time>\d{2}:\d{2})(?::\d{2})?)?"
+)
+
+
+def _product_payments(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """A payment to a named business: "pagaste $X a NOMBRE desde tu producto N el D H".
+
+    The model drops it like a card payment. It stays a pending purchase of that business.
+    The mail may wrap the business name onto the next line.
+    """
+    proposals = {}
+    for match in PRODUCT_PAYMENT.finditer(source):
+        name = " ".join(match["name"].split())
+        identifier, event = _fixed_event(
+            mail, preferences, source, name, match["amount"],
+            _notice_day(match["day"]), "purchase", preferences.categories[-1],
+            f"Pago a {name}, leido del aviso sin Ollama. Confirma su categoria.",
+            time=match["time"],
+        )
+        proposals[identifier] = event
+    return list(proposals.values())
+
+
+CARD_TOP_UP = _sentence(
+    r"Bancolombia le informa (?P<name>Recarga de Tarjeta Civica) por " + AMOUNT_TEXT
+    + r" desde cta \*\d{4}\. (?P<day>\d{2}/\d{2}/\d{4}) (?P<time>\d{1,2}:\d{2})"
+)
+
+
+def _card_top_ups(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """Topping up the prepaid metro pass: a pending purchase paid from the savings account.
+
+    The model names the bank as the merchant, or returns nothing at all.
+    """
+    proposals = {}
+    for match in CARD_TOP_UP.finditer(source):
+        identifier, event = _fixed_event(
+            mail, preferences, source, " ".join(match["name"].split()), match["amount"],
+            _notice_day(match["day"]), "purchase", preferences.categories[-1],
+            "Recarga leida del aviso, sin Ollama. Confirma su categoria.", time=match["time"].zfill(5),
+        )
+        if SAVINGS_ACCOUNT in preferences.accounts:
+            event["account"] = SAVINGS_ACCOUNT
+        proposals[identifier] = event
+    return list(proposals.values())
+
+
+# A contribution to an Invesbot plan, in the wordings the bank used over the year.
+INVESBOT_CONTRIBUTION = _sentence(
+    r"(?:la inversi[oó]n que programaste por|adicionaste|transferiste(?: \$)?) (?:COP )?" + AMOUNT_TEXT
+    + r" a tu (?:plan (?P<plan>[^\n$]{1,60}?) en Inve(?:st|s)bot\b|inversi[oó]n (?P<fund>[^\n$]{1,60}?)\.(?=\s|$))"
+)
+# Notices about a contribution that move no money of their own: the bank confirming or
+# repeating one already announced (one debit in the statement), a coming debit, a reminder.
+INVESBOT_NO_MOVEMENT = _sentence(
+    r"(?:ya ingresamos los (?:COP )?\$[^\n]{1,40}? que transferiste a tu inversi[oó]n"
+    r"|retiramos (?:COP )?\$[^\n]{1,40}? y los agregamos a tu inversi[oó]n"
+    r"|tomaremos de tu cuenta de ahorros los (?:COP )?\$[^\n]{1,40}? que elegiste sumar"
+    r"|aseg[uú]rate de tener \$[^\n]{1,40}? en tu producto origen)"
+)
+
+
+def _invesbot_contributions(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """A contribution to an Invesbot plan: "transferiste/adicionaste $X a tu plan P en Invesbot".
+
+    The model took some for money received and named the plan differently each time. The
+    notice states no date, so it is the day it arrived. The merchant is "Invesbot P", so
+    each plan keeps one destination and its rule whatever the wording.
+    """
+    day = received_local(mail.received, preferences.timezone).date().isoformat()
+    proposals = {}
+    for match in INVESBOT_CONTRIBUTION.finditer(source):
+        merchant = "Invesbot " + " ".join((match["plan"] or match["fund"]).split())
+        identifier, event = _fixed_event(
+            mail, preferences, source, merchant, match["amount"], day, "investment", "Inversiones",
+            f"Aporte a {merchant}, leido del aviso sin Ollama. Confirma que es inversion.",
+        )
+        proposals[identifier] = event
     return list(proposals.values())
 
 
@@ -461,11 +589,17 @@ def _source(mail: Mail) -> str:
     return mail.subject + "\n" + clean_text(mail.body, 40000)
 
 
-def _fixed_events(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+def _fixed_events(
+    mail: Mail, preferences: Preferences, source: str, other_cards: frozenset[str] = frozenset(),
+    own_cards: frozenset[str] = frozenset(),
+) -> list[dict]:
     """Movements read from the bank's fixed sentences, without the model."""
     return (
-        _card_payments(mail, preferences, source) or _account_transfers(mail, preferences, source)
+        _card_payments(mail, preferences, source, other_cards, own_cards)
+        or _account_transfers(mail, preferences, source)
         or _card_abonos(mail, preferences, source) or _key_transfers(mail, preferences, source)
+        or _qr_payments(mail, preferences, source) or _product_payments(mail, preferences, source)
+        or _card_top_ups(mail, preferences, source) or _invesbot_contributions(mail, preferences, source)
         or _received_transfers(mail, preferences, source)
     )
 
@@ -477,6 +611,31 @@ def _named_card(source: str, card_accounts: dict[str, str]) -> str | None:
         if re.fullmatch(r"\d{4}", suffix) and re.search(rf"(?<!\d){suffix}(?!\d)", source)
     }
     return named.pop() if len(named) == 1 else None
+
+
+CARD_PURCHASE = re.compile(
+    r"compraste\s+(?P<amount>(?:COP|USD|EUR)?\s*\$?\s*\d[\d.,]*\d)\s+en\s+(?P<merchant>[^$]{2,80}?)"
+    r"(?:\s+con\s+tu\s+T\.\s?(?:Cred|Deb)\w*\s+\*\d{4}"
+    r"|,\s+el\s+\d{2}/\d{2}/\d{4}[^$]{0,40}?esta\s+compra\s+est[aá]\s+asociada\s+a\s+T\.)",
+    re.IGNORECASE,
+)
+
+
+def _card_purchase(source: str, amount: str) -> str | None:
+    """Merchant of the notice's only card purchase sentence, when it states this same amount.
+
+    The model sometimes misspells the merchant or takes a purchase for income or an
+    investment because of its name; the bank's fixed sentence settles both.
+    """
+    found = list(CARD_PURCHASE.finditer(source))
+    if len(found) != 1:
+        return None
+    try:
+        if amount_minor(" ".join(found[0]["amount"].split())) != amount_minor(amount):
+            return None
+    except ValueError:
+        return None
+    return clean_text(" ".join(found[0]["merchant"].split()), 150)
 
 
 def _proposals(
@@ -503,9 +662,16 @@ def _proposals(
             if len(spaced) != 1:
                 raise EvidenceError("amount_text")
             amount = clean_text(spaced.pop(), 80)
-        no_merchant = last_attempt and event.get("kind") in NO_MERCHANT_KINDS
+        kind = event.get("kind")
+        if not isinstance(kind, str) or kind not in KINDS or type(event.get("savings")) is not bool:
+            raise ValueError("Tipo de movimiento invalido.")
+        bought = _card_purchase(source, amount) if len(events) == 1 else None
+        if bought and kind not in {"rejected", "promotion", "verification"}:
+            kind = "purchase"
+        no_merchant = last_attempt and kind in NO_MERCHANT_KINDS
         try:
-            merchant = _literal_merchant(merchant, source, no_merchant)
+            # The sentence names the merchant; the model may copy the bank's name instead.
+            merchant = bought or _literal_merchant(merchant, source, no_merchant)
         except EvidenceError:
             # e.g. a transfer to an account number: the notice names nobody. Keep what
             # the notice says right after the amount rather than the model's wording.
@@ -516,16 +682,15 @@ def _proposals(
         account = clean_text(event.get("account"), 150)
         if account not in preferences.accounts + preferences.excluded_accounts + ["Desconocida"]:
             raise ValueError("Ollama propuso una cuenta no configurada.")
-        if card_account and event.get("kind") != "income":
+        if card_account and kind != "income":
             # The card's own digits in the notice decide; the model often names another card.
             account = card_account
         currency = clean_text(event.get("currency"), 3).upper()
         if currency != notice_currency(source, preferences.currency):
             raise ValueError("Moneda sin evidencia en el aviso: requiere revision manual.")
-        kind = event.get("kind")
-        if not isinstance(kind, str) or kind not in KINDS or type(event.get("savings")) is not bool:
-            raise ValueError("Tipo de movimiento invalido.")
         category = clean_text(event.get("category"), 150)
+        if kind != event["kind"] and category not in preferences.categories:
+            category = preferences.categories[-1]  # it belonged to the kind the model proposed
         if kind == "income" and not INCOME_CUE.search(_plain(source)):
             # The notice never says money was received: a person decides what it is.
             kind = "unknown"

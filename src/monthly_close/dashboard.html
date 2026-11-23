@@ -590,6 +590,10 @@
             <div id="year-categories" class="rank-list"></div>
           </article>
           <article class="card">
+            <div class="card-header"><div><h3>Comercios frecuentes</h3><p>Ordenados por importe decidido en el año</p></div></div>
+            <div id="year-merchant-ranking" class="rank-list"></div>
+          </article>
+          <article class="card">
             <div class="card-header"><div><h3>Totales mensuales por categoría</h3><p>Cada columna apila las categorías decididas, de mayor a menor gasto del año.</p></div></div>
             <div id="year-chart" class="chart-wrap"></div>
             <div id="year-category-legend" class="legend-inline"></div>
@@ -1562,7 +1566,7 @@
         renderCumulative(inMonth, monthDate);
         renderWeekdays(decisions);
         renderRanking("#account-ranking", decisions, tx => tx.account, "Sin cuenta");
-        renderRanking("#merchant-ranking", decisions, tx => typeof tx.merchant === "string" && tx.merchant.trim() ? merchantName(tx.merchant.trim()) : tx.merchant, "Sin comercio");
+        renderRanking("#merchant-ranking", decisions, merchantKey, "Sin comercio");
         renderCategoryDetails(inMonth);
         renderStatements();
       }
@@ -1570,9 +1574,10 @@
       const productNames = {
         CTA_AHORROS: "Cuenta de ahorros", TARJETA_MASTERCARD: "Mastercard", TARJETA_AMEX: "Amex",
         TARJETA_VISA: "Visa", FIDUCUENTA: "Fiducuenta", CREDITO: "Crédito", HIPOTECARIO: "Hipotecario",
-        PROTECCION_VOLUNTARIA: "Pensión voluntaria Protección", PROTECCION_CESANTIAS: "Cesantías Protección"
+        PROTECCION_VOLUNTARIA: "Pensión voluntaria Protección", PROTECCION_CESANTIAS: "Cesantías Protección",
+        PROTECCION_OBLIGATORIA: "Pensión obligatoria Protección"
       };
-      const investmentProducts = ["FIDUCUENTA", "PROTECCION_VOLUNTARIA", "PROTECCION_CESANTIAS"];
+      const investmentProducts = ["FIDUCUENTA", "PROTECCION_VOLUNTARIA", "PROTECCION_CESANTIAS", "PROTECCION_OBLIGATORIA"];
       // Protección statements carry the period figures instead of movements to reconcile.
       function investmentFigures(check) {
         const figure = (label, value) => Number.isSafeInteger(value) ? `${label} ${formatMoney(value, "COP")}` : "";
@@ -1901,6 +1906,7 @@
         return row;
       }
 
+      const merchantKey = tx => typeof tx.merchant === "string" && tx.merchant.trim() ? merchantName(tx.merchant.trim()) : tx.merchant;
       function renderRanking(selector, items, keyOf, missingLabel, filter = counted) {
         const host = $(selector);
         host.replaceChildren();
@@ -2159,6 +2165,7 @@
         $("#year-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
         fitTiles($("#year-metrics"));
 
+        renderRanking("#year-merchant-ranking", items, merchantKey, "Sin comercio");
         const categoryHost = $("#year-categories");
         categoryHost.replaceChildren();
         const ranked = Array.from(categoryTotals).filter(([, total]) => total > 0).sort((a, b) => b[1] - a[1]);
@@ -2812,6 +2819,31 @@
         return note;
       }
       const decidedValues = new Set(["income", "personal", "family", "investment", "investment_withdrawal", "cash_withdrawal", "exclude", "third_party_payment"]);
+      // Decisions that change a total: a copy would add, or a third-party payment subtract, twice.
+      const countingDecisions = new Set(["personal", "family", "income", "investment", "investment_withdrawal", "cash_withdrawal", "third_party_payment"]);
+      const isPossibleDuplicate = tx => typeof tx.note === "string" && tx.note.startsWith("Posible duplicado");
+      // Movements that may be the same money as tx and count: same member, day, amount and
+      // currency, one of the two marked as a possible duplicate. deciding rows will count too.
+      function countedTwins(tx, deciding) {
+        const ids = new Set(deciding.map(row => row.id));
+        return safeArray(state.data && state.data.transactions).filter(other => other && other.id !== tx.id
+          && other.owner === tx.owner && other.day === tx.day && other.amount_minor === tx.amount_minor
+          && (other.kind === "card_payment") === (tx.kind === "card_payment")
+          && txCurrency(other) === txCurrency(tx) && (isPossibleDuplicate(tx) || isPossibleDuplicate(other))
+          && (countingDecisions.has(other.decision) || ids.has(other.id)));
+      }
+      // Asks before a decision would count the same money twice; true means save.
+      function confirmNoDoubleCount(rows, decision, label) {
+        if (!countingDecisions.has(decision)) return true;
+        const twins = rows.flatMap(tx => countedTwins(tx, rows));
+        if (!twins.length) return true;
+        const twin = twins[0];
+        const more = twins.length > 1 ? ` (y ${twins.length - 1} más)` : "";
+        return window.confirm(
+          `Posible duplicado: ya cuenta un movimiento del ${twin.day} por ${formatMoney(twin.amount_minor, txCurrency(twin))}${more}. `
+          + `Si es el mismo dinero, se contaría dos veces; marca uno de los dos como «No cuenta». ¿Guardar «${label}» de todos modos?`
+        );
+      }
       const counterpartKinds = new Set(["transfer", "own_transfer", "income", "unknown", "card_payment", "pse"]);
 
       // Movements to the same destination of the same member: pending oldest first, history newest first.
@@ -2878,10 +2910,11 @@
         const button = el("button", "button small", "Entre Santiago y Manuela");
         button.type = "button";
         button.setAttribute("aria-pressed", String(marked));
-        button.title = "No cuenta en Hogar; en la vista de cada titular conserva su decisión. Vale también para pagos futuros a este destino.";
+        button.title = "No cuenta en Hogar, pero no decide el movimiento: elige también una decisión. Marca todo el destino y vale también para pagos futuros a este destino.";
         button.addEventListener("click", () => postJson(
           "/api/between-owners", { owner: entry.owner, group: entry.group, value: !marked, remember: true },
-          marked ? "Destino desmarcado: vuelve a contar en Hogar." : "Destino marcado entre titulares: no cuenta en Hogar."
+          (marked ? "Destino desmarcado: vuelve a contar en Hogar." : "Destino marcado entre titulares: no cuenta en Hogar.")
+          + (entry.rows.some(tx => tx.decision == null) ? " La marca no lo decide: elige también una decisión." : "")
         ));
         return button;
       }
@@ -2998,6 +3031,7 @@
           button.addEventListener("click", () => {
             // Changing past decisions rewrites many movements at once, so ask first.
             if (isPrevious && !window.confirm(`¿Cambiar a «${label}» los ${entry.rows.length} movimientos de «${groupTitle(entry)}»?`)) return;
+            if (!confirmNoDoubleCount(entry.rows, decision, label)) return;
             const payload = {
               owner: entry.owner, group: entry.group, decision,
               scope: isPrevious ? "all" : "pending", remember: remember.checked
@@ -3284,6 +3318,7 @@
           button.dataset.decision = decision;
           button.setAttribute("aria-pressed", String(tx.decision === decision || (tx.decision === "cash_withdrawal" && decision === "personal")));
           button.addEventListener("click", async () => {
+            if (!confirmNoDoubleCount([tx], decision, label)) return;
             const payload = { id: tx.id, decision, category: categorySelect.value };
             if (currencySelect) {
               payload.currency = currencySelect.value;

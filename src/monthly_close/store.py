@@ -12,6 +12,7 @@ from typing import Iterator
 
 from shared.local_panel import remote_device
 from monthly_close.destinations import QR_NOT_OWN_REASON
+from monthly_close.statements import TWIN_DAYS, names_merchant
 from monthly_close.domain import (
     COUNTERPART_KINDS, DECISIONS, HOUSEHOLD, INCOME_CATEGORIES, INCOME_KINDS, LOAN_DECISIONS, NON_EXPENSES,
     OWNERS, Preferences, clean_text, owner_id,
@@ -106,12 +107,16 @@ SPECIAL_CATEGORIES = {
 }
 
 
-# A mailbox movement that may repeat one the same member already brought by file import.
-# It stays pending, and no rule decides it: a person compares both.
 # A corrected payment of a credit register is looked for this many days around the old one,
 # less than a fortnight so it never reaches the next instalment.
 CORRECTION_DAYS = 10
+# Movements brought once from a member's exported files, before her mailbox was read.
+# A notice matching exactly one of them completes it; matching several, it stays pending
+# with this note and no rule decides it: a person compares them.
+FILE_IMPORT_PREFIX = "{owner}-import:"
 DUPLICATE_NOTE = "Posible duplicado"
+# Copies of the database kept next to it, newest first (schema changes and manual changes).
+BACKUPS_KEPT = 3
 NOT_DUPLICATE = f"(note IS NULL OR note NOT LIKE '{DUPLICATE_NOTE}%')"
 
 # Movements of a notice that a reprocessing run must leave alone: everything except
@@ -134,9 +139,12 @@ class FixedStatementLine:
     reason: str
 
 
+CARD_ABONO_LINE = r"ABONO SUCURSAL VIRTUAL"
+# Any plausible rate: it only keeps an unrelated payment of the same day from being taken.
+PESOS_PER_DOLLAR = (Decimal(2000), Decimal(6000))
 FIXED_STATEMENT_LINES = (
     FixedStatementLine(
-        r"ABONO SUCURSAL VIRTUAL", "Tarjeta de cr%", "card_payment", "exclude", None,
+        CARD_ABONO_LINE, "Tarjeta de cr%", "card_payment", "exclude", None,
         "en el extracto de la tarjeta es un pago propio desde la cuenta de ahorros: no cuenta.",
     ),
     FixedStatementLine(
@@ -172,6 +180,10 @@ def merchant_rule_for(row: sqlite3.Row | dict, rules: list[dict]) -> dict | None
         and (rule["decision"] == "income") == (row["kind"] == "income")
     ]
     return max(matches, key=lambda item: len(item["pattern"])) if matches else None
+
+
+# The payment of a card as its notice names it (see extraction.CARD_PAYMENT).
+OTHER_CARD = re.compile(r"tarjeta\s+de\s+cr[eé]dito\s+\*(\d{4})", re.IGNORECASE)
 
 
 def counterpart_owner(row: sqlite3.Row | dict, accounts: dict[str, str]) -> str | None:
@@ -231,6 +243,17 @@ class Store:
             if backup is not None:
                 self._audit(db, "migrate-household", self.path.name, backup.name)
             self._reclassify_qr_own_transfers(db)
+        self._prune_backups()
+
+    def _prune_backups(self) -> None:
+        """Keep only the newest copies of the database: they hold real financial records."""
+        name = re.compile(re.escape(self.path.name) + r"\.backup-\d{8}T\d{12}Z")
+        copies = sorted(path for path in self.path.parent.glob(self.path.name + ".backup-*") if name.fullmatch(path.name))
+        for path in copies[:-BACKUPS_KEPT]:
+            try:
+                path.unlink()
+            except PermissionError:
+                continue  # open elsewhere; the next start removes it
 
     def _reclassify_qr_own_transfers(self, db: sqlite3.Connection) -> int:
         """Turn QR payments the model called own transfers back into transfers.
@@ -417,36 +440,57 @@ class Store:
                 if row["folder"] not in keep:
                     db.execute("DELETE FROM mailbox_sync WHERE mailbox=? AND folder=?", (mailbox, row["folder"]))
 
-    def last_import_day(self, owner: str) -> str | None:
-        """Last day covered by the member's file import (import-manuela), if any."""
-        owner = owner_id(owner)
-        with self.connect() as db:
-            row = db.execute(
-                "SELECT max(day) AS day FROM transactions WHERE owner=? AND message_id LIKE ?",
-                (owner, f"{owner}-import:%"),
-            ).fetchone()
-        return row["day"]
+    @staticmethod
+    def _file_twins(db: sqlite3.Connection, owner: str, event: dict) -> list[sqlite3.Row]:
+        """File-imported movements of that member with the same day, amount and currency."""
+        return db.execute(
+            """SELECT id, kind, time FROM transactions WHERE owner=? AND day=? AND amount_minor=?
+            AND currency=? AND message_id LIKE ? ORDER BY id""",
+            (owner, event["day"], event["amount_minor"], event["currency"],
+             FILE_IMPORT_PREFIX.format(owner=owner) + "%"),
+        ).fetchall()
+
+    @classmethod
+    def _statement_twins(cls, db: sqlite3.Connection, owner: str, event: dict) -> list[str]:
+        """Movements a statement brought before this notice: same value, kind and merchant.
+
+        A line already joined to a notice carries that notice's id and is left out. Loan
+        instalments stay with their statement: the credit registers look them up by it.
+        """
+        rows = db.execute(
+            """SELECT id, kind, merchant FROM transactions WHERE owner=? AND amount_minor=? AND currency=?
+            AND id LIKE 'stmt:%' AND message_id LIKE 'statement:%' AND kind<>'loan'
+            AND abs(julianday(day)-julianday(?))<=? ORDER BY id""",
+            (owner, event["amount_minor"], event["currency"], event["day"], TWIN_DAYS),
+        ).fetchall()
+        return [
+            row["id"] for row in rows
+            if cls._same_flow(row["kind"], event["kind"]) and names_merchant(row["merchant"], event["merchant"])
+        ]
 
     @staticmethod
-    def _mark_possible_duplicates(db: sqlite3.Connection, owner: str, events: list[dict]) -> list[dict]:
-        """Leave pending, with a note, movements matching a file-imported one of that member."""
-        marked = []
-        for event in events:
-            twin = db.execute(
-                """SELECT id FROM transactions WHERE owner=? AND day=? AND amount_minor=?
-                AND currency=? AND message_id LIKE ? LIMIT 1""",
-                (owner, event["day"], event["amount_minor"], event["currency"], f"{owner}-import:%"),
-            ).fetchone()
-            if twin is None:
-                marked.append(event)
-                continue
-            marked.append({
-                **event, "decision": None,
-                "note": f"{DUPLICATE_NOTE} del movimiento importado del {event['day']} con el mismo valor: "
-                        "si es el mismo dinero, elige No cuenta",
-            })
-            Store._audit(db, "mailbox-possible-duplicate", event["id"], twin["id"])
-        return marked
+    def _same_minute(first: str | None, second: str | None) -> bool:
+        """Both hours are known and at most one minute apart."""
+        if not first or not second:
+            return False
+        gap = datetime.strptime(first, "%H:%M") - datetime.strptime(second, "%H:%M")
+        return abs(gap.total_seconds()) <= 60
+
+    @staticmethod
+    def _same_flow(file_kind: str, notice_kind: str) -> bool:
+        """Card payments, income and the rest never stand for each other; unknown may be any."""
+        def flow(kind: str) -> str:
+            return kind if kind in {"card_payment", "income"} else "out"
+        return "unknown" in (file_kind, notice_kind) or flow(file_kind) == flow(notice_kind)
+
+    @staticmethod
+    def _complete_from_notice(db: sqlite3.Connection, twin: str, message_id: str, event: dict) -> None:
+        """The notice becomes the source of a file-imported movement; her decisions stay."""
+        db.execute(
+            "UPDATE transactions SET message_id=?, merchant=?, account=?, time=? WHERE id=?",
+            (message_id, event["merchant"], event["account"], event.get("time"), twin),
+        )
+        Store._audit(db, "mailbox-complete-file-import", twin, message_id)
 
     def import_message(
         self, message_id: str, events: list[dict], reprocess: bool = False, owner: str = "santiago",
@@ -458,12 +502,53 @@ class Store:
                 not reprocess or db.execute(KEPT, (message_id,)).fetchone()
             ):
                 return
+            # A file or statement movement this notice completed keeps its own id and stays.
             replaced = db.execute(
-                "DELETE FROM transactions WHERE message_id=?", (message_id,),
+                "DELETE FROM transactions WHERE message_id=? AND id NOT LIKE ? AND id NOT LIKE 'stmt:%'",
+                (message_id, f"{owner}:%"),
             ).rowcount
             if replaced:
                 self._audit(db, "reprocess-replace-card-payments", message_id, str(replaced))
-            for event in self._mark_possible_duplicates(db, owner, events):
+            imported = []
+            for event in events:
+                twins = self._file_twins(db, owner, event)
+                same = [twin["id"] for twin in twins if self._same_flow(twin["kind"], event["kind"])]
+                if len(same) > 1:
+                    same = [
+                        twin["id"] for twin in twins
+                        if twin["id"] in same and self._same_minute(twin["time"], event.get("time"))
+                    ]
+                if len(same) == 1:
+                    self._complete_from_notice(db, same[0], message_id, event)
+                    imported.append(same[0])
+                    continue
+                if twins:
+                    event = {
+                        **event, "decision": None,
+                        "note": f"{DUPLICATE_NOTE} de {len(twins)} "
+                                f"{'movimiento importado' if len(twins) == 1 else 'movimientos importados'} del {event['day']} "
+                                "con el mismo valor: si es el mismo dinero, elige No cuenta",
+                    }
+                    self._audit(db, "mailbox-possible-duplicate", event["id"], ",".join(twin["id"] for twin in twins))
+                else:
+                    lines = self._statement_twins(db, owner, event)
+                    if len(lines) == 1:
+                        # The statement prevails: only the notice and its hour are added.
+                        db.execute(
+                            "UPDATE transactions SET message_id=?, time=coalesce(time,?) WHERE id=?",
+                            (message_id, event.get("time"), lines[0]),
+                        )
+                        self._audit(db, "mailbox-complete-statement", lines[0], message_id)
+                        imported.append(lines[0])
+                        continue
+                    if lines:
+                        event = {
+                            **event, "decision": None,
+                            "note": f"{DUPLICATE_NOTE} de {len(lines)} movimientos del extracto con el mismo valor: "
+                                    "si es el mismo dinero, elige No cuenta",
+                        }
+                        self._audit(db, "mailbox-possible-duplicate", event["id"], ",".join(lines))
+                imported.append(event["id"])
                 db.execute(
                     """INSERT INTO transactions (
                     id,message_id,day,merchant,account,amount_minor,currency,
@@ -479,7 +564,7 @@ class Store:
                 )
             db.execute("INSERT OR IGNORE INTO processed VALUES (?)", (message_id,))
             db.execute("DELETE FROM extraction_failures WHERE message_id=?", (message_id,))
-            self._flag_between_owners(db, [event["id"] for event in events])
+            self._flag_between_owners(db, imported)
             self._audit(db, "import", message_id, str(len(events)))
         self.apply_rules()
 
@@ -620,6 +705,8 @@ class Store:
             if rule is None:
                 continue
             decision, category = rule
+            if decision == "income" and row["kind"] != "income":
+                continue  # money sent to whom also pays the person: a person decides
             try:
                 with self.connect() as db:
                     self._decide(
@@ -1127,6 +1214,15 @@ class Store:
                 (owner_id(owner),),
             )]
 
+    def own_cards(self, owner: str) -> frozenset[str]:
+        """Last four digits of the credit cards that the member's own statements showed."""
+        return frozenset(suffix for _product, suffix in self.card_statement_suffixes(owner))
+
+    def other_member_cards(self, owner: str) -> frozenset[str]:
+        """Last four digits of the credit cards that only the other member's statements showed."""
+        others = frozenset().union(*(self.own_cards(other) for other in OWNERS if other != owner))
+        return others - self.own_cards(owner)
+
     def own_account_suffixes(self, owner: str) -> list[str]:
         """Last four digits of the accounts registered as a member's own."""
         with self.connect() as db:
@@ -1260,6 +1356,9 @@ class Store:
                 words = merchant_words(row["merchant"]).strip()
                 if not re.fullmatch(line.wording, words):
                     continue
+                if line.wording == CARD_ABONO_LINE and (paid := self._member_abono(db, row["id"])) is not None:
+                    decided += paid
+                    continue
                 self._decide(
                     db, row["id"], line.decision, line.category,
                     audit=("decision-statement-phrase", f"{line.decision}: {words}"),
@@ -1270,6 +1369,52 @@ class Store:
                 )
                 decided += 1
         return decided
+
+    def _member_abono(self, db: sqlite3.Connection, line_id: str) -> int | None:
+        """Settle a statement's card payment that the other member made, in pesos or dollars.
+
+        The other member's movement names the card («tarjeta de credito *NNNN»), the same
+        day. A payment already shown by another third-party payment is not taken again. None
+        when nobody else paid; with several payments it stays pending for a person (0).
+        """
+        line = db.execute("SELECT * FROM transactions WHERE id=?", (line_id,)).fetchone()
+        source = line["message_id"].split(":")  # statement:PRODUCT:SUFFIX:PERIOD_END[:OWNER]
+        suffix = source[2] if len(source) > 3 else ""
+        taken = {
+            row["cop_amount_minor"] if row["currency"] == "USD" else row["amount_minor"]
+            for row in db.execute(
+                """SELECT currency,amount_minor,cop_amount_minor FROM transactions WHERE owner=?
+                AND decision='third_party_payment' AND abs(julianday(day)-julianday(?))<=?""",
+                (line["owner"], line["day"], TWIN_DAYS),
+            )
+        }
+        options = []
+        for row in db.execute(
+            "SELECT * FROM transactions WHERE owner<>? AND kind='transfer' AND currency='COP' AND day=?",
+            (line["owner"], line["day"]),
+        ):
+            card = OTHER_CARD.fullmatch(row["merchant"])
+            if card is None or card[1] != suffix or row["amount_minor"] in taken:
+                continue
+            rate = Decimal(row["amount_minor"]) / Decimal(line["amount_minor"])
+            low, high = (1, 1) if line["currency"] == "COP" else PESOS_PER_DOLLAR
+            if low <= rate <= high:
+                options.append((row["id"], rate))
+        if len(options) != 1:
+            return 0 if options else None
+        payment, rate = options[0]
+        self._decide(
+            db, line_id, "third_party_payment", audit=("decision-statement-member-abono", payment),
+            exchange_rate=(
+                format(rate.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP), "f")
+                if line["currency"] == "USD" else None
+            ),
+        )
+        db.execute(
+            "UPDATE transactions SET between_owners=1, reason=? WHERE id=?",
+            ("Lo pago el otro titular el mismo dia: abono de tercero. Puedes cambiarlo aqui.", line_id),
+        )
+        return 1
 
     def reclassify_statement_movements(self, kinds: dict[str, str]) -> int:
         """Correct the kind of statement movements still pending, after the reader improved.
@@ -1302,7 +1447,8 @@ class Store:
             (row["owner"], row["group_key"])
             for row in db.execute("SELECT owner,group_key FROM group_rules WHERE between_owners=1")
         }
-        if not accounts and not remembered:
+        cards = {owner: self.other_member_cards(owner) for owner in OWNERS}
+        if not accounts and not remembered and not any(cards.values()):
             return 0
         rows = db.execute("SELECT * FROM transactions WHERE between_owners=0").fetchall()
         if ids is not None:
@@ -1314,119 +1460,16 @@ class Store:
                 reason = "group-rule"
             elif counterpart_owner(row, accounts):
                 reason = "account"
+            elif row["kind"] == "transfer" and (card := OTHER_CARD.fullmatch(row["merchant"])) and (
+                card[1] in cards[row["owner"]]
+            ):
+                reason = "card"
             else:
                 continue
             db.execute("UPDATE transactions SET between_owners=1 WHERE id=?", (row["id"],))
             self._audit(db, "between-owners-" + reason, row["id"], "1")
             flagged += 1
         return flagged
-
-    def import_external(
-        self, owner: str, source: str, events: list[dict], group_rules: dict[str, str],
-    ) -> dict[str, int]:
-        """Import movements another member approved elsewhere, in one transaction.
-
-        Existing ids are skipped, so repeating the import changes nothing. Each movement
-        is decided through the same validation as the panel and audited one by one;
-        destination decisions become remembered rules unless a person already set one.
-        No mailbox notice is involved, so processed and coverage stay untouched.
-        """
-        owner = owner_id(owner)
-        if not re.fullmatch(r"[a-z][a-z-]{2,30}", source):
-            raise ValueError("Origen de importacion invalido.")
-        with self.connect() as db:
-            existing = {row["id"] for row in db.execute("SELECT id FROM transactions WHERE owner=?", (owner,))}
-            new = [event for event in events if event["id"] not in existing]
-            for event in new:
-                if event["owner"] != owner:
-                    raise ValueError("Movimiento de otro titular en la importacion.")
-                db.execute(
-                    """INSERT INTO transactions (
-                    id,message_id,day,merchant,account,amount_minor,currency,category,kind,
-                    decision,reason,owner,group_key,time,note,account_label,category_uncertain)
-                    VALUES (:id,:message_id,:day,:merchant,:account,:amount_minor,:currency,
-                    :category,:kind,NULL,:reason,:owner,:group_key,:time,:note,:account_label,
-                    :category_uncertain)""", event,
-                )
-            for group, decision in group_rules.items():
-                if decision not in DECISIONS:
-                    raise ValueError("Decision de destino no reconocida.")
-                if db.execute(
-                    "INSERT OR IGNORE INTO group_rules(owner,group_key,decision) VALUES (?,?,?)",
-                    (owner, group, decision),
-                ).rowcount:
-                    self._audit(db, f"group-rule-{source}", f"{owner}/{group}", decision)
-            rules = {
-                row["group_key"]: row["decision"] for row in db.execute(
-                    "SELECT * FROM group_rules WHERE owner=? AND decision IS NOT NULL", (owner,),
-                )
-            }
-            decided = by_group = 0
-            for event in new:
-                if event["group_key"]:
-                    decision = rules.get(event["group_key"])
-                    if decision is None:
-                        continue
-                    self._decide(
-                        db, event["id"], decision, None,
-                        audit=("decision-group-rule", f"{decision}: {event['group_key']}"),
-                    )
-                    by_group += 1
-                else:
-                    self._decide(
-                        db, event["id"], event["decision"], None,
-                        audit=(f"decision-{source}", f"{event['decision']}: aprobado en su panel"),
-                    )
-                    decided += 1
-            flagged = self._flag_between_owners(db, [event["id"] for event in new])
-            self._audit(db, f"import-{source}", owner, str(len(new)))
-        return {
-            "imported": len(new), "skipped": len(events) - len(new), "approved": decided,
-            "by_destination": by_group, "pending": len(new) - decided - by_group,
-            "between_owners": flagged,
-        }
-
-    def monthly_totals(self, owner: str) -> dict[str, dict[str, int]]:
-        """Decided totals per month in the reporting currency (COP for converted USD).
-
-        personal includes cash withdrawals; net is personal + family minus third-party
-        payments to a card. The household view leaves out money between members.
-        """
-        owner = owner_id(owner, allow_household=True)
-        with self.connect() as db:
-            rows = db.execute(
-                "SELECT * FROM transactions"
-                + ("" if owner == HOUSEHOLD else " WHERE owner=?"),
-                () if owner == HOUSEHOLD else (owner,),
-            ).fetchall()
-        totals: dict[str, dict[str, int]] = {}
-        for row in rows:
-            if owner == HOUSEHOLD and row["between_owners"]:
-                continue
-            amount = row["amount_minor"]
-            if row["currency"] == "USD" and row["cop_amount_minor"] is not None:
-                amount = row["cop_amount_minor"]
-            elif row["currency"] != "COP":
-                continue
-            month = totals.setdefault(row["day"][:7], dict.fromkeys(
-                ("personal", "family", "cash", "income", "third_party", "net", "pending"), 0,
-            ))
-            decision = row["decision"]
-            if decision in {"personal", "cash_withdrawal"}:
-                month["personal"] += amount
-            if decision == "cash_withdrawal":
-                month["cash"] += amount
-            if decision == "family":
-                month["family"] += amount
-            if decision == "income":
-                month["income"] += amount
-            if decision == "third_party_payment":
-                month["third_party"] += amount
-            if decision is None:
-                month["pending"] += amount
-        for month in totals.values():
-            month["net"] = month["personal"] + month["family"] - month["third_party"]
-        return totals
 
     def update_reconciled_coverage(self, today: date) -> dict[str, list[str]]:
         """Mark each closed month that the statements fully reconcile; undo it when that stops.

@@ -108,6 +108,62 @@ def test_transfer_to_a_key_keeps_the_recipient_and_is_never_income(preferences):
     assert (event["group_key"], event["note"]) == ("bb:@ficticia547", "Bre-B a la llave @ficticia547")
 
 
+def test_qr_payment_to_a_key_is_read_without_the_model(preferences):
+    """Ollama read "pagaste ... desde tu cuenta" as a card payment and returned nothing."""
+    events = extract(notice(
+        "Bancolombia: USUARIO, pagaste $12,500.00 por codigo QR desde tu cuenta *0001 a la llave\n"
+        "3000000099 el 06/04/2026 a las 16:51. Pagar con codigo QR es facil y de una."
+    ), preferences, NoModel())
+    assert [
+        (e["kind"], e["merchant"], e["amount_minor"], e["day"], e["time"], e["group_key"], e["decision"])
+        for e in events
+    ] == [("transfer", "Pago QR a llave 3000000099", 1250000, "2026-04-06", "16:51", "qr:3000000099", None)]
+
+
+def test_payment_to_a_business_from_a_product_is_read_without_the_model(preferences):
+    events = extract(notice(
+        "Todo salio bien con tus movimientos Bancolombia: Pagaste $350,000.00 a CONJUNTO RESIDENCIAL\n"
+        "FICTICIO desde tu producto *0001 el 05/05/2026 10:20:30. ¿Dudas? Llamanos."
+    ), preferences, NoModel())
+    assert [(e["kind"], e["merchant"], e["amount_minor"], e["day"], e["time"], e["decision"]) for e in events] == [
+        ("purchase", "CONJUNTO RESIDENCIAL FICTICIO", 35000000, "2026-05-05", "10:20", None),
+    ]
+
+
+def test_scheduled_invesbot_contribution_is_an_investment_never_income(preferences):
+    """Ollama called it income; the notice has no date, so it takes the day it arrived."""
+    events = extract(notice(
+        "Bancolombia: Realizamos la inversión que programaste por COP $ 150.000,00 a tu plan\n"
+        "Plan Ficticio en Invesbot. Recibe tus rendimientos cada mes."
+    ), preferences, NoModel())
+    assert [(e["kind"], e["category"], e["merchant"], e["amount_minor"], e["day"], e["decision"]) for e in events] == [
+        ("investment", "Inversiones", "Invesbot Plan Ficticio", 15000000, "2026-03-01", None),
+    ]
+
+
+@pytest.mark.parametrize("body", [
+    "Transferiste COP $ 150.000,00 a tu inversión Plan Ficticio. Gracias por invertir.",
+    "Transferiste $ COP $ 150.000,00 a tu inversión Plan Ficticio.",
+    "Adicionaste COP $ 150.000,00 a tu plan Plan Ficticio en Invesbot.",
+])
+def test_every_wording_of_an_invesbot_contribution_is_the_same_plan(preferences, body):
+    events = extract(notice(body), preferences, NoModel())
+    assert [(e["kind"], e["merchant"], e["amount_minor"]) for e in events] == [
+        ("investment", "Invesbot Plan Ficticio", 15000000),
+    ]
+
+
+@pytest.mark.parametrize("body", [
+    "Ya ingresamos los COP $ 150.000,00 que transferiste a tu inversión Plan Ficticio.",
+    "Retiramos COP $ 150.000,00 y los agregamos a tu inversión Plan Ficticio.",
+    "El 14 de octubre tomaremos de tu cuenta de ahorros los COP $ 150.000 que elegiste sumar cada mes a tu inversión.",
+    "Asegúrate de tener $150.000,00 COP en tu producto origen cuenta bancaria.",
+])
+def test_invesbot_notices_without_money_of_their_own_leave_no_movement(preferences, body):
+    """The statement shows one debit per contribution: these repeat, confirm or announce it."""
+    assert extract(notice(body), preferences, NoModel()) == []
+
+
 def test_received_transfer_is_income_with_its_sender(preferences):
     events = extract(notice(
         "Bancolombia: USUARIO, recibiste una transferencia de PERSONA FICTICIA por $17,000.00 en tu "

@@ -13,6 +13,60 @@ from monthly_close.extraction import EvidenceError, Mail, extract
 from monthly_close.store import Store
 
 
+PURCHASE = (
+    "Todo salio bien con tus movimientos Bancolombia: Compraste COP1.234,56\nen APORTE FICTICIO*CO "
+    "con tu T.Cred *1234, el 01/03/2026 a las 10:15. Es posible que recibas una llamada."
+)
+
+
+def purchase_mail(body: str = PURCHASE) -> Mail:
+    return Mail("m-buy", "avisos@example.test", "Alertas", "2026-03-01T15:00:00Z", body)
+
+
+def test_a_misspelled_merchant_is_taken_from_the_card_purchase_sentence(preferences):
+    model = FakeExtractionModel(merchant="APORTEFICTICI*CO", amount_text="COP1.234,56")
+    [event] = extract(purchase_mail(), preferences, model)
+    assert (event["merchant"], event["kind"], event["category"]) == ("APORTE FICTICIO*CO", "purchase", "Compras")
+    assert model.calls == 1  # no correction round
+
+
+@pytest.mark.parametrize("body", [
+    PURCHASE,
+    "Bancolombia: Compraste COP1.234,56 en APORTE FICTICIO*CO, el 01/03/2026 a las 10:15. "
+    "Esta compra esta asociada a T.Cred *1234.",
+])
+def test_the_purchase_sentence_names_the_merchant_even_if_the_model_copies_the_bank(preferences, body):
+    model = FakeExtractionModel(merchant="Bancolombia", amount_text="COP1.234,56", kind="transfer")
+    [event] = extract(purchase_mail(body), preferences, model)
+    assert (event["merchant"], event["kind"]) == ("APORTE FICTICIO*CO", "purchase")
+
+
+@pytest.mark.parametrize(("kind", "category"), [("income", "Otros ingresos"), ("investment", "Compras"), ("unknown", "Compras")])
+def test_a_card_purchase_is_a_purchase_whatever_the_model_calls_it(preferences, kind, category):
+    """«APORTE EN ...» was read as income and as an investment, so it could not be an expense."""
+    model = FakeExtractionModel(merchant="APORTE FICTICIO*CO", amount_text="COP1.234,56", kind=kind, category=category)
+    [event] = extract(purchase_mail(), preferences, model)
+    assert event["kind"] == "purchase" and event["category"] in preferences.categories
+    assert event["decision"] is None
+
+
+@pytest.mark.parametrize("body", [
+    PURCHASE.replace("COP1.234,56", "COP1.234,57") + " Referencia COP1.234,56",  # another amount
+    PURCHASE + "\n" + PURCHASE,  # two purchases: which one is it?
+    PURCHASE.replace("con tu T.Cred *1234", "con tu tarjeta"),  # another wording
+])
+def test_the_purchase_sentence_decides_nothing_unless_it_is_the_only_one_and_matches(preferences, body):
+    model = FakeExtractionModel(merchant="APORTEFICTICI*CO", amount_text="COP1.234,56")
+    with pytest.raises(EvidenceError, match="merchant"):
+        extract(purchase_mail(body), preferences, model)
+
+
+def test_a_rejected_purchase_stays_rejected(preferences):
+    model = FakeExtractionModel(merchant="APORTE FICTICIO*CO", amount_text="COP1.234,56", kind="rejected")
+    [event] = extract(purchase_mail(), preferences, model)
+    assert (event["kind"], event["decision"]) == ("rejected", "exclude")
+
+
 @pytest.mark.parametrize(("text", "expected"), [
     ("$ 1.234,56", 123456), ("1,234.56", 123456), ("1234", 123400),
     ("COP 1.234.567", 123456700), ("$ 0,50", 50), ("12.5", 1250),
@@ -390,3 +444,24 @@ def test_without_exactly_one_known_card_the_model_account_stays(preferences):
     ):
         event = extract(card_mail(body), prefs, FakeExtractionModel(account="Tarjeta A"), card_accounts=known)[0]
         assert event["account"] == "Tarjeta A", body
+
+
+TOP_UP = (
+    "Bancolombia le informa Recarga de Tarjeta Civica por $1,234.00 desde cta *1234. "
+    "01/03/2026 7:32. Inquietudes al 000."
+)
+
+
+def test_a_prepaid_card_top_up_is_read_without_the_model(preferences):
+    [event] = extract(purchase_mail(TOP_UP), preferences, None)
+    assert (event["merchant"], event["kind"], event["decision"]) == ("Recarga de Tarjeta Civica", "purchase", None)
+    assert (event["amount_minor"], event["day"], event["time"]) == (123400, "2026-03-01", "07:32")
+
+
+def test_a_top_up_in_another_wording_is_queued_when_the_model_returns_nothing(preferences):
+    class Empty:
+        def complete_json(self, system, user):
+            return {"events": []}
+
+    with pytest.raises(EvidenceError):
+        extract(purchase_mail(TOP_UP.replace("desde cta *1234", "con otra redaccion")), preferences, Empty())

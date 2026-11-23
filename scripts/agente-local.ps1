@@ -4,7 +4,7 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet(
         "serve", "login", "check-config", "pilot", "scan", "import", "summary", "scheduled", "invoices", "invoices-cleanup",
-        "import-manuela", "owner-account", "payroll-deduction", "merge-category",
+        "owner-account", "payroll-deduction", "merge-category",
         "devices", "lan-firewall"
     )]
     [string]$Command = "serve",
@@ -13,7 +13,6 @@ param(
     [string]$Owner,
     [ValidatePattern("^\d{4}$")]
     [string]$Suffix,
-    [string]$SourceDir,
     [ValidatePattern("^[a-z][a-z0-9-]{1,30}$")]
     [string]$Mailbox,
     [string]$FromCategory,
@@ -301,7 +300,6 @@ try {
     if ($Month) { $arguments += @("--month", $Month) }
     if ($Owner) { $arguments += @("--owner", $Owner) }
     if ($Suffix) { $arguments += @("--suffix", $Suffix) }
-    if ($SourceDir) { $arguments += @("--source-dir", $SourceDir) }
     if ($Mailbox) { $arguments += @("--mailbox", $Mailbox) }
     if ($FromCategory) { $arguments += @("--from", $FromCategory) }
     if ($ToCategory) { $arguments += @("--to", $ToCategory) }

@@ -35,7 +35,6 @@ from monthly_close.gmail_client import GmailClient
 from monthly_close.gmail_reader import GmailSourceReader
 from monthly_close.mailboxes import Mailbox, find, load_mailboxes, primary_graph
 from shared.run_log import run_log
-from monthly_close.household_import import PARITY_FILE, import_member, parity_report
 from monthly_close.outlook import Candidate, OutlookError
 from monthly_close.server import create_server
 from monthly_close.store import Store
@@ -146,20 +145,34 @@ def due_close_month(now: datetime, timezone: str, last_closed: str | None) -> st
 
 
 class Progress:
-    """One-line terminal bar: how far back each folder has been read, by notice date.
+    """One terminal bar for the whole run, never going back.
 
-    Folders are read newest first, so the bar fills from the end of the range towards
-    its start. It only draws on an interactive terminal and never prints mail content.
+    Each mailbox gets an equal share; within it, each Outlook folder an equal part, and
+    Gmail half for checking its list and half for its notices. Within a part, notice dates
+    tell how much of the range was read (a full walk reads newest first, an incremental
+    one oldest first). It only draws on an interactive terminal and never prints mail content.
     """
 
     WIDTH = 24
 
-    def __init__(self, start: date, end: date, stream=None) -> None:
+    def __init__(
+        self, start: date, end: date, stream=None, oldest_first: bool = False, mailboxes: int = 1,
+    ) -> None:
         self.start, self.end = start, end
+        self.oldest_first = oldest_first
         self.stream = sys.stderr if stream is None else stream
         self.enabled = bool(getattr(self.stream, "isatty", lambda: False)())
         self.notices = 0
         self.length = 0
+        self.mailboxes = max(mailboxes, 1)
+        self.position = 0  # mailboxes finished
+        self.name = ""
+        self.part = (0.0, 1.0)  # (offset, width) of the current part within the mailbox
+        self.done = 0.0
+
+    def mailbox(self, position: int, name: str) -> None:
+        """Mailbox number position (0-based) starts."""
+        self.position, self.name, self.part = position, name, (0.0, 1.0)
 
     def update(self, folder: tuple[str, ...] | None, day: date, counted: bool = True) -> None:
         if counted:
@@ -167,13 +180,37 @@ class Progress:
         if not self.enabled:
             return
         span = max((self.end - self.start).days, 1)
-        done = min(max((self.end - day).days / span, 0.0), 1.0)
-        filled = round(done * self.WIDTH)
-        label = " / ".join(folder or ("?",))[:34]
-        line = (
-            f"[{'#' * filled}{'.' * (self.WIDTH - filled)}] {done:4.0%} | {label} | "
-            f"{max(min(day, self.end), self.start).isoformat()} | {self.notices} avisos"
+        read = (day - self.start).days if self.oldest_first else (self.end - day).days
+        self._advance(
+            min(max(read / span, 0.0), 1.0),
+            f"{self._label(folder)} | {max(min(day, self.end), self.start).isoformat()} | {self.notices} avisos",
         )
+
+    def listing(self, label: str, checked: int, total: int) -> None:
+        """Progress of the metadata a reader checks before it can visit any notice."""
+        self.part = (0.0, 0.5)
+        if self.enabled:
+            self._advance(checked / max(total, 1), f"{self._label((label,))} | Revisando lista: {checked}/{total} mensajes")
+        if checked >= total:
+            self.part = (0.5, 0.5)  # the notices come next
+
+    def folder(self, folder: tuple[str, ...] | None, position: int, total: int) -> None:
+        """A folder starts: shown even when it brings no notice."""
+        self.part = ((position - 1) / max(total, 1), 1 / max(total, 1))
+        if self.enabled:
+            self._advance(0.0, f"{self._label(folder)} | Carpeta {position}/{total}")
+
+    def _label(self, folder: tuple[str, ...] | None) -> str:
+        return (f"{self.name} · " if self.name else "") + " / ".join(folder or ("?",))[:34]
+
+    def _advance(self, fraction: float, detail: str) -> None:
+        offset, width = self.part
+        self.done = max(self.done, (self.position + offset + width * fraction) / self.mailboxes)
+        self._draw(self.done, detail)
+
+    def _draw(self, done: float, detail: str) -> None:
+        filled = round(done * self.WIDTH)
+        line = f"[{'#' * filled}{'.' * (self.WIDTH - filled)}] {done:4.0%} | {detail}"
         # Pad over the previous bar instead of relying on ANSI support in the console.
         self.stream.write("\r" + line.ljust(self.length))
         self.stream.flush()
@@ -271,14 +308,12 @@ def scan(
     check_sessions(data_dir, boxes, relogin_minutes)
     model = None if read_only else OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
     mode = ScanMode(read_only, reprocess_empty, incremental)
-    for box in boxes:
-        box_start = mailbox_start(store, box, start)
+    progress = Progress(start, end, oldest_first=incremental, mailboxes=len(boxes))
+    for position, box in enumerate(boxes):
         if len(boxes) > 1:
-            print(f"Buzon {box.name} ({box.provider}, titular {box.owner}) desde {box_start.isoformat()}.", flush=True)
-        if box_start >= end:
-            print("Sin dias por leer en este buzon para el rango pedido.", flush=True)
-            continue
-        _scan_mailbox(store, data_dir, settings, box, preferences, box_start, end, mode, model)
+            print(f"Buzon {box.name} ({box.provider}, titular {box.owner}) desde {start.isoformat()}.", flush=True)
+        progress.mailbox(position, box.name if len(boxes) > 1 else "")
+        _scan_mailbox(store, data_dir, settings, box, preferences, start, end, mode, model, progress)
 
 
 @dataclass(frozen=True)
@@ -288,18 +323,9 @@ class ScanMode:
     incremental: bool
 
 
-def mailbox_start(store: Store, box: Mailbox, start: date) -> date:
-    """A member whose movements came by file starts on the last imported day, included.
-
-    Movements of that day that match an imported one stay pending as possible duplicates.
-    """
-    last = store.last_import_day(box.owner)
-    return max(start, date.fromisoformat(last)) if last else start
-
-
 def _scan_mailbox(
     store: Store, data_dir: Path, settings: dict, box: Mailbox, preferences: Preferences,
-    start: date, end: date, mode: ScanMode, model,
+    start: date, end: date, mode: ScanMode, model, progress: Progress,
 ) -> None:
     scope = hashlib.sha256(json.dumps(
         [start.isoformat(), end.isoformat(), settings, preferences.to_dict()]
@@ -309,7 +335,6 @@ def _scan_mailbox(
         sort_keys=True, ensure_ascii=False,
     ).encode()).hexdigest()
     failed_ids: set[str] = set()
-    progress = Progress(start, end)
     clear_progress = _ClearProgress(progress)
     extraction_log = logging.getLogger("monthly_close.extraction")
     extraction_log.addFilter(clear_progress)
@@ -332,6 +357,19 @@ def _walk(
     read_only, reprocess_empty = mode.read_only, mode.reprocess_empty
     received_ids: set[str] = set()
     with open_source(data_dir, settings, preferences.approved_senders, box) as reader:
+        if box.provider == "gmail":
+            reader.on_listed = lambda checked, total: progress.listing("Gmail", checked, total)
+        else:
+            reader.on_folder = lambda position, total: progress.folder(reader.active_folder, position, total)
+
+        def wait(seconds: float) -> None:
+            progress.clear()
+            print(
+                f"{box.provider.capitalize()} pidio esperar o fallo un momento; "
+                f"se reintenta en {seconds:.0f} s.", flush=True,
+            )
+
+        reader.client.on_wait = wait
 
         def visit(candidate: Candidate) -> bool | None:
             if candidate.sender not in preferences.approved_senders:
@@ -383,6 +421,7 @@ def _walk(
                         for c in credit_ledger.load_configs(data_dir) if c.owner == box.owner
                     ],
                     card_accounts=card_accounts(store, box.owner, preferences),
+                    other_cards=store.other_member_cards(box.owner), own_cards=store.own_cards(box.owner),
                 )
             except EvidenceError as exc:
                 folder = " / ".join(reader.active_folder or ())
@@ -757,24 +796,6 @@ def run_complements(store: Store, data_dir: Path, settings: dict, preferences: P
     refresh_reconciled_coverage(store, preferences)
 
 
-def run_member_import(store: Store, folder: Path) -> None:
-    """Import Manuela's exported files and compare her monthly totals with her dashboard."""
-    result = import_member(store, folder)
-    print(
-        f"Importacion de Manuela: {result['imported']} nuevos, {result['skipped']} ya importados; "
-        f"{result['approved']} aprobados en su panel, {result['by_destination']} decididos por destino, "
-        f"{result['pending']} pendientes; {result['between_owners']} entre titulares."
-    )
-    parity = folder / PARITY_FILE
-    if not parity.is_file():
-        print("Sin archivo de paridad: no se compararon totales.")
-        return
-    matched, lines = parity_report(store, parity)
-    print("\n".join(lines))
-    if not matched:
-        raise ValueError("Los totales importados no coinciden con el panel de Manuela; revisa antes de usarlos.")
-
-
 def run(args: argparse.Namespace) -> None:
     data_dir = args.data_dir.expanduser().resolve()
     store = Store(data_dir / "close.sqlite3")
@@ -804,10 +825,6 @@ def run(args: argparse.Namespace) -> None:
         month = args.month or datetime.now().strftime("%Y-%m")
         datetime.strptime(month, "%Y-%m")
         print(store.summary(month, args.owner or "santiago"))
-        return
-    if args.command == "import-manuela":
-        run_member_import(store, args.source_dir.expanduser().resolve())
-        refresh_reconciled_coverage(store, store.preferences())
         return
     if args.command == "merge-category":
         if not args.source_category or not args.target_category:
@@ -890,14 +907,10 @@ def main() -> None:
         "command",
         choices=[
             "serve", "login", "pilot", "scan", "summary", "scheduled", "check-config",
-            "import-manuela", "owner-account", "payroll-deduction", "merge-category",
+            "owner-account", "payroll-deduction", "merge-category",
         ],
     )
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
-    parser.add_argument(
-        "--source-dir", type=Path, default=data_root() / "ImportManuela",
-        help="Con import-manuela, carpeta local con los archivos exportados de Manuela.",
-    )
     parser.add_argument(
         "--owner", choices=["santiago", "manuela", "hogar"],
         help="Con summary, titular u hogar (por defecto santiago); con owner-account, titular.",

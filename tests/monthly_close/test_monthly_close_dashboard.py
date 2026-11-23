@@ -137,6 +137,48 @@ def test_decision_persists_and_updates_totals(dashboard):
     assert re.search(r"\b1[.\s]?700,58", page.locator("#month-metrics").inner_text())
 
 
+def test_counting_a_possible_duplicate_whose_twin_counts_asks_first(dashboard):
+    """Movement 2 already counts as family; its possible duplicate must not silently count too."""
+    page, store, month, _ = dashboard
+    store.import_message("dup", [movement(
+        "dup", "TIENDA DUPLICADA", message_id="dup", day=f"{month}-05", amount_minor=30001,
+        note="Posible duplicado de 1 movimientos importados con el mismo valor",
+    )])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    card = page.locator("#panel-decisions .decision-card").filter(has_text="TIENDA DUPLICADA")
+    asked = []
+    page.on("dialog", lambda dialog: (asked.append(dialog.message), dialog.dismiss()))
+    card.get_by_role("button", name="Familiar", exact=True).first.click()
+    assert len(asked) == 1 and asked[0].startswith("Posible duplicado: ya cuenta un movimiento del")
+    assert "se contaría dos veces" in asked[0] and "«Familiar»" in asked[0]
+    assert {row["id"]: row["decision"] for row in store.state()["transactions"]}["dup"] is None
+    # «No cuenta» is the answer for the same money, so it is saved without asking.
+    with page.expect_response(lambda response: response.url.endswith("/api/decision")) as saved:
+        card.get_by_role("button", name="No cuenta", exact=True).first.click()
+    assert saved.value.status == 200 and len(asked) == 1
+    assert {row["id"]: row["decision"] for row in store.state()["transactions"]}["dup"] == "exclude"
+
+
+def test_a_destination_decision_that_would_count_a_duplicate_twice_asks_first(dashboard):
+    page, store, month, _ = dashboard
+    for identifier, amount in (("dup-a", 30001), ("dup-b", 777)):
+        store.import_message(identifier, [movement(
+            identifier, "TIENDA DUPLICADA", message_id=identifier, day=f"{month}-05", amount_minor=amount,
+            note="Posible duplicado de 1 movimientos importados con el mismo valor",
+        )])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    card = page.locator("#panel-decisions .group-card").filter(has_text="TIENDA DUPLICADA")
+    asked = []
+    page.on("dialog", lambda dialog: (asked.append(dialog.message), dialog.dismiss()))
+    card.get_by_role("button", name=re.compile("^Gasto personal")).first.click()
+    assert len(asked) == 1 and "se contaría dos veces" in asked[0]
+    assert {row["id"]: row["decision"] for row in store.state()["transactions"]}["dup-a"] is None
+
+
 def test_decision_card_shows_the_hour_next_to_the_date(dashboard):
     page, store, month, _ = dashboard
     store.import_message("m-hour", [movement("hour", "TIENDA CON HORA", message_id="m-hour", day=f"{month}-05", time="10:32")])
@@ -245,6 +287,44 @@ def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
     assert "12,34" in history.inner_text()
     assert re.search(r"51[.\s]?834,17", history.inner_text())
     assert history.get_by_label(re.compile("Tasa estimada COP por USD")).input_value() == "4200.50"
+
+
+def test_a_copied_third_party_payment_asks_first_and_the_between_mark_says_it_does_not_decide(dashboard):
+    page, store, month, _ = dashboard
+    paid = {"day": f"{month}-07", "amount_minor": 4300, "kind": "card_payment", "category": "Pago de tarjeta"}
+    store.import_message("paid", [movement("paid", "ABONO CONTADO", message_id="paid", **paid)])
+    store.decide("paid", "third_party_payment")
+    store.import_message("copy", [movement(
+        "copy", "ABONO COPIADO", message_id="copy", note="Posible duplicado de 1 movimiento importado", **paid,
+    )])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.get_by_role("tab", name=re.compile("Decisi")).click()
+    card = page.locator("#pending-list .decision-card").filter(has_text="ABONO COPIADO")
+    asked = []
+    page.on("dialog", lambda dialog: (asked.append(dialog.message), dialog.dismiss()))
+    card.get_by_role("button", name="Abono de tercero", exact=True).click()
+    assert len(asked) == 1 and "se contaría dos veces" in asked[0]
+    with page.expect_response(lambda response: response.url.endswith("/api/between-owners")):
+        card.get_by_role("button", name="Entre Santiago y Manuela", exact=True).click()
+    expect(page.locator("body")).to_contain_text("La marca no lo decide: elige también una decisión.")
+    row = next(row for row in store.state()["transactions"] if row["id"] == "copy")
+    assert (row["between_owners"], row["decision"]) == (1, None)
+
+
+def test_year_tab_lists_frequent_merchants_of_the_year(dashboard):
+    page, store, month, _ = dashboard
+    year = month[:4]
+    other = f"{year}-01" if month != f"{year}-01" else f"{year}-02"
+    store.import_message("y1", [movement("y1", "FERRETERIA DEL ANO", message_id="y1", day=f"{other}-10",
+                                         amount_minor=900000, decision="personal")])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.locator("#tab-year").click()
+    ranking = page.locator("#year-merchant-ranking")
+    # The decided movements of every month count; the pending one of the fixture does not.
+    expect(ranking).to_contain_text("FERRETERIA DEL ANO · 1")
+    assert ranking.inner_text().count(" · ") == 2  # the fixture's merchant and the new one
 
 
 def test_grouped_usd_purchases_show_dollars_not_zero_cop(dashboard):

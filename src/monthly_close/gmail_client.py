@@ -5,11 +5,15 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
-from monthly_close.graph_client import GraphClient, GraphError
+from monthly_close.graph_client import GraphClient, GraphError, retry_after
 
 GMAIL_ROOT = "https://gmail.googleapis.com/gmail/v1/users/me"
 # Read-only: this scope cannot send, label, archive or delete messages.
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+# Gmail answers 403 (or 429) when the per-user query quota of the minute is spent.
+RATE_LIMIT_REASONS = {"rateLimitExceeded", "userRateLimitExceeded"}
+# Waits long enough for that minute to pass; only these answers are repeated.
+RATE_LIMIT_WAITS = (15.0, 30.0, 60.0, 60.0)
 
 
 class GmailError(GraphError):
@@ -37,10 +41,32 @@ class GmailClient(GraphClient):
 
     service = "Gmail"
     error = GmailError
+    retries = len(RATE_LIMIT_WAITS)
 
     @staticmethod
     def validate(url: str) -> str:
         return validate_gmail_url(url)
+
+    def _wait(self, response, attempt: int) -> float | None:
+        if _rate_limited(response):
+            wait = RATE_LIMIT_WAITS[min(attempt, len(RATE_LIMIT_WAITS) - 1)]
+            return max(wait, retry_after(response)) if "Retry-After" in response.headers else wait
+        return super()._wait(response, attempt)
+
+
+def _rate_limited(response) -> bool:
+    """The per-minute query quota, never a permission refusal (those stop the run)."""
+    if response.status_code == 429:
+        return True
+    if response.status_code != 403:
+        return False
+    try:
+        error = response.json().get("error", {})
+        reasons = {item.get("reason") for item in error.get("errors", []) if isinstance(item, dict)}
+        message = str(error.get("message", ""))
+    except (ValueError, AttributeError):
+        return False
+    return bool(reasons & RATE_LIMIT_REASONS) or message.startswith("Quota exceeded")
 
 
 def _google():

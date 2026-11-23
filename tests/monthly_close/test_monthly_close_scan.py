@@ -7,6 +7,7 @@ import json
 from argparse import Namespace
 from contextlib import nullcontext
 from datetime import date, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,8 @@ def test_scan_resumes_failed_notice_without_rereading_completed_or_losing_decisi
     fail = [True]
 
     class Reader:
+        client = SimpleNamespace(on_wait=None)
+
         def __init__(self, *args):
             pass
 
@@ -78,6 +81,7 @@ def test_scan_queues_invalid_evidence_continues_and_retries_without_losing_decis
 
     class Reader:
         active_folder = ("dinero", "banco")
+        client = SimpleNamespace(on_wait=None)
 
         def __init__(self, *args):
             pass
@@ -96,7 +100,7 @@ def test_scan_queues_invalid_evidence_continues_and_retries_without_losing_decis
                 visit(Candidate(identity, preferences.approved_senders[0], "Aviso"))
             return []
 
-    def extraction(mail, prefs, model, own_accounts=None, known_credits=None, card_accounts=None):
+    def extraction(mail, prefs, model, own_accounts=None, known_credits=None, card_accounts=None, other_cards=frozenset(), own_cards=frozenset()):
         chosen = FakeExtractionModel(merchant="Inventado") if mail.id == "bad" and invalid[0] else FakeExtractionModel()
         return extract(mail, prefs, chosen)
 
@@ -165,6 +169,8 @@ def test_scan_does_not_continue_after_other_failures(tmp_path, preferences, monk
     reads = []
 
     class Reader:
+        client = SimpleNamespace(on_wait=None)
+
         def __init__(self, *args):
             pass
 
@@ -343,5 +349,33 @@ def test_progress_bar_follows_notice_dates_and_stays_silent_off_a_terminal():
     piped = io.StringIO()
     quiet = app.Progress(date(2026, 1, 1), date(2026, 11, 1), stream=piped)
     quiet.update(("dinero",), date(2026, 6, 2))
+    quiet.listing("Gmail", 1, 2)
     quiet.clear()
     assert piped.getvalue() == ""
+
+
+def test_one_bar_covers_the_whole_run_and_never_goes_back():
+    """Two mailboxes share the bar: Outlook by folders, Gmail half list and half notices."""
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    screen = Terminal()
+    progress = app.Progress(date(2026, 1, 1), date(2026, 11, 1), stream=screen, oldest_first=True, mailboxes=2)
+    bar = lambda: screen.getvalue().rsplit(chr(13), 1)[-1]  # noqa: E731
+
+    progress.mailbox(0, "santiago")
+    progress.folder(("Dinero",), 2, 4)
+    assert bar().startswith("[###.....................]  12% | santiago · Dinero | Carpeta 2/4")
+    progress.update(("Dinero",), date(2026, 11, 1))  # the second folder read to the end
+    assert bar().startswith("[######..................]  25% | santiago · Dinero | 2026-11-01 | 1 avisos")
+    progress.folder(("Spam",), 3, 4)
+    progress.update(("Spam",), date(2026, 1, 1))  # an older notice never moves the bar back
+    assert "25%" in bar()
+
+    progress.mailbox(1, "manuela")
+    progress.listing("Gmail", 6, 12)
+    assert bar().startswith("[###############.........]  62% | manuela · Gmail | Revisando lista: 6/12 mensajes")
+    progress.listing("Gmail", 12, 12)
+    progress.update(("Gmail",), date(2026, 11, 1))
+    assert bar().startswith("[########################] 100% | manuela · Gmail | 2026-11-01")

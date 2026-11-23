@@ -11,6 +11,7 @@ import io
 import logging
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -20,15 +21,19 @@ from pypdf.errors import PdfReadError
 
 FILE_NAME = re.compile(r"Extracto_\d+_(?P<period>\d{6})_(?P<product>[A-Z_]+?)_\w{4}\.pdf")
 # Protección names its attachments "<id>_PensionVoluntaria_202610.pdf".
-PROTECCION_FILE = re.compile(r"[0-9A-Za-z]+_(?P<kind>PensionVoluntaria|PensionesCesantias)_(?P<period>\d{6})\.pdf")
+PROTECCION_KINDS = r"PensionVoluntaria|PensionesCesantias|PensionesObligatorias"
+PROTECCION_FILE = re.compile(rf"[0-9A-Za-z]+_(?P<kind>{PROTECCION_KINDS})_(?P<period>\d{{6}})\.pdf")
 # Any statement attachment the reader may download: Bancolombia's or Protección's.
-STATEMENT_NAME = re.compile(
-    r"(?:Extracto_\d+_\d{6}_[A-Z_]+?_\w{4}|[0-9A-Za-z]+_(?:PensionVoluntaria|PensionesCesantias)_\d{6})\.pdf"
-)
-PROTECCION_PRODUCTS = {"PensionVoluntaria": "PROTECCION_VOLUNTARIA", "PensionesCesantias": "PROTECCION_CESANTIAS"}
+STATEMENT_NAME = re.compile(rf"(?:Extracto_\d+_\d{{6}}_[A-Z_]+?_\w{{4}}|[0-9A-Za-z]+_(?:{PROTECCION_KINDS})_\d{{6}})\.pdf")
+PROTECCION_PRODUCTS = {
+    "PensionVoluntaria": "PROTECCION_VOLUNTARIA", "PensionesCesantias": "PROTECCION_CESANTIAS",
+    "PensionesObligatorias": "PROTECCION_OBLIGATORIA",
+}
 # Protección's statement e-mails: their PDF is read here, so the mail itself is no notice.
 PROTECCION_SENDER = "afp_proteccion@proteccion.com"
-PROTECCION_SUBJECT = re.compile(r"^Extracto (?:Pensiones Voluntarias|de Cesantias) Protecci[oó]n", re.I)
+PROTECCION_SUBJECT = re.compile(
+    r"^Extracto (?:Pensiones Voluntarias|de Cesantias|de Pensiones Obligatorias) Protecci[oó]n", re.I,
+)
 PRODUCTS = {
     "CTA_AHORROS": "Cuenta de ahorros",
     "TARJETA_MASTERCARD": "Tarjeta de crédito Master",
@@ -39,6 +44,7 @@ PRODUCTS = {
     "HIPOTECARIO": "Crédito hipotecario",
     "PROTECCION_VOLUNTARIA": "Pensión voluntaria Protección",
     "PROTECCION_CESANTIAS": "Cesantías Protección",
+    "PROTECCION_OBLIGATORIA": "Pensión obligatoria Protección",
 }
 MAX_PDF_BYTES = 10 * 1024 * 1024
 # Protección's PDFs make pypdf warn about every embedded font (fontTools is not
@@ -522,6 +528,45 @@ def parse_severance(text: str) -> Statement:
     return _figures(statement, opening, abs(contributions), abs(withdrawals), final)
 
 
+# The lifetime summary: obligatory contributions, voluntary ones, returns, pension bond
+# and total savings, five amounts on one line.
+OBLIGATORY_SUMMARY = re.compile(rf"(?:{PESOS}\s*){{5}}")
+
+
+def parse_obligatory(text: str) -> Statement:
+    """Protección obligatory pension, a quarterly statement without an opening balance.
+
+    The lifetime summary must add up to the total savings and agree with the labelled
+    lifetime totals. The opening balance is what remains after the quarter's
+    contributions and returns; it chains to the previous quarter's total savings.
+    """
+    lines = _lines(text)
+    index = next((i for i, line in enumerate(lines) if re.search(r"^\S.* PO\d+ ", line)), None)
+    if not index:
+        raise StatementError("Periodo del extracto de pensión obligatoria no reconocido.")
+    start, end = _spanish_day(lines[index - 1]), _spanish_day(lines[index].split(" PO")[0])
+    summary = next((line for line in lines if OBLIGATORY_SUMMARY.fullmatch(line)), None)
+    if summary is None:
+        raise StatementError("Resumen del extracto de pensión obligatoria no encontrado.")
+    mandatory, voluntary, returns, bond, final = (_pesos(item) for item in re.findall(PESOS, summary))
+    figures = {
+        "contributions": _labelled(lines, r"Aportes obligatorios abonados a mi cuenta de ahorro individual en el trimestre"),
+        "returns": _labelled(lines, r"Mis rendimientos del trimestre"),
+        "voluntary": _labelled(lines, r"Mis aportes voluntarios netos del trimestre"),
+        "total_contributions": _labelled(lines, r"Aportes totales en mi cuenta de ahorro individual"),
+        "total_returns": _labelled(lines, r"Mis rendimientos totales en mi cuenta de ahorro individual"),
+    }
+    if any(value is None for value in figures.values()):
+        raise StatementError("Resumen del extracto de pensión obligatoria incompleto.")
+    if not _adds_up(mandatory + voluntary + returns + bond, final) or (
+        figures["total_contributions"], figures["total_returns"]) != (mandatory, returns):
+        raise StatementError("El resumen del extracto de pensión obligatoria no cuadra con su saldo final.")
+    put_in = abs(figures["contributions"]) + max(figures["voluntary"], 0)
+    taken_out = max(-figures["voluntary"], 0)
+    opening = final - put_in + taken_out - figures["returns"]
+    return _figures(Statement("PROTECCION_OBLIGATORIA", "", start, end), opening, put_in, taken_out, final)
+
+
 def parse(product: str, period: str, text: str) -> Statement:
     if product == "CTA_AHORROS":
         return parse_savings(text)
@@ -537,6 +582,8 @@ def parse(product: str, period: str, text: str) -> Statement:
         return parse_voluntary(text)
     if product == "PROTECCION_CESANTIAS":
         return parse_severance(text)
+    if product == "PROTECCION_OBLIGATORIA":
+        return parse_obligatory(text)
     raise StatementError("Producto de extracto no soportado.")
 
 
@@ -545,6 +592,7 @@ class Candidate:
     statement: Statement
     movement: Movement
     paired: bool = False  # the same money seen in another statement
+    copy: int = 0  # position among the identical lines of its own statement
 
 
 def _close(a: Movement, b: Movement, days: int = 5) -> bool:
@@ -558,14 +606,22 @@ def pair_internal(statements: list[Statement]) -> list[Candidate]:
     a savings debit and a fund addition; a loan instalment as a savings debit and in
     the credit statement. The savings side is dropped when the other side exists.
     """
-    candidates, seen = [], set()
+    candidates: list[Candidate] = []
+    seen: Counter[tuple] = Counter()
     for statement in statements:
+        here: Counter[tuple] = Counter()
+        same: Counter[Movement] = Counter()
         for movement in statement.movements:
-            # Consecutive statements may repeat a movement near their cut-off date.
+            if movement.currency not in {"COP", "USD"}:
+                continue
+            # Consecutive statements may repeat a movement near their cut-off date; lines
+            # alike within one statement are different movements.
             key = (statement.product, statement.suffix, movement.day, movement.amount_minor, movement.currency)
-            if movement.currency in {"COP", "USD"} and key not in seen:
-                seen.add(key)
-                candidates.append(Candidate(statement, movement))
+            here[key] += 1
+            if here[key] > seen[key]:
+                seen[key] = here[key]
+                candidates.append(Candidate(statement, movement, copy=same[movement]))
+            same[movement] += 1
     savings = [c for c in candidates if c.statement.product == "CTA_AHORROS"]
     others = [c for c in candidates if c.statement.product != "CTA_AHORROS"]
     for other in others:
@@ -590,6 +646,28 @@ def _same_money(saving: Movement, other: Movement) -> bool:
     return saving.amount_minor == expected
 
 
+def _opposite_investment(movement: Movement, row: dict) -> bool:
+    """An addition to a fund never stands for a withdrawal of the same value, nor the reverse."""
+    decided = row.get("decision")
+    if movement.hint == "investment":
+        return decided == "investment_withdrawal" or (
+            decided != "investment" and row["merchant"].upper().startswith("RETIR")
+        )
+    if movement.hint == "investment_withdrawal":
+        # A person's decision outweighs the kind the model proposed.
+        return decided == "investment" or (decided is None and row["kind"] == "investment")
+    return False
+
+
+def _opposite_savings(candidate: Candidate, row: dict) -> bool:
+    """Money entering a savings account never stands for money leaving it, nor the reverse."""
+    if candidate.statement.product != "CTA_AHORROS":
+        return False
+    if candidate.movement.amount_minor > 0:
+        return row.get("decision") == "income" or row["kind"] == "income"
+    return row.get("decision") in {"personal", "family", "cash_withdrawal", "investment"}
+
+
 def match_existing(
     candidates: list[Candidate], rows: list[dict], owner: str = "santiago",
 ) -> tuple[list[tuple[Candidate, str]], list[Candidate]]:
@@ -598,20 +676,31 @@ def match_existing(
         row for row in rows
         if row["owner"] == owner and row["currency"] in {"COP", "USD"}
     ]
-    used: set[str] = set()
     matched, missing = [], []
+    # A line already imported is its own row; a line alike of another day never takes it.
+    known = {row["id"] for row in free}
+    own = {id(c): row_id for c in candidates if (row_id := line_id(c)) in known}
+    used = set(own.values())
     for candidate in sorted(candidates, key=lambda c: c.movement.day):
         movement = candidate.movement
+        if id(candidate) in own:
+            matched.append((candidate, own[id(candidate)]))
+            continue
         options = [
             row for row in free
             if row["id"] not in used and row["currency"] == movement.currency
             and row["amount_minor"] == abs(movement.amount_minor)
             and abs((date.fromisoformat(row["day"]) - movement.day).days) <= 5
+            and not _opposite_investment(movement, row) and not _opposite_savings(candidate, row)
         ]
         if not options:
             missing.append(candidate)
             continue
-        best = min(options, key=lambda row: abs((date.fromisoformat(row["day"]) - movement.day).days))
+        best = min(options, key=lambda row: (
+            abs((date.fromisoformat(row["day"]) - movement.day).days),
+            # On equal days, money received goes to a row known to be money received.
+            movement.amount_minor < 0 and row["kind"] != "income",
+        ))
         used.add(best["id"])
         matched.append((candidate, best["id"]))
     return matched, missing
@@ -629,6 +718,12 @@ def same_merchant(a: str, b: str) -> bool:
     """One merchant written with or without spaces or a trailing letter ("LA TIENDA DEL CAFE E")."""
     first, second = _compact(a), _compact(b)
     return min(len(first), len(second)) >= 5 and (first.startswith(second) or second.startswith(first))
+
+
+def names_merchant(line: str, merchant: str) -> bool:
+    """The same merchant, or a line that also says what it was ("PAGO DE NOMI EMPRESA")."""
+    compact = _compact(merchant)
+    return same_merchant(line, merchant) or (len(compact) >= 8 and compact in _compact(line))
 
 
 def find_twins(
@@ -677,6 +772,8 @@ def line_id(candidate: Candidate) -> str:
     """Id of the movement a statement line becomes in the panel, the same in every run."""
     statement, movement = candidate.statement, candidate.movement
     identity = f"{statement.identity}|{movement.day}|{movement.description}|{movement.amount_minor}|{movement.currency}"
+    if candidate.copy:  # the first one keeps the id it always had
+        identity += f"|{candidate.copy}"
     return "stmt:" + hashlib.sha256(identity.encode()).hexdigest()
 
 

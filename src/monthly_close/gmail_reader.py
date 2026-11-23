@@ -73,6 +73,8 @@ class GmailSourceReader:
         self.approved_senders = [sender.lower() for sender in approved_senders]
         self.active_folder: tuple[str, ...] | None = FOLDER
         self._received: dict[str, str] = {}
+        # Told (checked, total) while message metadata is read, before any notice is visited.
+        self.on_listed: Callable[[int, int], None] | None = None
 
     def _query(self, since: datetime | None) -> str:
         senders = " OR ".join(f'"{sender}"' for sender in self.approved_senders)
@@ -136,7 +138,10 @@ class GmailSourceReader:
 
     def _candidates(self, identifiers: list[str], since: datetime | None) -> list[tuple[datetime, dict]]:
         found: list[tuple[datetime, dict]] = []
-        for identifier in dict.fromkeys(identifiers):
+        unique = list(dict.fromkeys(identifiers))
+        for checked, identifier in enumerate(unique, 1):
+            if self.on_listed is not None:
+                self.on_listed(checked, len(unique))
             message = self._metadata(identifier)
             if message is None:
                 continue
