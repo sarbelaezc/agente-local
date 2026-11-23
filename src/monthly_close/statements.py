@@ -11,6 +11,7 @@ import io
 import logging
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -591,6 +592,7 @@ class Candidate:
     statement: Statement
     movement: Movement
     paired: bool = False  # the same money seen in another statement
+    copy: int = 0  # position among the identical lines of its own statement
 
 
 def _close(a: Movement, b: Movement, days: int = 5) -> bool:
@@ -604,14 +606,22 @@ def pair_internal(statements: list[Statement]) -> list[Candidate]:
     a savings debit and a fund addition; a loan instalment as a savings debit and in
     the credit statement. The savings side is dropped when the other side exists.
     """
-    candidates, seen = [], set()
+    candidates: list[Candidate] = []
+    seen: Counter[tuple] = Counter()
     for statement in statements:
+        here: Counter[tuple] = Counter()
+        same: Counter[Movement] = Counter()
         for movement in statement.movements:
-            # Consecutive statements may repeat a movement near their cut-off date.
+            if movement.currency not in {"COP", "USD"}:
+                continue
+            # Consecutive statements may repeat a movement near their cut-off date; lines
+            # alike within one statement are different movements.
             key = (statement.product, statement.suffix, movement.day, movement.amount_minor, movement.currency)
-            if movement.currency in {"COP", "USD"} and key not in seen:
-                seen.add(key)
-                candidates.append(Candidate(statement, movement))
+            here[key] += 1
+            if here[key] > seen[key]:
+                seen[key] = here[key]
+                candidates.append(Candidate(statement, movement, copy=same[movement]))
+            same[movement] += 1
     savings = [c for c in candidates if c.statement.product == "CTA_AHORROS"]
     others = [c for c in candidates if c.statement.product != "CTA_AHORROS"]
     for other in others:
@@ -657,10 +667,16 @@ def match_existing(
         row for row in rows
         if row["owner"] == owner and row["currency"] in {"COP", "USD"}
     ]
-    used: set[str] = set()
     matched, missing = [], []
+    # A line already imported is its own row; a line alike of another day never takes it.
+    known = {row["id"] for row in free}
+    own = {id(c): row_id for c in candidates if (row_id := line_id(c)) in known}
+    used = set(own.values())
     for candidate in sorted(candidates, key=lambda c: c.movement.day):
         movement = candidate.movement
+        if id(candidate) in own:
+            matched.append((candidate, own[id(candidate)]))
+            continue
         options = [
             row for row in free
             if row["id"] not in used and row["currency"] == movement.currency
@@ -743,6 +759,8 @@ def line_id(candidate: Candidate) -> str:
     """Id of the movement a statement line becomes in the panel, the same in every run."""
     statement, movement = candidate.statement, candidate.movement
     identity = f"{statement.identity}|{movement.day}|{movement.description}|{movement.amount_minor}|{movement.currency}"
+    if candidate.copy:  # the first one keeps the id it always had
+        identity += f"|{candidate.copy}"
     return "stmt:" + hashlib.sha256(identity.encode()).hexdigest()
 
 

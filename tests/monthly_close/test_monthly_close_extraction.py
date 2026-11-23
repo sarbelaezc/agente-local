@@ -444,3 +444,24 @@ def test_without_exactly_one_known_card_the_model_account_stays(preferences):
     ):
         event = extract(card_mail(body), prefs, FakeExtractionModel(account="Tarjeta A"), card_accounts=known)[0]
         assert event["account"] == "Tarjeta A", body
+
+
+TOP_UP = (
+    "Bancolombia le informa Recarga de Tarjeta Civica por $1,234.00 desde cta *1234. "
+    "01/03/2026 7:32. Inquietudes al 000."
+)
+
+
+def test_a_prepaid_card_top_up_is_read_without_the_model(preferences):
+    [event] = extract(purchase_mail(TOP_UP), preferences, None)
+    assert (event["merchant"], event["kind"], event["decision"]) == ("Recarga de Tarjeta Civica", "purchase", None)
+    assert (event["amount_minor"], event["day"], event["time"]) == (123400, "2026-03-01", "07:32")
+
+
+def test_a_top_up_in_another_wording_is_queued_when_the_model_returns_nothing(preferences):
+    class Empty:
+        def complete_json(self, system, user):
+            return {"events": []}
+
+    with pytest.raises(EvidenceError):
+        extract(purchase_mail(TOP_UP.replace("desde cta *1234", "con otra redaccion")), preferences, Empty())

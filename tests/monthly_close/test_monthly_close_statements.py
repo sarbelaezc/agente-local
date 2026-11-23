@@ -1111,3 +1111,28 @@ def test_a_fund_addition_never_matches_a_withdrawal_of_the_same_value_and_day():
     mistyped = {**notice, "kind": "investment"}
     matched, _missing = st.match_existing(candidates, [mistyped])
     assert [(c.movement.description, row) for c, row in matched] == [("RETIRO TRASLA", "out")]
+
+
+def test_equal_lines_of_one_statement_are_different_movements_but_not_across_statements():
+    def statement(end, *movements):
+        return st.Statement("CTA_AHORROS", "0001", date(2026, 5, 1), end, list(movements))
+
+    top_up = st.Movement(date(2026, 5, 27), "RECARGA", 100, "COP", "purchase")
+    first = statement(date(2026, 5, 31), top_up, top_up)
+    candidates = st.pair_internal([first, statement(date(2026, 6, 30), top_up)])
+    assert len(candidates) == 2 and len({st.line_id(c) for c in candidates}) == 2
+    # The first one keeps the id it had before equal lines were told apart.
+    assert st.line_id(candidates[0]) == st.line_id(st.Candidate(first, top_up))
+    # Each takes its own notice; with one notice, the other is imported.
+    row = {"id": "a", "owner": "santiago", "day": "2026-05-27", "amount_minor": 100, "currency": "COP",
+           "kind": "purchase", "merchant": "RECARGA", "decision": "personal"}
+    matched, missing = st.match_existing(candidates, [row])
+    assert (len(matched), len(missing)) == (1, 1)
+    # Running it again finds both and imports nothing.
+    imported = {**row, "id": st.line_id(missing[0])}
+    assert st.match_existing(candidates, [row, imported])[1] == []
+    # An equal line of the next day keeps its own row.
+    next_day = st.Candidate(first, st.Movement(date(2026, 5, 28), "RECARGA", 100, "COP", "purchase"))
+    later = {**row, "id": st.line_id(next_day), "day": "2026-05-28"}
+    matched, missing = st.match_existing([*candidates, next_day], [row, later])
+    assert (next_day, later["id"]) in [(c, i) for c, i in matched] and missing == [candidates[1]]
