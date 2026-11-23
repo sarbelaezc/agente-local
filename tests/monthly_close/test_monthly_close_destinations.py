@@ -130,6 +130,40 @@ def test_payment_to_a_business_from_a_product_is_read_without_the_model(preferen
     ]
 
 
+def test_scheduled_invesbot_contribution_is_an_investment_never_income(preferences):
+    """Ollama called it income; the notice has no date, so it takes the day it arrived."""
+    events = extract(notice(
+        "Bancolombia: Realizamos la inversión que programaste por COP $ 150.000,00 a tu plan\n"
+        "Plan Ficticio en Invesbot. Recibe tus rendimientos cada mes."
+    ), preferences, NoModel())
+    assert [(e["kind"], e["category"], e["merchant"], e["amount_minor"], e["day"], e["decision"]) for e in events] == [
+        ("investment", "Inversiones", "Invesbot Plan Ficticio", 15000000, "2026-03-01", None),
+    ]
+
+
+@pytest.mark.parametrize("body", [
+    "Transferiste COP $ 150.000,00 a tu inversión Plan Ficticio. Gracias por invertir.",
+    "Transferiste $ COP $ 150.000,00 a tu inversión Plan Ficticio.",
+    "Adicionaste COP $ 150.000,00 a tu plan Plan Ficticio en Invesbot.",
+])
+def test_every_wording_of_an_invesbot_contribution_is_the_same_plan(preferences, body):
+    events = extract(notice(body), preferences, NoModel())
+    assert [(e["kind"], e["merchant"], e["amount_minor"]) for e in events] == [
+        ("investment", "Invesbot Plan Ficticio", 15000000),
+    ]
+
+
+@pytest.mark.parametrize("body", [
+    "Ya ingresamos los COP $ 150.000,00 que transferiste a tu inversión Plan Ficticio.",
+    "Retiramos COP $ 150.000,00 y los agregamos a tu inversión Plan Ficticio.",
+    "El 14 de octubre tomaremos de tu cuenta de ahorros los COP $ 150.000 que elegiste sumar cada mes a tu inversión.",
+    "Asegúrate de tener $150.000,00 COP en tu producto origen cuenta bancaria.",
+])
+def test_invesbot_notices_without_money_of_their_own_leave_no_movement(preferences, body):
+    """The statement shows one debit per contribution: these repeat, confirm or announce it."""
+    assert extract(notice(body), preferences, NoModel()) == []
+
+
 def test_received_transfer_is_income_with_its_sender(preferences):
     events = extract(notice(
         "Bancolombia: USUARIO, recibiste una transferencia de PERSONA FICTICIA por $17,000.00 en tu "

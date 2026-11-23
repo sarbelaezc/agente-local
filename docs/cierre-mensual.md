@@ -929,12 +929,16 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 | «NOMBRE hizo un abono por $X a tu tarjeta de crédito terminada en *N» | Pago a tarjeta pendiente: «Abono de tercero» si pagó otra persona, «No cuenta» si fuiste tú |
 | «transferiste $X a la llave K desde tu cuenta *N a NOMBRE» | Transferencia a NOMBRE con la llave y la hora |
 | «Pagaste $X a NOMBRE desde tu producto *N el DD/MM/AAAA HH:MM:SS» | Compra pendiente a NOMBRE con la hora; confirma su categoría |
+| «Transferiste COP $X a tu inversión P», «Adicionaste COP $X a tu plan P en Invesbot» o «… la inversión que programaste por COP $X a tu plan P en Invesbot» | Inversión pendiente «Invesbot P» con la fecha de llegada del aviso (no trae otra); si ese plan ya tiene una regla de destino («Aplicar también a pagos futuros a este destino»), la regla la decide |
+| «Ya ingresamos los COP $X que transferiste…», «Retiramos COP $X y los agregamos a tu inversión…», «… tomaremos de tu cuenta de ahorros los COP $X que elegiste sumar…» y «Asegúrate de tener $X COP en tu producto origen» | Ningún movimiento: confirman, repiten o anuncian un aporte que ya llega en su propio aviso (el extracto muestra un solo débito) |
 | «recibiste una transferencia de NOMBRE por $X» | Ingreso pendiente con el nombre de quien envía |
 
 Las frases desde «NOMBRE hizo un abono» se reconocen aunque el correo las parta
 en varias líneas (por ejemplo «…hizo» al final de una línea y «un abono por…» en
 la siguiente). Ollama tomaba «Pagaste … desde tu cuenta» o «desde tu producto»
 por un pago de tarjeta y no devolvía nada; por eso esas dos frases se leen sin él.
+Con Invesbot tomaba aportes por ingresos y contaba como inversión las
+confirmaciones del mismo aporte.
 
 Las cuentas y las llaves Bre-B y QR de destino se guardan completas, como las
 escribe el aviso y como en lo importado del panel de Manuela, para que un mismo
@@ -1038,6 +1042,9 @@ archivos de la carpeta nunca se tocan.
   por la cuota de Google y barra de avance en los dos buzones; 422 movimientos del
   archivo completados con su aviso conservando sus decisiones, 7 posibles
   duplicados pendientes; la segunda ejecución solo leyó cambios.
+- Invesbot (2026-11-23): cada débito «TRASLADO A FONDO DE INVERSION» de los extractos
+  de ahorros corresponde a un solo aporte aunque lleguen dos o tres avisos; 20
+  copias pasaron a «No cuenta» y 7 aportes quedaron como «Invesbot P».
 - Extractos del banco de 2026: leídos sin errores; una segunda ejecución no
   importó nada. Extractos de Protección (2026-11-16): 10 de pensión voluntaria en
   los dos formatos y 2 de cesantías, encadenados sin diferencias mayores a $10.
@@ -1126,6 +1133,9 @@ archivos de la carpeta nunca se tocan.
   dos tienen extractos de septiembre y octubre). Probado solo sobre una copia de la
   base y con datos sintéticos.
 
+- Los avisos «tomaremos» de Invesbot de septiembre y octubre siguen decididos como
+  inversión: sin extracto de esas fechas no se sabe si fueron el único registro del
+  aporte.
 - Releer la cola de revisión de Manuela con las frases de pago por QR y de pago
   desde un producto: probadas en solo lectura sobre sus 54 avisos en cola, sin
   importar todavía.
