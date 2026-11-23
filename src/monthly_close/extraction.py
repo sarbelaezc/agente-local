@@ -581,6 +581,30 @@ def _named_card(source: str, card_accounts: dict[str, str]) -> str | None:
     return named.pop() if len(named) == 1 else None
 
 
+CARD_PURCHASE = re.compile(
+    r"compraste\s+(?P<amount>(?:COP|USD|EUR)?\s*\$?\s*\d[\d.,]*\d)\s+en\s+(?P<merchant>[^$]{2,80}?)"
+    r"\s+con\s+tu\s+T\.\s?(?:Cred|Deb)\w*\s+\*\d{4}",
+    re.IGNORECASE,
+)
+
+
+def _card_purchase(source: str, amount: str) -> str | None:
+    """Merchant of the notice's only card purchase sentence, when it states this same amount.
+
+    The model sometimes misspells the merchant or takes a purchase for income or an
+    investment because of its name; the bank's fixed sentence settles both.
+    """
+    found = list(CARD_PURCHASE.finditer(source))
+    if len(found) != 1:
+        return None
+    try:
+        if amount_minor(" ".join(found[0]["amount"].split())) != amount_minor(amount):
+            return None
+    except ValueError:
+        return None
+    return clean_text(" ".join(found[0]["merchant"].split()), 150)
+
+
 def _proposals(
     result: dict, mail: Mail, preferences: Preferences, received: datetime, source: str,
     last_attempt: bool = False, card_account: str | None = None,
@@ -605,29 +629,37 @@ def _proposals(
             if len(spaced) != 1:
                 raise EvidenceError("amount_text")
             amount = clean_text(spaced.pop(), 80)
-        no_merchant = last_attempt and event.get("kind") in NO_MERCHANT_KINDS
+        kind = event.get("kind")
+        if not isinstance(kind, str) or kind not in KINDS or type(event.get("savings")) is not bool:
+            raise ValueError("Tipo de movimiento invalido.")
+        bought = _card_purchase(source, amount) if len(events) == 1 else None
+        if bought and kind not in {"rejected", "promotion", "verification"}:
+            kind = "purchase"
+        no_merchant = last_attempt and kind in NO_MERCHANT_KINDS
         try:
             merchant = _literal_merchant(merchant, source, no_merchant)
         except EvidenceError:
             # e.g. a transfer to an account number: the notice names nobody. Keep what
             # the notice says right after the amount rather than the model's wording.
             after = re.match(r"\s*([^.\n]{3,60})", source[source.index(amount) + len(amount):])
-            if not no_merchant or not after:
+            if bought:
+                merchant = bought
+            elif no_merchant and after:
+                merchant = clean_text(after.group(1), 150)
+            else:
                 raise
-            merchant = clean_text(after.group(1), 150)
         account = clean_text(event.get("account"), 150)
         if account not in preferences.accounts + preferences.excluded_accounts + ["Desconocida"]:
             raise ValueError("Ollama propuso una cuenta no configurada.")
-        if card_account and event.get("kind") != "income":
+        if card_account and kind != "income":
             # The card's own digits in the notice decide; the model often names another card.
             account = card_account
         currency = clean_text(event.get("currency"), 3).upper()
         if currency != notice_currency(source, preferences.currency):
             raise ValueError("Moneda sin evidencia en el aviso: requiere revision manual.")
-        kind = event.get("kind")
-        if not isinstance(kind, str) or kind not in KINDS or type(event.get("savings")) is not bool:
-            raise ValueError("Tipo de movimiento invalido.")
         category = clean_text(event.get("category"), 150)
+        if kind != event["kind"] and category not in preferences.categories:
+            category = preferences.categories[-1]  # it belonged to the kind the model proposed
         if kind == "income" and not INCOME_CUE.search(_plain(source)):
             # The notice never says money was received: a person decides what it is.
             kind = "unknown"
