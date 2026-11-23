@@ -518,6 +518,7 @@ Fiducuenta, crédito de consumo e hipotecario):
 - Las cuotas de crédito cuentan como gasto si se deciden Personal o Familiar.
 - Las recargas de tarjetas prepagadas (por ejemplo, «RECARGA DE TARJETA CIVICA»,
   el pase del metro de Medellín) entran como compra, no como pago de tarjeta.
+- Una adición a un fondo nunca se empareja con un retiro del mismo valor, ni al revés.
 - Si un lector mejora, al conciliar de nuevo se corrige el tipo de los movimientos
   importados de extractos que siguen pendientes (`statement-reclassify`).
 
