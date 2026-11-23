@@ -569,6 +569,27 @@ def test_a_notice_completes_its_only_file_twin_and_flags_several_without_decidin
     assert audit == {"mailbox-complete-file-import": twin, "mailbox-possible-duplicate": "d"}
 
 
+def test_a_notice_only_completes_a_file_movement_of_its_own_kind(tmp_path, preferences):
+    """A purchase and the payment to the card for the same value on the same day are not copies."""
+    store = Store(tmp_path / "close.sqlite3")
+    store.configure(preferences.to_dict())
+    bought = insert_imported(store, "manuela", "2026-08-30", 700, "buy")
+    paid = insert_imported(store, "manuela", "2026-08-30", 700, "pay", kind="card_payment")
+    vague = insert_imported(store, "manuela", "2026-09-01", 800, "vague", kind="unknown")
+    other = insert_imported(store, "manuela", "2026-09-02", 900, "income", kind="income")
+    for message, day, amount, kind in (
+        ("m-pay", "2026-08-30", 700, "card_payment"), ("m-buy", "2026-08-30", 700, "purchase"),
+        ("m-vague", "2026-09-01", 800, "purchase"), ("m-cross", "2026-09-02", 900, "purchase"),
+    ):
+        store.import_message(message, [{**event(message, day, amount), "kind": kind}], owner="manuela")
+    source = sources(store)
+    assert (source[bought], source[paid], source[vague]) == ("m-buy", "m-pay", "m-vague")
+    # Another kind: never completed and never a silent new movement; a person compares them.
+    assert source[other].startswith("manuela-import:")
+    crossed = next(row for row in store.state()["transactions"] if row["id"] == "m-cross")
+    assert crossed["decision"] is None and crossed["note"].startswith("Posible duplicado de 1 movimiento importado del")
+
+
 def test_reprocessing_a_notice_never_deletes_the_file_movement_it_completed(tmp_path, preferences):
     store = Store(tmp_path / "close.sqlite3")
     store.configure(preferences.to_dict())
