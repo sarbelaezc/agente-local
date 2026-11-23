@@ -373,17 +373,21 @@ importa archivos.
 La base local conserva los movimientos de Manuela que llegaron una sola vez desde
 los archivos exportados de su panel anterior (con identificador `manuela:<id>`),
 con las decisiones, categorías y notas que ella aprobó. Al leer su Gmail, cada
-movimiento de un aviso se compara con ellos por día, importe y moneda:
+movimiento de un aviso se compara con ellos por día, importe, moneda y tipo (abono
+a tarjeta, ingreso u otra salida; uno «desconocido» vale para cualquiera):
 
 - **Coincide con uno solo.** Ese movimiento pasa a venir del aviso: toma su
   identificador de mensaje, su comercio, su cuenta y su hora, y conserva la
   decisión, la categoría y la nota de Manuela. No se crea un movimiento nuevo. Se
   audita como `mailbox-complete-file-import`.
-- **Coincide con varios.** Entra **pendiente** con la nota «Posible duplicado…»
+- **Coincide con varios del mismo tipo.** Se completa el único cuya hora esté a un
+  minuto o menos de la del aviso.
+- **Coincide con varios que la hora no distingue, o solo con otro tipo.** Entra **pendiente** con la nota «Posible duplicado…»
   y ninguna regla lo decide. Si es el mismo dinero, elige «No cuenta».
 
-Si decides un posible duplicado como gasto, ingreso o inversión y otro movimiento
-del mismo titular, día, valor y moneda ya cuenta, el panel pregunta antes de
+Si decides un posible duplicado como gasto, ingreso, inversión, retiro o abono de
+tercero y otro movimiento del mismo titular, día, valor y moneda (abonos a tarjeta
+solo con abonos a tarjeta) ya cuenta, el panel pregunta antes de
 guardar («Posible duplicado: ya cuenta un movimiento del …»), también al decidir un
 destino completo. Cancelar no guarda nada; «No cuenta» se guarda sin preguntar.
 - **No coincide con ninguno.** Entra como cualquier aviso nuevo.
@@ -407,6 +411,7 @@ local):
   una cuenta registrada del otro titular (`*NNNN` o un destino `tr:` que termina en
   esos dígitos) se marcan **entre Santiago y Manuela**. La marca automática nunca
   quita una puesta a mano.
+- La marca no decide el movimiento: sigue pendiente hasta que elijas una decisión.
 - También se marca a mano con el botón «Entre Santiago y Manuela» de la tarjeta del
   destino, que vale para pagos futuros a ese destino.
 - Las cuentas propias también se le indican a Ollama, para que una transferencia a

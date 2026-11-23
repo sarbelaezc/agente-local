@@ -2819,8 +2819,8 @@
         return note;
       }
       const decidedValues = new Set(["income", "personal", "family", "investment", "investment_withdrawal", "cash_withdrawal", "exclude", "third_party_payment"]);
-      // Decisions that add the movement to spending, income or investments.
-      const countingDecisions = new Set(["personal", "family", "income", "investment", "cash_withdrawal"]);
+      // Decisions that change a total: a copy would add, or a third-party payment subtract, twice.
+      const countingDecisions = new Set(["personal", "family", "income", "investment", "investment_withdrawal", "cash_withdrawal", "third_party_payment"]);
       const isPossibleDuplicate = tx => typeof tx.note === "string" && tx.note.startsWith("Posible duplicado");
       // Movements that may be the same money as tx and count: same member, day, amount and
       // currency, one of the two marked as a possible duplicate. deciding rows will count too.
@@ -2828,6 +2828,7 @@
         const ids = new Set(deciding.map(row => row.id));
         return safeArray(state.data && state.data.transactions).filter(other => other && other.id !== tx.id
           && other.owner === tx.owner && other.day === tx.day && other.amount_minor === tx.amount_minor
+          && (other.kind === "card_payment") === (tx.kind === "card_payment")
           && txCurrency(other) === txCurrency(tx) && (isPossibleDuplicate(tx) || isPossibleDuplicate(other))
           && (countingDecisions.has(other.decision) || ids.has(other.id)));
       }
@@ -2840,7 +2841,7 @@
         const more = twins.length > 1 ? ` (y ${twins.length - 1} más)` : "";
         return window.confirm(
           `Posible duplicado: ya cuenta un movimiento del ${twin.day} por ${formatMoney(twin.amount_minor, txCurrency(twin))}${more}. `
-          + `Si es el mismo dinero, se sumaría dos veces; marca uno de los dos como «No cuenta». ¿Guardar «${label}» de todos modos?`
+          + `Si es el mismo dinero, se contaría dos veces; marca uno de los dos como «No cuenta». ¿Guardar «${label}» de todos modos?`
         );
       }
       const counterpartKinds = new Set(["transfer", "own_transfer", "income", "unknown", "card_payment", "pse"]);
@@ -2909,10 +2910,11 @@
         const button = el("button", "button small", "Entre Santiago y Manuela");
         button.type = "button";
         button.setAttribute("aria-pressed", String(marked));
-        button.title = "No cuenta en Hogar; en la vista de cada titular conserva su decisión. Vale también para pagos futuros a este destino.";
+        button.title = "No cuenta en Hogar, pero no decide el movimiento: elige también una decisión. Marca todo el destino y vale también para pagos futuros a este destino.";
         button.addEventListener("click", () => postJson(
           "/api/between-owners", { owner: entry.owner, group: entry.group, value: !marked, remember: true },
-          marked ? "Destino desmarcado: vuelve a contar en Hogar." : "Destino marcado entre titulares: no cuenta en Hogar."
+          (marked ? "Destino desmarcado: vuelve a contar en Hogar." : "Destino marcado entre titulares: no cuenta en Hogar.")
+          + (entry.rows.some(tx => tx.decision == null) ? " La marca no lo decide: elige también una decisión." : "")
         ));
         return button;
       }

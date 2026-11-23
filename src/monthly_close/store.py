@@ -433,14 +433,29 @@ class Store:
                     db.execute("DELETE FROM mailbox_sync WHERE mailbox=? AND folder=?", (mailbox, row["folder"]))
 
     @staticmethod
-    def _file_twins(db: sqlite3.Connection, owner: str, event: dict) -> list[str]:
+    def _file_twins(db: sqlite3.Connection, owner: str, event: dict) -> list[sqlite3.Row]:
         """File-imported movements of that member with the same day, amount and currency."""
-        return [row["id"] for row in db.execute(
-            """SELECT id FROM transactions WHERE owner=? AND day=? AND amount_minor=?
+        return db.execute(
+            """SELECT id, kind, time FROM transactions WHERE owner=? AND day=? AND amount_minor=?
             AND currency=? AND message_id LIKE ? ORDER BY id""",
             (owner, event["day"], event["amount_minor"], event["currency"],
              FILE_IMPORT_PREFIX.format(owner=owner) + "%"),
-        )]
+        ).fetchall()
+
+    @staticmethod
+    def _same_minute(first: str | None, second: str | None) -> bool:
+        """Both hours are known and at most one minute apart."""
+        if not first or not second:
+            return False
+        gap = datetime.strptime(first, "%H:%M") - datetime.strptime(second, "%H:%M")
+        return abs(gap.total_seconds()) <= 60
+
+    @staticmethod
+    def _same_flow(file_kind: str, notice_kind: str) -> bool:
+        """Card payments, income and the rest never stand for each other; unknown may be any."""
+        def flow(kind: str) -> str:
+            return kind if kind in {"card_payment", "income"} else "out"
+        return "unknown" in (file_kind, notice_kind) or flow(file_kind) == flow(notice_kind)
 
     @staticmethod
     def _complete_from_notice(db: sqlite3.Connection, twin: str, message_id: str, event: dict) -> None:
@@ -470,17 +485,24 @@ class Store:
             imported = []
             for event in events:
                 twins = self._file_twins(db, owner, event)
-                if len(twins) == 1:
-                    self._complete_from_notice(db, twins[0], message_id, event)
-                    imported.append(twins[0])
+                same = [twin["id"] for twin in twins if self._same_flow(twin["kind"], event["kind"])]
+                if len(same) > 1:
+                    same = [
+                        twin["id"] for twin in twins
+                        if twin["id"] in same and self._same_minute(twin["time"], event.get("time"))
+                    ]
+                if len(same) == 1:
+                    self._complete_from_notice(db, same[0], message_id, event)
+                    imported.append(same[0])
                     continue
                 if twins:
                     event = {
                         **event, "decision": None,
-                        "note": f"{DUPLICATE_NOTE} de {len(twins)} movimientos importados del {event['day']} "
+                        "note": f"{DUPLICATE_NOTE} de {len(twins)} "
+                                f"{'movimiento importado' if len(twins) == 1 else 'movimientos importados'} del {event['day']} "
                                 "con el mismo valor: si es el mismo dinero, elige No cuenta",
                     }
-                    self._audit(db, "mailbox-possible-duplicate", event["id"], ",".join(twins))
+                    self._audit(db, "mailbox-possible-duplicate", event["id"], ",".join(twin["id"] for twin in twins))
                 imported.append(event["id"])
                 db.execute(
                     """INSERT INTO transactions (
