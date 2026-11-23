@@ -158,7 +158,8 @@ el total y una pista, con botones que deciden todos sus movimientos a la vez.
   extracto (por ejemplo un «TRASLADO A NEQUI» como Retiro en efectivo y Gasto
   personal), salvo posibles duplicados y lo que no pase la validación, como una
   compra en USD sin tasa, que queda pendiente con la decisión de la regla
-  propuesta (ver [Compras en dólares](#compras-en-dólares)). Se puede borrar en
+  propuesta (ver [Compras en dólares](#compras-en-dólares)). Una regla de Ingreso solo
+  decide dinero recibido: lo que le envías a ese destino queda pendiente. Se puede borrar en
   «Reglas por destino». Sin esa casilla no se crea ninguna regla.
 - **Categoría del destino.** Una tarjeta con varios movimientos que admiten Gasto
   personal o Familiar (compras, transferencias como un traslado a Nequi, cuotas
@@ -528,6 +529,8 @@ Fiducuenta, crédito de consumo e hipotecario):
 - Dos líneas iguales de un mismo extracto de ahorros son dos movimientos; la misma
   línea repetida en extractos consecutivos es uno. En los de tarjeta, el PDF repite
   filas, así que las iguales cuentan una vez.
+- En ahorros, dinero que entra nunca se empareja con un gasto o inversión decididos,
+  ni dinero que sale con un ingreso.
 - Una adición a un fondo nunca se empareja con un retiro del mismo valor, ni al revés.
 - Si un lector mejora, al conciliar de nuevo se corrige el tipo de los movimientos
   importados de extractos que siguen pendientes (`statement-reclassify`).

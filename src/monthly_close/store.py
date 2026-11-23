@@ -705,6 +705,8 @@ class Store:
             if rule is None:
                 continue
             decision, category = rule
+            if decision == "income" and row["kind"] != "income":
+                continue  # money sent to whom also pays the person: a person decides
             try:
                 with self.connect() as db:
                     self._decide(

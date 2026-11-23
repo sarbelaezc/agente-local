@@ -201,6 +201,17 @@ def test_paying_the_other_members_card_is_own_spending_and_never_counts_twice_at
     assert (second["decision"], second["category"], second["between_owners"]) == ("personal", "Otros gastos", 1)
 
 
+def test_an_income_rule_never_decides_money_sent_to_that_person(store):
+    def move(identifier, kind):
+        store.import_message(identifier, [santiago_event(identifier, 100, kind=kind, merchant="PERSONA UNO")])
+        return next(r for r in store.state()["transactions"] if r["id"] == identifier)
+
+    row = move("first", "income")
+    store.decide_group("santiago", row["group"], "income", remember=True)
+    assert move("sent", "transfer")["decision"] is None
+    assert move("received", "income")["decision"] == "income"
+
+
 def test_a_card_in_no_statement_is_money_given_away(store):
     mail = Mail("pay", SENDER, "Alertas", "2026-10-14T17:00:00Z", CARD_NOTICE)
 
