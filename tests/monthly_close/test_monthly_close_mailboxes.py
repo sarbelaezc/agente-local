@@ -608,6 +608,43 @@ def test_the_hour_tells_apart_two_file_movements_of_the_same_kind(tmp_path, pref
     assert all(notes[name].startswith("Posible duplicado de 2") for name in ("m-none", "m-far"))
 
 
+def test_a_late_notice_joins_the_movement_its_statement_already_brought(tmp_path, preferences):
+    store = Store(tmp_path / "close.sqlite3")
+    store.configure(preferences.to_dict())
+
+    def line(identifier: str, merchant: str, amount: int, day: str = "2026-04-13", kind: str = "purchase") -> None:
+        store.record_statements([], [{
+            **event(identifier, day, amount), "id": f"stmt:{identifier}", "message_id": "statement:x",
+            "merchant": merchant, "kind": kind, "owner": "manuela",
+        }])
+
+    line("pizza", "PIZZERIA FICTICIA", 100)
+    line("pay", "PAGO DE NOMI EMPRESA FICTICIA", 200, kind="income")
+    line("other", "OTRO COMERCIO", 300)
+    line("twice-a", "TIENDA DOBLE", 400)
+    line("twice-b", "TIENDA DOBLE", 400, day="2026-04-14")
+    line("far", "TIENDA LEJANA", 500, day="2026-04-18")
+    store.decide("stmt:pizza", "family", "Compras")
+    for name, merchant, amount, kind in (
+        ("m-pizza", "PIZZERIA FICTICIA", 100, "purchase"), ("m-pay", "EMPRESA FICTICIA", 200, "income"),
+        ("m-other", "COMERCIO DISTINTO", 300, "purchase"), ("m-twice", "TIENDA DOBLE", 400, "purchase"),
+        ("m-far", "TIENDA LEJANA", 500, "purchase"),
+    ):
+        store.import_message(name, [{**event(name, "2026-04-13", amount), "merchant": merchant, "kind": kind,
+                                     "time": "20:41"}], owner="manuela")
+    source = sources(store)
+    rows = {row["id"]: row for row in store.state()["transactions"]}
+    assert (source["stmt:pizza"], source["stmt:pay"]) == ("m-pizza", "m-pay")
+    assert "m-pizza" not in rows and "m-pay" not in rows
+    assert (rows["stmt:pizza"]["decision"], rows["stmt:pizza"]["time"]) == ("family", "20:41")
+    # Another merchant or too far: a movement of its own. Two lines: a person compares.
+    assert rows["m-other"]["note"] is None and rows["m-far"]["note"] is None
+    assert rows["m-twice"]["note"].startswith("Posible duplicado de 2 movimientos del extracto")
+    # A second purchase of the same value does not join the line already taken.
+    store.import_message("m-again", [{**event("m-again", "2026-04-13", 100), "merchant": "PIZZERIA FICTICIA"}], owner="manuela")
+    assert "m-again" in sources(store)
+
+
 def test_reprocessing_a_notice_never_deletes_the_file_movement_it_completed(tmp_path, preferences):
     store = Store(tmp_path / "close.sqlite3")
     store.configure(preferences.to_dict())

@@ -583,7 +583,8 @@ def _named_card(source: str, card_accounts: dict[str, str]) -> str | None:
 
 CARD_PURCHASE = re.compile(
     r"compraste\s+(?P<amount>(?:COP|USD|EUR)?\s*\$?\s*\d[\d.,]*\d)\s+en\s+(?P<merchant>[^$]{2,80}?)"
-    r"\s+con\s+tu\s+T\.\s?(?:Cred|Deb)\w*\s+\*\d{4}",
+    r"(?:\s+con\s+tu\s+T\.\s?(?:Cred|Deb)\w*\s+\*\d{4}"
+    r"|,\s+el\s+\d{2}/\d{2}/\d{4}[^$]{0,40}?esta\s+compra\s+est[aá]\s+asociada\s+a\s+T\.)",
     re.IGNORECASE,
 )
 
@@ -637,17 +638,15 @@ def _proposals(
             kind = "purchase"
         no_merchant = last_attempt and kind in NO_MERCHANT_KINDS
         try:
-            merchant = _literal_merchant(merchant, source, no_merchant)
+            # The sentence names the merchant; the model may copy the bank's name instead.
+            merchant = bought or _literal_merchant(merchant, source, no_merchant)
         except EvidenceError:
             # e.g. a transfer to an account number: the notice names nobody. Keep what
             # the notice says right after the amount rather than the model's wording.
             after = re.match(r"\s*([^.\n]{3,60})", source[source.index(amount) + len(amount):])
-            if bought:
-                merchant = bought
-            elif no_merchant and after:
-                merchant = clean_text(after.group(1), 150)
-            else:
+            if not no_merchant or not after:
                 raise
+            merchant = clean_text(after.group(1), 150)
         account = clean_text(event.get("account"), 150)
         if account not in preferences.accounts + preferences.excluded_accounts + ["Desconocida"]:
             raise ValueError("Ollama propuso una cuenta no configurada.")
