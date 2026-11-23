@@ -659,6 +659,15 @@ def _opposite_investment(movement: Movement, row: dict) -> bool:
     return False
 
 
+def _opposite_savings(candidate: Candidate, row: dict) -> bool:
+    """Money entering a savings account never stands for money leaving it, nor the reverse."""
+    if candidate.statement.product != "CTA_AHORROS":
+        return False
+    if candidate.movement.amount_minor > 0:
+        return row.get("decision") == "income" or row["kind"] == "income"
+    return row.get("decision") in {"personal", "family", "cash_withdrawal", "investment"}
+
+
 def match_existing(
     candidates: list[Candidate], rows: list[dict], owner: str = "santiago",
 ) -> tuple[list[tuple[Candidate, str]], list[Candidate]]:
@@ -682,12 +691,16 @@ def match_existing(
             if row["id"] not in used and row["currency"] == movement.currency
             and row["amount_minor"] == abs(movement.amount_minor)
             and abs((date.fromisoformat(row["day"]) - movement.day).days) <= 5
-            and not _opposite_investment(movement, row)
+            and not _opposite_investment(movement, row) and not _opposite_savings(candidate, row)
         ]
         if not options:
             missing.append(candidate)
             continue
-        best = min(options, key=lambda row: abs((date.fromisoformat(row["day"]) - movement.day).days))
+        best = min(options, key=lambda row: (
+            abs((date.fromisoformat(row["day"]) - movement.day).days),
+            # On equal days, money received goes to a row known to be money received.
+            movement.amount_minor < 0 and row["kind"] != "income",
+        ))
         used.add(best["id"])
         matched.append((candidate, best["id"]))
     return matched, missing

@@ -1136,3 +1136,27 @@ def test_equal_lines_of_one_statement_are_different_movements_but_not_across_sta
     later = {**row, "id": st.line_id(next_day), "day": "2026-05-28"}
     matched, missing = st.match_existing([*candidates, next_day], [row, later])
     assert (next_day, later["id"]) in [(c, i) for c, i in matched] and missing == [candidates[1]]
+
+
+def test_money_entering_savings_never_matches_money_leaving_it():
+    day = date(2026, 9, 23)
+    savings = st.Statement("CTA_AHORROS", "0001", date(2026, 9, 1), date(2026, 9, 30), [
+        st.Movement(day, "CONSIGNACION", -100, "COP", "income"),
+        st.Movement(day, "TRANSF A ALGUIEN", 100, "COP", "transfer"),
+        st.Movement(day, "TRASLADO", 300, "COP", "unknown"),
+    ])
+    base = {"owner": "santiago", "day": "2026-09-23", "currency": "COP", "merchant": "X"}
+    spent = {**base, "id": "spent", "amount_minor": 100, "kind": "transfer", "decision": "personal"}
+    received = {**base, "id": "received", "amount_minor": 100, "kind": "income", "decision": None}
+    unsure = {**base, "id": "unsure", "amount_minor": 300, "kind": "unknown", "decision": None}
+    candidates = [c for c in (st.Candidate(savings, m) for m in savings.movements)]
+    matched, missing = st.match_existing(candidates, [spent, received, unsure])
+    assert {c.movement.description: row for c, row in matched} == {
+        "CONSIGNACION": "received", "TRANSF A ALGUIEN": "spent", "TRASLADO": "unsure",
+    }
+    assert missing == []
+    pending = {**spent, "id": "pending", "decision": None}
+    matched, missing = st.match_existing(candidates, [pending, received, unsure])
+    assert dict((c.movement.description, row) for c, row in matched)["CONSIGNACION"] == "received" and missing == []
+    matched, missing = st.match_existing(candidates, [spent, unsure])
+    assert [c.movement.description for c in missing] == ["CONSIGNACION"]
