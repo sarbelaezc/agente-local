@@ -124,6 +124,8 @@ def extract(
     fixed = _fixed_events(mail, preferences, source)
     if fixed:
         return _notice_time(_mark_own_transfers(assign_destinations(fixed, source), own_accounts), received)
+    if INVESBOT_NO_MOVEMENT.search(source):
+        return []  # the money is in its own contribution notice and the statement
     context = {
         "accounts": preferences.accounts,
         "own_account_suffixes": sorted(own_accounts or []),
@@ -433,24 +435,35 @@ def _product_payments(mail: Mail, preferences: Preferences, source: str) -> list
     return list(proposals.values())
 
 
+# A contribution to an Invesbot plan, in the wordings the bank used over the year.
 INVESBOT_CONTRIBUTION = _sentence(
-    r"la inversi[oó]n que programaste por (?:COP )?" + AMOUNT_TEXT + r" a tu plan (?P<plan>[^\n$]{1,60}?) en (?P<bot>Inve(?:st|s)bot)\b"
+    r"(?:la inversi[oó]n que programaste por|adicionaste|transferiste(?: \$)?) (?:COP )?" + AMOUNT_TEXT
+    + r" a tu (?:plan (?P<plan>[^\n$]{1,60}?) en Inve(?:st|s)bot\b|inversi[oó]n (?P<fund>[^\n$]{1,60}?)\.(?=\s|$))"
+)
+# Notices about a contribution that move no money of their own: the bank confirming or
+# repeating one already announced (one debit in the statement), a coming debit, a reminder.
+INVESBOT_NO_MOVEMENT = _sentence(
+    r"(?:ya ingresamos los (?:COP )?\$[^\n]{1,40}? que transferiste a tu inversi[oó]n"
+    r"|retiramos (?:COP )?\$[^\n]{1,40}? y los agregamos a tu inversi[oó]n"
+    r"|tomaremos de tu cuenta de ahorros los (?:COP )?\$[^\n]{1,40}? que elegiste sumar"
+    r"|aseg[uú]rate de tener \$[^\n]{1,40}? en tu producto origen)"
 )
 
 
 def _invesbot_contributions(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
-    """A scheduled contribution: "... la inversion que programaste por $X a tu plan P en Invesbot".
+    """A contribution to an Invesbot plan: "transferiste/adicionaste $X a tu plan P en Invesbot".
 
-    The model took it for money received. The notice states no date, so it is the day it
-    arrived. The merchant names the plan, so each plan keeps one destination and its rule.
+    The model took some for money received and named the plan differently each time. The
+    notice states no date, so it is the day it arrived. The merchant is "Invesbot P", so
+    each plan keeps one destination and its rule whatever the wording.
     """
     day = received_local(mail.received, preferences.timezone).date().isoformat()
     proposals = {}
     for match in INVESBOT_CONTRIBUTION.finditer(source):
-        merchant = f"{match['bot']} {' '.join(match['plan'].split())}"
+        merchant = "Invesbot " + " ".join((match["plan"] or match["fund"]).split())
         identifier, event = _fixed_event(
             mail, preferences, source, merchant, match["amount"], day, "investment", "Inversiones",
-            f"Aporte programado a {merchant}, leido del aviso sin Ollama. Confirma que es inversion.",
+            f"Aporte a {merchant}, leido del aviso sin Ollama. Confirma que es inversion.",
         )
         proposals[identifier] = event
     return list(proposals.values())
