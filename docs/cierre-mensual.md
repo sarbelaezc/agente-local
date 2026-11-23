@@ -950,6 +950,14 @@ por un pago de tarjeta y no devolvía nada; por eso esas dos frases se leen sin 
 Con Invesbot tomaba aportes por ingresos y contaba como inversión las
 confirmaciones del mismo aporte.
 
+**Compras con tarjeta.** «Compraste $X en COMERCIO con tu T.Cred *NNNN» sí pasa por
+Ollama, que propone la categoría y la cuenta. Si el aviso trae una sola frase así,
+Ollama propone un solo movimiento y el monto coincide, la frase manda en dos cosas:
+el movimiento es una compra aunque el comercio se llame «APORTE…» (salvo que Ollama
+lo lea como rechazado, promoción o verificación) y, si Ollama copia mal el nombre,
+el comercio se toma de la frase. Si algo no se cumple, el aviso sigue las reglas
+normales y puede ir a la cola de revisión.
+
 Las cuentas y las llaves Bre-B y QR de destino se guardan completas, como las
 escribe el aviso y como en lo importado del panel de Manuela, para que un mismo
 destino tenga la misma llave en avisos e importaciones. Si el aviso solo escribe
