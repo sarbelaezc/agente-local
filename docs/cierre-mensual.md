@@ -16,7 +16,7 @@ Para instalar y configurar, ver [configuracion.md](configuracion.md).
   - [Ingresos](#ingresos)
   - [Inversiones y retiros](#inversiones-y-retiros)
   - [Avisos sin extraer](#avisos-sin-extraer)
-  - [Movimientos de Manuela por archivo](#movimientos-de-manuela-por-archivo)
+  - [Movimientos de Manuela que vinieron por archivo](#movimientos-de-manuela-que-vinieron-por-archivo)
   - [Cuentas y transferencias entre titulares](#cuentas-y-transferencias-entre-titulares)
   - [Conciliar extractos](#conciliar-extractos)
   - [Conciliación automática del mes](#conciliación-automática-del-mes)
@@ -110,9 +110,23 @@ abrir el panel.
 - **Reanudar.** Si una ejecución con fechas se interrumpe, repetirla con el mismo
   rango no vuelve a abrir los avisos ya completados. El progreso se guarda como
   huellas, sin asuntos ni cuerpos, y se borra al terminar.
-- **Progreso.** En una terminal interactiva se ve una barra por carpeta
-  (`[#####......] 36% | dinero / bancolombia | 2026-08-02 | 2 avisos`). No aparece
-  en la tarea programada ni al redirigir la salida, y nunca muestra contenido.
+- **Progreso.** En una terminal interactiva se ve una sola barra para todo el
+  recorrido, que nunca retrocede
+  (`[#########...] 37% | santiago · Dinero / Bancolombia | 2026-08-02 | 12 avisos`).
+  Cada buzón ocupa una parte igual. En Outlook esa parte se reparte entre sus
+  carpetas, y cada carpeta se anuncia al empezar aunque no traiga avisos
+  (`Carpeta 3/15`). En Gmail, la mitad es la revisión de los datos básicos de cada
+  mensaje (`Revisando lista: 3/12 mensajes`) y la otra mitad la lectura de los
+  avisos. Dentro de cada parte avanza según la fecha de los avisos: con fechas se
+  lee del más nuevo al más viejo y, sin fechas, del más viejo al más nuevo. No
+  aparece en la tarea programada ni al redirigir la salida, y nunca muestra
+  contenido.
+- **Límite de consultas de Gmail.** Google limita las consultas por minuto de
+  cada usuario. Si Gmail responde que se agotó esa cuota, el agente lo dice
+  (`Gmail pidio esperar o fallo un momento; se reintenta en 15 s.`) y
+  reintenta tras 15, 30, 60 y 60 segundos. Si sigue agotada, se detiene sin
+  guardar la posición del buzón. Un 403 por cualquier otro motivo, como falta de
+  permisos, detiene la ejecución sin reintentar.
 - Al terminar de leer los avisos, cada `scan`, `import` o `scheduled` (sin
   `-ReadOnly`) concilia los extractos si existe `statements.json` e importa los
   registros de créditos si existe `credit_ledgers.json`. Un fallo en cualquier
@@ -349,36 +363,35 @@ lo reintenta); si no trae ninguno, descártalo.
 Los fallos de sesión, de Graph o de Gmail, y cualquier otra validación, sí
 detienen la ejecución.
 
-## Movimientos de Manuela por archivo
+## Movimientos de Manuela que vinieron por archivo
 
-Los movimientos de Manuela hasta su último día exportado de su panel anterior
-entran por archivo. Desde ese día, si su Gmail está configurado, el agente lo lee
-directamente.
+Todos los movimientos de los dos titulares se obtienen del correo, cada uno con su
+API (Outlook de Santiago por Microsoft Graph y Gmail de Manuela por la API de
+Gmail), desde la misma fecha de inicio y con la misma información. El agente no
+importa archivos.
 
-```powershell
-.\scripts\agente-local.ps1 import-manuela
-```
+La base local conserva los movimientos de Manuela que llegaron una sola vez desde
+los archivos exportados de su panel anterior (con identificador `manuela:<id>`),
+con las decisiones, categorías y notas que ella aprobó. Al leer su Gmail, cada
+movimiento de un aviso se compara con ellos por día, importe y moneda:
 
-Lee de `.local\ImportManuela\` los archivos `movimientos_manuela.normalizado.json`,
-`decisiones_manuela.json` y, si existe, `paridad_totales_manuela.json`.
+- **Coincide con uno solo.** Ese movimiento pasa a venir del aviso: toma su
+  identificador de mensaje, su comercio, su cuenta y su hora, y conserva la
+  decisión, la categoría y la nota de Manuela. No se crea un movimiento nuevo. Se
+  audita como `mailbox-complete-file-import`.
+- **Coincide con varios.** Entra **pendiente** con la nota «Posible duplicado…»
+  y ninguna regla lo decide. Si es el mismo dinero, elige «No cuenta».
 
-- Valida todo antes de escribir. Si un registro falla, no importa nada e indica
-  solo su número, nunca su contenido. Escribe todo en una transacción.
-- Es idempotente: lo que ya existe (`manuela:<id>`) se omite.
-- Lo que Manuela ya había decidido entra decidido y auditado como
-  `decision-manuela`. Los pagos a destinos se deciden con su decisión por destino,
-  que se guarda como regla; si una persona ya cambió esa regla, no se sobrescribe.
-- Las compras en moneda extranjera entran en COP tal como las convirtió Manuela
-  (4.000 COP/USD), con la nota «aprox.».
-- Las categorías dudosas quedan como «Categoría por confirmar» hasta que alguien
-  decida ese movimiento.
-- Al terminar compara los totales de cada mes con el archivo de paridad y se
-  detiene con error si alguno no coincide (descontando la diferencia aprobada del
-  cajero).
-- **Día de corte.** El Gmail de Manuela empieza en el último día del archivo, ese
-  día incluido. Un movimiento del buzón con el mismo día, importe y moneda que uno
-  del archivo entra **pendiente** con la nota «Posible duplicado…»; ninguna regla
-  lo decide. Si es el mismo dinero, elige «No cuenta».
+Si decides un posible duplicado como gasto, ingreso o inversión y otro movimiento
+del mismo titular, día, valor y moneda ya cuenta, el panel pregunta antes de
+guardar («Posible duplicado: ya cuenta un movimiento del …»), también al decidir un
+destino completo. Cancelar no guarda nada; «No cuenta» se guarda sin preguntar.
+- **No coincide con ninguno.** Entra como cualquier aviso nuevo.
+
+Los movimientos del archivo sin aviso en el correo se quedan como están. Los que
+traían una categoría dudosa siguen marcados «Categoría por confirmar» hasta que
+alguien los decida. Reprocesar un aviso con `-ReprocessEmpty` nunca borra el
+movimiento del archivo que ese aviso completó.
 
 ## Cuentas y transferencias entre titulares
 
@@ -501,6 +514,7 @@ de producto, así que el buzón dice de quién es cada uno:
 |---|---|---|---|
 | Pensión voluntaria | «Extracto Pensiones Voluntarias Protección S.A.» | `<id>_PensionVoluntaria_AAAAMM.pdf` | Mensual |
 | Cesantías | «Extracto de Cesantias Protección.» | `<id>_PensionesCesantias_AAAAMM.pdf` | Semestral |
+| Pensión obligatoria | «Extracto de Pensiones Obligatorias Protección S.A» | `<id>_PensionesObligatorias_AAAAMM.pdf` | Trimestral |
 
 - Solo guardan cifras, no movimientos: no duplican los avisos de aportes ni
   cambian el gasto. Por producto y período: saldo inicial, aportes, retiros
@@ -509,6 +523,12 @@ de producto, así que el buzón dice de quién es cada uno:
 - Las cifras deben sumar el saldo final con una diferencia de hasta $10, porque
   Protección redondea a pesos. Una diferencia mayor o un concepto que falte detiene
   todo sin guardar nada.
+- La pensión obligatoria no imprime un saldo inicial. El saldo final es «Mi saldo
+  total ahorrado», que debe ser la suma del resumen de toda la vida laboral
+  (aportes obligatorios, voluntarios, rendimientos y bono) y coincidir con «Aportes
+  totales» y «Rendimientos totales». Los aportes son los obligatorios del trimestre
+  más los voluntarios netos, y el saldo inicial es el saldo final menos esos aportes
+  y los rendimientos del trimestre.
 - Los correos de Protección no se envían a Ollama: se marcan como procesados sin
   movimientos, porque la información la aporta el PDF.
 
@@ -520,7 +540,7 @@ nombre a la izquierda y su saldo o estado a la derecha.
   («✓ 21/21») indica que todos los movimientos coinciden. Una naranja («⚠ 3
   pendientes») indica que algunos solo venían en el extracto: entraron como
   pendientes y debajo se indica cuántos coinciden.
-- **Inversiones** (Fiducuenta, pensión voluntaria y cesantías) y **Créditos**: el
+- **Inversiones** (Fiducuenta, pensión voluntaria, cesantías y pensión obligatoria) y **Créditos**: el
   total del último saldo conocido de cada producto hasta ese mes, con la fecha
   del saldo. Protección muestra además aportes, retiros y rendimientos.
 
@@ -534,8 +554,7 @@ recuerda lo que abres o cierras en cada mes mientras sigue abierto.
 
 ## Conciliación automática del mes
 
-Después de cada lectura (`scan`, `import`, la tarea programada), de
-`import-manuela` y de cada
+Después de cada lectura (`scan`, `import`, la tarea programada) y de cada
 decisión en el panel, el agente revisa los meses ya cerrados (anteriores al mes en
 curso). Un mes queda **Conciliado** si se cumple todo:
 
@@ -777,8 +796,9 @@ visuales > Efectos de animación), el panel cambia sin animaciones.
   la inversión neta, los retiros de inversión y la cobertura («X de N» meses
   revisados a mano o conciliados con los extractos).
 - Gráfica de ingresos (azul) y gastos (naranja), dos colores que se distinguen
-  también con daltonismo rojo-verde; categorías del año con barras y porcentaje, y
-  columnas por categoría con los mismos colores que el mes. El mes en curso se ve
+  también con daltonismo rojo-verde; categorías del año con barras y porcentaje;
+  comercios frecuentes del año, agrupados igual que en el mes; y columnas por
+  categoría con los mismos colores que el mes. El mes en curso se ve
   más claro.
 - **Inversiones y créditos:** una gráfica de línea para cada grupo con el saldo
   al cierre de cada mes, hasta el mes en curso: verde azulado para inversiones y
@@ -883,8 +903,8 @@ Sin `-Start` ni `-End`, `scan`, `import` y la tarea leen solo lo que cambió:
   La primera sincronización lista la carpeta completa y descarta, sin abrirlos, los
   avisos anteriores al inicio. Los mensajes borrados o movidos se ignoran.
 - **Gmail** guarda el `historyId` del buzón y luego pide solo lo añadido.
-- **Inicio.** La primera vez, desde el 1 de enero del año local (o desde el último
-  día importado por archivo para ese titular). No hay fecha de fin.
+- **Inicio.** La primera vez, desde el 1 de enero del año local, igual para los dos
+  buzones. No hay fecha de fin.
 - **Fallos.** La posición de cada carpeta se guarda solo después de procesar todos
   sus avisos, así que un fallo repite esos cambios sin duplicar nada. Si Graph o
   Gmail rechazan una posición caducada, esa carpeta o ese buzón se sincroniza de
@@ -904,14 +924,17 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 | «Pagaste $X en la tarjeta de credito *NNNN desde la cuenta *NNNN, el DD/MM/AAAA» | Pago de tarjeta decidido «No cuenta» (no es gasto: el gasto son las compras). La cuenta queda `Desconocida` |
 | «Transferiste $X [por QR] desde tu cuenta *NNNN a la cuenta *NNNN, el …» | Transferencia pendiente a `cuenta *NNNN`, destino `tr:` con el número completo que escribe el aviso |
 | «Transferiste $X a la llave @alias o número desde tu cuenta …» (Bre-B) | Destino `bb:@alias` o `bb:` con el número completo de la llave |
-| «Pagaste $X por código QR desde tu cuenta … a la llave …» | Destino `qr:` con la llave completa |
+| «Pagaste $X por código QR desde tu cuenta *N a la llave K el DD/MM/AAAA a las HH:MM» | Transferencia pendiente «Pago QR a llave K» con la hora, destino `qr:` con la llave completa |
 | «Retiraste $X de tu cuenta de inversión *XXXX …» | Destino `fd:XXXX` |
 | «NOMBRE hizo un abono por $X a tu tarjeta de crédito terminada en *N» | Pago a tarjeta pendiente: «Abono de tercero» si pagó otra persona, «No cuenta» si fuiste tú |
 | «transferiste $X a la llave K desde tu cuenta *N a NOMBRE» | Transferencia a NOMBRE con la llave y la hora |
+| «Pagaste $X a NOMBRE desde tu producto *N el DD/MM/AAAA HH:MM:SS» | Compra pendiente a NOMBRE con la hora; confirma su categoría |
 | «recibiste una transferencia de NOMBRE por $X» | Ingreso pendiente con el nombre de quien envía |
 
-Las tres últimas frases se reconocen aunque el correo las parta en varias líneas
-(por ejemplo «…hizo» al final de una línea y «un abono por…» en la siguiente).
+Las frases desde «NOMBRE hizo un abono» se reconocen aunque el correo las parta
+en varias líneas (por ejemplo «…hizo» al final de una línea y «un abono por…» en
+la siguiente). Ollama tomaba «Pagaste … desde tu cuenta» o «desde tu producto»
+por un pago de tarjeta y no devolvía nada; por eso esas dos frases se leen sin él.
 
 Las cuentas y las llaves Bre-B y QR de destino se guardan completas, como las
 escribe el aviso y como en lo importado del panel de Manuela, para que un mismo
@@ -970,7 +993,8 @@ etiquetas principales:
 | `qr-not-own-transfer` | Pago por QR que Ollama propuso como transferencia propia, vuelto transferencia |
 | `card-account-backfill` | Tarjeta corregida por los dígitos del aviso al releer los avisos ya importados (con la anterior) |
 | `payroll-deduction-income` | Ingreso espejo de una cuota descontada de la nómina |
-| `mailbox-possible-duplicate` | Posible duplicado entre el Gmail de Manuela y su archivo |
+| `mailbox-complete-file-import` | Movimiento del archivo de Manuela completado con su aviso de Gmail (con el mensaje) |
+| `mailbox-possible-duplicate` | Aviso de Gmail de Manuela igual a varios movimientos de su archivo, dejado pendiente |
 | `reprocess-replace-card-payments` | Pagos de tarjeta reemplazados por `-ReprocessEmpty` |
 | `category-merge-local-user` | Categoría unida con `merge-category` |
 | `scheduled-close` | Cierre de la tarea programada |
@@ -980,6 +1004,11 @@ etiquetas principales:
 **Migración de bases anteriores.** Al abrir una base de una versión anterior, el
 agente la copia a `close.sqlite3.backup-<fecha UTC>` antes de añadir columnas y
 tablas. No cambia importes, decisiones ni auditoría.
+
+**Copias de la base.** Cada vez que se abre la base se conservan solo las 3
+copias `close.sqlite3.backup-<fecha UTC>` más recientes, sean de una migración o
+hechas a mano antes de un cambio, porque contienen los movimientos reales. Otros
+archivos de la carpeta nunca se tocan.
 
 ## Privacidad y límites
 
@@ -1005,12 +1034,16 @@ tablas. No cambia importes, decisiones ni auditoría.
 - Gmail de Manuela (2026-11-16): inicio de sesión en modo Testing, recorrido de
   solo lectura (3 avisos cotejados en Gmail) y primera importación con un posible
   duplicado y una transferencia propia, ambos pendientes.
-- Importación de Manuela: paridad mes a mes con su panel (salvo la diferencia
-  aprobada del cajero); la segunda importación no cambió nada; los totales de
-  Santiago quedaron idénticos.
+- Gmail de Manuela desde el 1 de enero (2026-11-22): 609 avisos leídos con espera
+  por la cuota de Google y barra de avance en los dos buzones; 422 movimientos del
+  archivo completados con su aviso conservando sus decisiones, 7 posibles
+  duplicados pendientes; la segunda ejecución solo leyó cambios.
 - Extractos del banco de 2026: leídos sin errores; una segunda ejecución no
   importó nada. Extractos de Protección (2026-11-16): 10 de pensión voluntaria en
   los dos formatos y 2 de cesantías, encadenados sin diferencias mayores a $10.
+- Pensión obligatoria de Manuela (2026-11-22): 8 extractos trimestrales de 2025 y
+  2026 leídos en solo lectura; el saldo inicial deducido de cada trimestre coincide
+  con el saldo final del anterior con diferencias de hasta $1.
 - Destinos de pagos ya importados, releyendo los avisos de todos los buzones:
   quedó guardado el destino de casi todos, con la llave completa, sin cambiar
   importes ni decisiones.
@@ -1093,6 +1126,9 @@ tablas. No cambia importes, decisiones ni auditoría.
   dos tienen extractos de septiembre y octubre). Probado solo sobre una copia de la
   base y con datos sintéticos.
 
+- Releer la cola de revisión de Manuela con las frases de pago por QR y de pago
+  desde un producto: probadas en solo lectura sobre sus 54 avisos en cola, sin
+  importar todavía.
 - La primera ejecución real de la tarea programada.
 - Cuánto dura en la práctica la sesión de Gmail en Testing, y si pasar la app a
   producción lo evita.

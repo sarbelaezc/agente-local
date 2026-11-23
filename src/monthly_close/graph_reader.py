@@ -79,6 +79,13 @@ class GraphSourceReader:
         self.approved_senders = [sender.lower() for sender in approved_senders]
         self.active_folder: tuple[str, ...] | None = None
         self._received: dict[str, str] = {}
+        # Told (position, total) as each folder starts, before its messages are known.
+        self.on_folder: Callable[[int, int], None] | None = None
+
+    def _enter(self, folder: Folder, position: int, total: int) -> None:
+        self.active_folder = folder.path
+        if self.on_folder is not None:
+            self.on_folder(position, total)
 
     @staticmethod
     def _folder_url(folder_id: str, tail: str) -> str:
@@ -214,8 +221,8 @@ class GraphSourceReader:
         folders = self.folders()
         reports: list[dict] = []
         examined = 0
-        for folder in folders:
-            self.active_folder = folder.path
+        for position, folder in enumerate(folders, 1):
+            self._enter(folder, position, len(folders))
             rows = authorized = 0
             stopped_before_start = False
             for message in self._snapshot(folder):
@@ -292,8 +299,8 @@ class GraphSourceReader:
         folders = self.folders()
         reports: list[dict] = []
         examined = 0
-        for folder in folders:
-            self.active_folder = folder.path
+        for position, folder in enumerate(folders, 1):
+            self._enter(folder, position, len(folders))
             link = state.get(folder.id)
             rows, delta, initial = self._folder_changes(folder, link)
             recent = sorted(

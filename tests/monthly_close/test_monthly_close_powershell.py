@@ -130,8 +130,6 @@ function Start-Process {
 
 
 @pytest.mark.parametrize("arguments,expected", [
-    (["import-manuela", "-SourceDir", "C:\\datos sinteticos"],
-     ["import-manuela", "--source-dir", "C:\\datos sinteticos"]),
     (["owner-account", "-Owner", "manuela", "-Suffix", "1234"],
      ["owner-account", "--owner", "manuela", "--suffix", "1234"]),
     (["summary", "-Month", "2026-03", "-Owner", "hogar"],

@@ -106,12 +106,16 @@ SPECIAL_CATEGORIES = {
 }
 
 
-# A mailbox movement that may repeat one the same member already brought by file import.
-# It stays pending, and no rule decides it: a person compares both.
 # A corrected payment of a credit register is looked for this many days around the old one,
 # less than a fortnight so it never reaches the next instalment.
 CORRECTION_DAYS = 10
+# Movements brought once from a member's exported files, before her mailbox was read.
+# A notice matching exactly one of them completes it; matching several, it stays pending
+# with this note and no rule decides it: a person compares them.
+FILE_IMPORT_PREFIX = "{owner}-import:"
 DUPLICATE_NOTE = "Posible duplicado"
+# Copies of the database kept next to it, newest first (schema changes and manual changes).
+BACKUPS_KEPT = 3
 NOT_DUPLICATE = f"(note IS NULL OR note NOT LIKE '{DUPLICATE_NOTE}%')"
 
 # Movements of a notice that a reprocessing run must leave alone: everything except
@@ -231,6 +235,17 @@ class Store:
             if backup is not None:
                 self._audit(db, "migrate-household", self.path.name, backup.name)
             self._reclassify_qr_own_transfers(db)
+        self._prune_backups()
+
+    def _prune_backups(self) -> None:
+        """Keep only the newest copies of the database: they hold real financial records."""
+        name = re.compile(re.escape(self.path.name) + r"\.backup-\d{8}T\d{12}Z")
+        copies = sorted(path for path in self.path.parent.glob(self.path.name + ".backup-*") if name.fullmatch(path.name))
+        for path in copies[:-BACKUPS_KEPT]:
+            try:
+                path.unlink()
+            except PermissionError:
+                continue  # open elsewhere; the next start removes it
 
     def _reclassify_qr_own_transfers(self, db: sqlite3.Connection) -> int:
         """Turn QR payments the model called own transfers back into transfers.
@@ -417,36 +432,24 @@ class Store:
                 if row["folder"] not in keep:
                     db.execute("DELETE FROM mailbox_sync WHERE mailbox=? AND folder=?", (mailbox, row["folder"]))
 
-    def last_import_day(self, owner: str) -> str | None:
-        """Last day covered by the member's file import (import-manuela), if any."""
-        owner = owner_id(owner)
-        with self.connect() as db:
-            row = db.execute(
-                "SELECT max(day) AS day FROM transactions WHERE owner=? AND message_id LIKE ?",
-                (owner, f"{owner}-import:%"),
-            ).fetchone()
-        return row["day"]
+    @staticmethod
+    def _file_twins(db: sqlite3.Connection, owner: str, event: dict) -> list[str]:
+        """File-imported movements of that member with the same day, amount and currency."""
+        return [row["id"] for row in db.execute(
+            """SELECT id FROM transactions WHERE owner=? AND day=? AND amount_minor=?
+            AND currency=? AND message_id LIKE ? ORDER BY id""",
+            (owner, event["day"], event["amount_minor"], event["currency"],
+             FILE_IMPORT_PREFIX.format(owner=owner) + "%"),
+        )]
 
     @staticmethod
-    def _mark_possible_duplicates(db: sqlite3.Connection, owner: str, events: list[dict]) -> list[dict]:
-        """Leave pending, with a note, movements matching a file-imported one of that member."""
-        marked = []
-        for event in events:
-            twin = db.execute(
-                """SELECT id FROM transactions WHERE owner=? AND day=? AND amount_minor=?
-                AND currency=? AND message_id LIKE ? LIMIT 1""",
-                (owner, event["day"], event["amount_minor"], event["currency"], f"{owner}-import:%"),
-            ).fetchone()
-            if twin is None:
-                marked.append(event)
-                continue
-            marked.append({
-                **event, "decision": None,
-                "note": f"{DUPLICATE_NOTE} del movimiento importado del {event['day']} con el mismo valor: "
-                        "si es el mismo dinero, elige No cuenta",
-            })
-            Store._audit(db, "mailbox-possible-duplicate", event["id"], twin["id"])
-        return marked
+    def _complete_from_notice(db: sqlite3.Connection, twin: str, message_id: str, event: dict) -> None:
+        """The notice becomes the source of a file-imported movement; her decisions stay."""
+        db.execute(
+            "UPDATE transactions SET message_id=?, merchant=?, account=?, time=? WHERE id=?",
+            (message_id, event["merchant"], event["account"], event.get("time"), twin),
+        )
+        Store._audit(db, "mailbox-complete-file-import", twin, message_id)
 
     def import_message(
         self, message_id: str, events: list[dict], reprocess: bool = False, owner: str = "santiago",
@@ -458,12 +461,27 @@ class Store:
                 not reprocess or db.execute(KEPT, (message_id,)).fetchone()
             ):
                 return
+            # A file-imported movement this notice completed keeps its own id and stays.
             replaced = db.execute(
-                "DELETE FROM transactions WHERE message_id=?", (message_id,),
+                "DELETE FROM transactions WHERE message_id=? AND id NOT LIKE ?", (message_id, f"{owner}:%"),
             ).rowcount
             if replaced:
                 self._audit(db, "reprocess-replace-card-payments", message_id, str(replaced))
-            for event in self._mark_possible_duplicates(db, owner, events):
+            imported = []
+            for event in events:
+                twins = self._file_twins(db, owner, event)
+                if len(twins) == 1:
+                    self._complete_from_notice(db, twins[0], message_id, event)
+                    imported.append(twins[0])
+                    continue
+                if twins:
+                    event = {
+                        **event, "decision": None,
+                        "note": f"{DUPLICATE_NOTE} de {len(twins)} movimientos importados del {event['day']} "
+                                "con el mismo valor: si es el mismo dinero, elige No cuenta",
+                    }
+                    self._audit(db, "mailbox-possible-duplicate", event["id"], ",".join(twins))
+                imported.append(event["id"])
                 db.execute(
                     """INSERT INTO transactions (
                     id,message_id,day,merchant,account,amount_minor,currency,
@@ -479,7 +497,7 @@ class Store:
                 )
             db.execute("INSERT OR IGNORE INTO processed VALUES (?)", (message_id,))
             db.execute("DELETE FROM extraction_failures WHERE message_id=?", (message_id,))
-            self._flag_between_owners(db, [event["id"] for event in events])
+            self._flag_between_owners(db, imported)
             self._audit(db, "import", message_id, str(len(events)))
         self.apply_rules()
 
@@ -1320,113 +1338,6 @@ class Store:
             self._audit(db, "between-owners-" + reason, row["id"], "1")
             flagged += 1
         return flagged
-
-    def import_external(
-        self, owner: str, source: str, events: list[dict], group_rules: dict[str, str],
-    ) -> dict[str, int]:
-        """Import movements another member approved elsewhere, in one transaction.
-
-        Existing ids are skipped, so repeating the import changes nothing. Each movement
-        is decided through the same validation as the panel and audited one by one;
-        destination decisions become remembered rules unless a person already set one.
-        No mailbox notice is involved, so processed and coverage stay untouched.
-        """
-        owner = owner_id(owner)
-        if not re.fullmatch(r"[a-z][a-z-]{2,30}", source):
-            raise ValueError("Origen de importacion invalido.")
-        with self.connect() as db:
-            existing = {row["id"] for row in db.execute("SELECT id FROM transactions WHERE owner=?", (owner,))}
-            new = [event for event in events if event["id"] not in existing]
-            for event in new:
-                if event["owner"] != owner:
-                    raise ValueError("Movimiento de otro titular en la importacion.")
-                db.execute(
-                    """INSERT INTO transactions (
-                    id,message_id,day,merchant,account,amount_minor,currency,category,kind,
-                    decision,reason,owner,group_key,time,note,account_label,category_uncertain)
-                    VALUES (:id,:message_id,:day,:merchant,:account,:amount_minor,:currency,
-                    :category,:kind,NULL,:reason,:owner,:group_key,:time,:note,:account_label,
-                    :category_uncertain)""", event,
-                )
-            for group, decision in group_rules.items():
-                if decision not in DECISIONS:
-                    raise ValueError("Decision de destino no reconocida.")
-                if db.execute(
-                    "INSERT OR IGNORE INTO group_rules(owner,group_key,decision) VALUES (?,?,?)",
-                    (owner, group, decision),
-                ).rowcount:
-                    self._audit(db, f"group-rule-{source}", f"{owner}/{group}", decision)
-            rules = {
-                row["group_key"]: row["decision"] for row in db.execute(
-                    "SELECT * FROM group_rules WHERE owner=? AND decision IS NOT NULL", (owner,),
-                )
-            }
-            decided = by_group = 0
-            for event in new:
-                if event["group_key"]:
-                    decision = rules.get(event["group_key"])
-                    if decision is None:
-                        continue
-                    self._decide(
-                        db, event["id"], decision, None,
-                        audit=("decision-group-rule", f"{decision}: {event['group_key']}"),
-                    )
-                    by_group += 1
-                else:
-                    self._decide(
-                        db, event["id"], event["decision"], None,
-                        audit=(f"decision-{source}", f"{event['decision']}: aprobado en su panel"),
-                    )
-                    decided += 1
-            flagged = self._flag_between_owners(db, [event["id"] for event in new])
-            self._audit(db, f"import-{source}", owner, str(len(new)))
-        return {
-            "imported": len(new), "skipped": len(events) - len(new), "approved": decided,
-            "by_destination": by_group, "pending": len(new) - decided - by_group,
-            "between_owners": flagged,
-        }
-
-    def monthly_totals(self, owner: str) -> dict[str, dict[str, int]]:
-        """Decided totals per month in the reporting currency (COP for converted USD).
-
-        personal includes cash withdrawals; net is personal + family minus third-party
-        payments to a card. The household view leaves out money between members.
-        """
-        owner = owner_id(owner, allow_household=True)
-        with self.connect() as db:
-            rows = db.execute(
-                "SELECT * FROM transactions"
-                + ("" if owner == HOUSEHOLD else " WHERE owner=?"),
-                () if owner == HOUSEHOLD else (owner,),
-            ).fetchall()
-        totals: dict[str, dict[str, int]] = {}
-        for row in rows:
-            if owner == HOUSEHOLD and row["between_owners"]:
-                continue
-            amount = row["amount_minor"]
-            if row["currency"] == "USD" and row["cop_amount_minor"] is not None:
-                amount = row["cop_amount_minor"]
-            elif row["currency"] != "COP":
-                continue
-            month = totals.setdefault(row["day"][:7], dict.fromkeys(
-                ("personal", "family", "cash", "income", "third_party", "net", "pending"), 0,
-            ))
-            decision = row["decision"]
-            if decision in {"personal", "cash_withdrawal"}:
-                month["personal"] += amount
-            if decision == "cash_withdrawal":
-                month["cash"] += amount
-            if decision == "family":
-                month["family"] += amount
-            if decision == "income":
-                month["income"] += amount
-            if decision == "third_party_payment":
-                month["third_party"] += amount
-            if decision is None:
-                month["pending"] += amount
-        for month in totals.values():
-            month["net"] = month["personal"] + month["family"] - month["third_party"]
-        return totals
 
     def update_reconciled_coverage(self, today: date) -> dict[str, list[str]]:
         """Mark each closed month that the statements fully reconcile; undo it when that stops.

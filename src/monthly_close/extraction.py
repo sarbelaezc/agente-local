@@ -383,6 +383,56 @@ def _key_transfers(mail: Mail, preferences: Preferences, source: str) -> list[di
     return list(proposals.values())
 
 
+QR_PAYMENT = _sentence(
+    r"pagaste\s+" + AMOUNT_TEXT + r" por c[oó]digo QR desde tu cuenta \*?\d{4} a la llave (?P<key>@[\w.\-]+|\d+)"
+    r" el (?P<day>\d{2}/\d{2}/\d{2,4})(?: a las (?P<time>\d{2}:\d{2}))?"
+)
+
+
+def _qr_payments(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """A QR payment: "pagaste $X por codigo QR desde tu cuenta *N a la llave K el D".
+
+    The model reads "pagaste ... desde tu cuenta" as a card payment and drops it. The
+    notice names nobody, so the merchant is the key, as in Manuela's exported records.
+    """
+    proposals = dict(
+        _fixed_event(
+            mail, preferences, source, f"Pago QR a llave {match['key']}", match["amount"],
+            _notice_day(match["day"]), "transfer", preferences.categories[-1],
+            f"Pago por QR a la llave {match['key']}, leido del aviso sin Ollama. "
+            "Confirma si es gasto personal, familiar o no cuenta.",
+            time=match["time"],
+        )
+        for match in QR_PAYMENT.finditer(source)
+    )
+    return list(proposals.values())
+
+
+PRODUCT_PAYMENT = _sentence(
+    r"pagaste\s+" + AMOUNT_TEXT + r" a (?P<name>[^$]{2,80}?) desde tu producto \*?\d{4}"
+    r" el (?P<day>\d{2}/\d{2}/\d{4})(?: (?P<time>\d{2}:\d{2})(?::\d{2})?)?"
+)
+
+
+def _product_payments(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """A payment to a named business: "pagaste $X a NOMBRE desde tu producto N el D H".
+
+    The model drops it like a card payment. It stays a pending purchase of that business.
+    The mail may wrap the business name onto the next line.
+    """
+    proposals = {}
+    for match in PRODUCT_PAYMENT.finditer(source):
+        name = " ".join(match["name"].split())
+        identifier, event = _fixed_event(
+            mail, preferences, source, name, match["amount"],
+            _notice_day(match["day"]), "purchase", preferences.categories[-1],
+            f"Pago a {name}, leido del aviso sin Ollama. Confirma su categoria.",
+            time=match["time"],
+        )
+        proposals[identifier] = event
+    return list(proposals.values())
+
+
 RECEIVED_TRANSFER = _sentence(
     r"recibiste una transferencia de\s+(?P<name>[^\n$]{2,80}?)\s+por\s+" + AMOUNT_TEXT
     + r"\s+en tu cuenta\s+\*?\d{4}[^\n]{0,80}?\s+el\s+(?P<day>\d{2}/\d{2}/\d{2,4})(?:\s+a las\s+(?P<time>\d{2}:\d{2}))?"
@@ -466,6 +516,7 @@ def _fixed_events(mail: Mail, preferences: Preferences, source: str) -> list[dic
     return (
         _card_payments(mail, preferences, source) or _account_transfers(mail, preferences, source)
         or _card_abonos(mail, preferences, source) or _key_transfers(mail, preferences, source)
+        or _qr_payments(mail, preferences, source) or _product_payments(mail, preferences, source)
         or _received_transfers(mail, preferences, source)
     )
 

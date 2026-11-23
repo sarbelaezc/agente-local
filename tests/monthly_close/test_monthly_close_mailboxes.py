@@ -8,6 +8,7 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 
+from builders import file_imported
 from monthly_close import gmail_client
 from monthly_close import main as app
 from monthly_close.gmail_client import GmailClient, GmailError, validate_gmail_url
@@ -421,6 +422,56 @@ def test_gmail_token_is_never_sent_outside_the_gmail_api(url):
     assert sent == []
 
 
+class Answer:
+    def __init__(self, status: int, payload: dict | None = None, headers: dict | None = None) -> None:
+        self.status_code, self._payload, self.headers = status, payload or {}, headers or {}
+
+    def json(self):
+        return self._payload
+
+
+class Answers:
+    def __init__(self, *answers: Answer) -> None:
+        self.answers, self.requests = list(answers), 0
+
+    def get(self, url, params=None, headers=None):
+        self.requests += 1
+        return self.answers.pop(0)
+
+    def close(self):
+        pass
+
+
+QUOTA = Answer(403, {"error": {
+    "code": 403, "message": "Quota exceeded for quota metric 'Queries' and limit 'Units per minute per user'.",
+    "errors": [{"reason": "rateLimitExceeded"}],
+}})
+PROFILE = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
+
+
+def test_gmail_waits_out_its_per_minute_quota_and_says_so():
+    sleeps, told = [], []
+    http = Answers(QUOTA, Answer(429), Answer(200, {"historyId": "1"}))
+    client = GmailClient(lambda: "token", http=http, sleep=sleeps.append)
+    client.on_wait = told.append
+    assert client.get_json(PROFILE) == {"historyId": "1"}
+    assert sleeps == told == [15.0, 30.0]
+
+    http = Answers(*[QUOTA] * 5)
+    with pytest.raises(GmailError, match="403"):
+        GmailClient(lambda: "token", http=http, sleep=lambda seconds: None).get_json(PROFILE)
+    assert http.requests == 5  # four waits of the minute's quota, then it stops
+
+
+def test_a_gmail_permission_refusal_is_never_repeated():
+    denied = Answer(403, {"error": {"code": 403, "message": "Request had insufficient authentication scopes.",
+                                     "errors": [{"reason": "insufficientPermissions"}]}})
+    http = Answers(denied)
+    with pytest.raises(GmailError, match="insufficient"):
+        GmailClient(lambda: "token", http=http, sleep=lambda seconds: pytest.fail("no wait")).get_json(PROFILE)
+    assert http.requests == 1
+
+
 def test_gmail_session_is_required_and_only_read_only_scopes_are_kept(tmp_path):
     with pytest.raises(GmailError, match="login"):
         gmail_client.silent_token(tmp_path / "gmail_token_manuela.json")
@@ -454,14 +505,25 @@ def test_login_with_a_gmail_mailbox_uses_its_client_and_session_files(tmp_path, 
 # ---------------------------------------------------------------- store
 
 
-def insert_imported(store: Store, owner: str, day: str, amount: int) -> None:
+def insert_imported(
+    store: Store, owner: str, day: str, amount: int, legacy: str = "x",
+    kind: str = "purchase", category: str = "Compras",
+) -> str:
+    """A movement as the one-off import of a member's exported files left it."""
+    identifier = f"{owner}:{day}:{amount}:{legacy}"
+    file_imported(store, [{
+        "id": identifier, "message_id": f"{owner}-import:{day}:{amount}:{legacy}", "owner": owner,
+        "day": day, "merchant": "Comercio del archivo", "account": "TC *0001", "amount_minor": amount,
+        "currency": "COP", "category": category, "kind": kind, "decision": "family",
+        "reason": "importado", "note": "Nota de ella",
+    }])
+    return identifier
+
+
+def sources(store: Store) -> dict[str, str]:
+    """Which notice (or file) each movement comes from."""
     with store.connect() as db:
-        db.execute(
-            """INSERT INTO transactions (id,message_id,day,merchant,account,amount_minor,currency,
-            category,kind,decision,reason,owner) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (f"{owner}:{day}:{amount}", f"{owner}-import:{day}:{amount}", day, "Tienda", "Tarjeta A",
-             amount, "COP", "Compras", "purchase", "personal", "importado", owner),
-        )
+        return {row["id"]: row["message_id"] for row in db.execute("SELECT id, message_id FROM transactions")}
 
 
 def event(identifier: str, day: str, amount: int) -> dict:
@@ -472,23 +534,49 @@ def event(identifier: str, day: str, amount: int) -> dict:
     }
 
 
-def test_imports_keep_the_mailbox_owner_and_flag_possible_duplicates_without_deciding_them(
+def test_a_notice_completes_its_only_file_twin_and_flags_several_without_deciding_them(
     tmp_path, preferences,
 ):
     store = Store(tmp_path / "close.sqlite3")
     store.configure(preferences.to_dict())
     store.add_rule("TIENDA", "Compras", "personal")
-    insert_imported(store, "manuela", "2026-11-05", 123456)
-    assert store.last_import_day("manuela") == "2026-11-05" and store.last_import_day("santiago") is None
-    store.import_message("m-a", [event("a", "2026-11-05", 123456), event("b", "2026-11-05", 999)], owner="manuela")
+    twin = insert_imported(store, "manuela", "2026-11-05", 123456)
+    first, second = (insert_imported(store, "manuela", "2026-11-07", 500, legacy) for legacy in "ab")
+    store.import_message("m-a", [
+        {**event("a", "2026-11-05", 123456), "time": "10:15"}, event("b", "2026-11-05", 999),
+    ], owner="manuela")
     store.import_message("m-c", [event("c", "2026-11-05", 123456)])
+    store.import_message("m-d", [event("d", "2026-11-07", 500)], owner="manuela")
     rows = {row["id"]: row for row in store.state()["transactions"]}
-    assert rows["a"]["owner"] == "manuela" and rows["a"]["decision"] is None
-    assert rows["a"]["note"].startswith("Posible duplicado")
-    assert rows["b"]["decision"] == "personal"  # no twin: the merchant rule decides it
-    assert rows["c"]["owner"] == "santiago" and rows["c"]["note"] is None  # other owner's import
+    source = sources(store)
+
+    # The notice becomes the source of her movement: its fields, her decision and note.
+    assert "a" not in rows
+    completed = rows[twin]
+    assert (source[twin], completed["merchant"], completed["account"], completed["time"]) == (
+        "m-a", "Tienda", "Tarjeta A", "10:15",
+    )
+    assert (completed["decision"], completed["category"], completed["note"]) == ("family", "Compras", "Nota de ella")
+    assert rows["b"]["owner"] == "manuela" and rows["b"]["decision"] == "personal"  # no twin: the rule decides
+    assert rows["c"]["owner"] == "santiago" and rows["c"]["note"] is None  # another owner's file movement
+    # Several twins: a person compares them; no rule decides it and both stay from the file.
+    assert rows["d"]["decision"] is None and rows["d"]["note"].startswith("Posible duplicado de 2 movimientos")
+    assert source[first].startswith("manuela-import:") and source[second].startswith("manuela-import:")
     with store.connect() as db:
-        assert db.execute("SELECT count(*) FROM audit WHERE action='mailbox-possible-duplicate'").fetchone()[0] == 1
+        audit = dict(db.execute(
+            "SELECT action, target FROM audit WHERE action LIKE 'mailbox-%' ORDER BY id",
+        ).fetchall())
+    assert audit == {"mailbox-complete-file-import": twin, "mailbox-possible-duplicate": "d"}
+
+
+def test_reprocessing_a_notice_never_deletes_the_file_movement_it_completed(tmp_path, preferences):
+    store = Store(tmp_path / "close.sqlite3")
+    store.configure(preferences.to_dict())
+    twin = insert_imported(store, "manuela", "2026-11-05", 7000, kind="card_payment", category="Otros gastos")
+    guessed = {**event("g", "2026-11-05", 7000), "kind": "card_payment", "category": "Otros gastos"}
+    store.import_message("m-g", [guessed], owner="manuela")
+    store.import_message("m-g", [], reprocess=True, owner="manuela")
+    assert [row["id"] for row in store.state()["transactions"]] == [twin]
 
 
 def test_sync_state_is_saved_per_mailbox_and_pruned(tmp_path):
@@ -532,30 +620,31 @@ def two_mailboxes(tmp_path, preferences, monkeypatch, gmail_verified: bool = Tru
     monkeypatch.setattr(app, "require_model", lambda settings: None)
     store = Store(tmp_path / "close.sqlite3")
     store.configure(preferences.to_dict())
-    insert_imported(store, "manuela", "2026-11-05", 123456)
     settings = graph_settings(mailboxes=[OUTLOOK_BOX, {**GMAIL_BOX, "verified": gmail_verified}])
     return store, settings, outlook, gmail, model
 
 
-def test_incremental_scan_reads_both_mailboxes_with_their_owner_and_the_member_cutoff(
+def test_incremental_scan_reads_both_mailboxes_from_the_same_start_and_completes_file_movements(
     tmp_path, preferences, monkeypatch, capsys,
 ):
     store, settings, outlook, gmail, model = two_mailboxes(tmp_path, preferences, monkeypatch)
+    twin = insert_imported(store, "manuela", "2026-11-05", 123456)
     args = (store, tmp_path, settings, preferences, date(2026, 1, 1), date(2026, 11, 17))
 
     app.scan(*args, incremental=True)
 
     rows = store.state()["transactions"]
-    mailbox_rows = [row for row in rows if not row["id"].startswith("manuela:")]
-    owners = sorted((row["owner"], row["day"]) for row in mailbox_rows)
-    # Manuela's Gmail starts on her last imported day (included); Santiago's from the start.
-    assert owners == [("manuela", "2026-11-05"), ("manuela", "2026-11-06"), ("santiago", "2026-11-13")]
-    cutoff = next(row for row in mailbox_rows if row["day"] == "2026-11-05")
-    assert cutoff["decision"] is None and cutoff["note"].startswith("Posible duplicado")
-    assert gmail.raw_reads == ["cutoff", "after"]
+    # Both mailboxes are read from the same start; every movement now comes from a notice.
+    assert sorted((row["owner"], row["day"]) for row in rows) == [
+        ("manuela", "2026-11-03"), ("manuela", "2026-11-05"), ("manuela", "2026-11-06"), ("santiago", "2026-11-13"),
+    ]
+    assert not any(origin.startswith("manuela-import:") for origin in sources(store).values())
+    completed = next(row for row in rows if row["id"] == twin)
+    assert completed["decision"] == "family" and completed["note"] == "Nota de ella"
+    assert gmail.raw_reads == ["before", "cutoff", "after"]
     assert store.sync_state("manuela") == {"history": "900"} and "inbox" in store.sync_state("santiago")
     output = capsys.readouterr().out
-    assert "Buzon manuela (gmail, titular manuela) desde 2026-11-05." in output
+    assert "Buzon manuela (gmail, titular manuela) desde 2026-01-01." in output
     assert "primera sincronizacion" in output
 
     calls = model.calls

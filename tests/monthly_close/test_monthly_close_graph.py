@@ -136,12 +136,16 @@ def test_walks_inbox_junk_deleted_then_the_whole_dinero_tree_and_nothing_else():
         visited.append(candidate.item_id)
         paths.append(graph.active_folder)
 
+    started = []
+    graph.on_folder = lambda position, total: started.append((graph.active_folder[-1], position, total))
     reports = graph.walk_folders(100, visit)
 
     assert [report["folder"] for report in reports] == [
         "Bandeja de entrada", "Correo no deseado", "Elementos eliminados",
         "Dinero", "Dinero / Banco", "Dinero / Banco / Puntos",
     ]
+    # Every folder is announced, even one without notices, so progress shows for each.
+    assert [(position, total) for _name, position, total in started] == [(n, 6) for n in range(1, 7)]
     assert [report["rows"] for report in reports] == [3, 0, 1, 0, 2, 1]
     assert [report["authorized"] for report in reports] == [2, 0, 0, 0, 2, 1]
     assert visited == ["m1", "m3", "m5", "m6", "m7"]
