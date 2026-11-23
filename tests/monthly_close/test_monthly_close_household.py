@@ -201,6 +201,65 @@ def test_paying_the_other_members_card_is_own_spending_and_never_counts_twice_at
     assert (second["decision"], second["category"], second["between_owners"]) == ("personal", "Otros gastos", 1)
 
 
+def test_a_card_in_no_statement_is_money_given_away(store):
+    mail = Mail("pay", SENDER, "Alertas", "2026-10-14T17:00:00Z", CARD_NOTICE)
+
+    def read(own):
+        [event] = extract(mail, store.preferences(), None, own_cards=frozenset(own))
+        return event["kind"], event["decision"]
+
+    assert read({"8243"}) == ("card_payment", "exclude")
+    assert read({"1111"}) == ("transfer", None)
+    # Before the first card statement nothing says the card is someone else's.
+    assert read(set()) == ("card_payment", "exclude")
+
+
+def card_abono(identifier, amount, currency="USD", suffix="5419", day="2026-04-01"):
+    return {
+        "id": f"stmt:{identifier}", "message_id": f"statement:TARJETA_MASTERCARD:{suffix}:2026-04-30:manuela", "day": day,
+        "merchant": "ABONO SUCURSAL VIRTUAL", "account": "Tarjeta de crédito Master", "amount_minor": amount,
+        "currency": currency, "category": "Compras", "kind": "card_payment", "decision": None, "owner": "manuela",
+        "reason": "Leído del extracto.",
+    }
+
+
+def pay_card(store, identifier, amount, suffix="5419", day="2026-04-01"):
+    store.import_message(identifier, [santiago_event(
+        identifier, amount, day=day, kind="transfer", merchant=f"tarjeta de credito *{suffix}",
+    )])
+
+
+def test_a_card_payment_the_other_member_made_becomes_their_third_party_payment(store):
+    pay_card(store, "usd", 120783300)
+    pay_card(store, "cop", 30000000, day="2026-04-05")
+    pay_card(store, "x", 10000000, suffix="7143", day="2026-04-07")
+    store.record_statements([], [
+        card_abono("usd", 33000), card_abono("cop", 30000000, "COP", day="2026-04-05"),
+        card_abono("own", 2000, day="2026-04-07"),  # paid from her account: that payment was to another card
+    ])
+    rows = {row["id"]: row for row in store.state()["transactions"]}
+    usd, cop = rows["stmt:usd"], rows["stmt:cop"]
+    assert (usd["decision"], usd["between_owners"], usd["cop_amount_minor"]) == ("third_party_payment", 1, 120783300)
+    assert (cop["decision"], cop["between_owners"]) == ("third_party_payment", 1)
+    assert rows["stmt:own"]["decision"] == "exclude"
+    assert "abonos de terceros" not in store.summary("2026-04", "hogar")
+    assert {row["value"] for row in audit_rows(store, "decision-statement-member-abono")} == {"usd", "cop"}
+
+
+def test_a_payment_is_taken_once_and_several_wait_for_a_person(store):
+    pay_card(store, "p", 120783300)
+    # Her notice already shows that money: the line is a copy and stays out.
+    store.import_message("n", [{**santiago_event("n", 120783300, day="2026-04-01", kind="card_payment"),
+                                "merchant": "Abono de ALGUIEN a la tarjeta *5419"}], owner="manuela")
+    store.decide("n", "third_party_payment")
+    store.record_statements([], [card_abono("copy", 33000)])
+    for position, name in enumerate(("a", "b")):
+        pay_card(store, name, 36000000 + position, day="2026-04-10")
+    store.record_statements([], [card_abono("two", 10000, day="2026-04-10")])
+    rows = {row["id"]: row for row in store.state()["transactions"]}
+    assert rows["stmt:copy"]["decision"] == "exclude" and rows["stmt:two"]["decision"] is None
+
+
 def test_third_party_payment_only_for_card_payments_and_reduces_net(store):
     store.import_message("c1", [santiago_event("c1", 30000, kind="card_payment", category="Pago de tarjeta")])
     store.import_message("b1", [santiago_event("b1", 100000, decision="personal")])
