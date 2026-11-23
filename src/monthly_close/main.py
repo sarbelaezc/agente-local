@@ -421,6 +421,7 @@ def _walk(
                         for c in credit_ledger.load_configs(data_dir) if c.owner == box.owner
                     ],
                     card_accounts=card_accounts(store, box.owner, preferences),
+                    other_cards=store.other_member_cards(box.owner),
                 )
             except EvidenceError as exc:
                 folder = " / ".join(reader.active_folder or ())
