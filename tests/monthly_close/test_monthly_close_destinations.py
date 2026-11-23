@@ -130,6 +130,17 @@ def test_payment_to_a_business_from_a_product_is_read_without_the_model(preferen
     ]
 
 
+def test_scheduled_invesbot_contribution_is_an_investment_never_income(preferences):
+    """Ollama called it income; the notice has no date, so it takes the day it arrived."""
+    events = extract(notice(
+        "Bancolombia: Realizamos la inversión que programaste por COP $ 150.000,00 a tu plan\n"
+        "Plan Ficticio en Invesbot. Recibe tus rendimientos cada mes."
+    ), preferences, NoModel())
+    assert [(e["kind"], e["category"], e["merchant"], e["amount_minor"], e["day"], e["decision"]) for e in events] == [
+        ("investment", "Inversiones", "Invesbot Plan Ficticio", 15000000, "2026-03-01", None),
+    ]
+
+
 def test_received_transfer_is_income_with_its_sender(preferences):
     events = extract(notice(
         "Bancolombia: USUARIO, recibiste una transferencia de PERSONA FICTICIA por $17,000.00 en tu "

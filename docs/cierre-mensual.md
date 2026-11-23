@@ -929,12 +929,14 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 | «NOMBRE hizo un abono por $X a tu tarjeta de crédito terminada en *N» | Pago a tarjeta pendiente: «Abono de tercero» si pagó otra persona, «No cuenta» si fuiste tú |
 | «transferiste $X a la llave K desde tu cuenta *N a NOMBRE» | Transferencia a NOMBRE con la llave y la hora |
 | «Pagaste $X a NOMBRE desde tu producto *N el DD/MM/AAAA HH:MM:SS» | Compra pendiente a NOMBRE con la hora; confirma su categoría |
+| «… la inversión que programaste por COP $X a tu plan P en Invesbot» | Inversión pendiente «Invesbot P» con la fecha de llegada del aviso (no trae otra); si ese plan ya tiene una regla de destino («Aplicar también a pagos futuros a este destino»), la regla la decide |
 | «recibiste una transferencia de NOMBRE por $X» | Ingreso pendiente con el nombre de quien envía |
 
 Las frases desde «NOMBRE hizo un abono» se reconocen aunque el correo las parta
 en varias líneas (por ejemplo «…hizo» al final de una línea y «un abono por…» en
 la siguiente). Ollama tomaba «Pagaste … desde tu cuenta» o «desde tu producto»
 por un pago de tarjeta y no devolvía nada; por eso esas dos frases se leen sin él.
+El aporte programado a Invesbot lo tomaba por un ingreso.
 
 Las cuentas y las llaves Bre-B y QR de destino se guardan completas, como las
 escribe el aviso y como en lo importado del panel de Manuela, para que un mismo

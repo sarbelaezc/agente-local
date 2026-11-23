@@ -433,6 +433,29 @@ def _product_payments(mail: Mail, preferences: Preferences, source: str) -> list
     return list(proposals.values())
 
 
+INVESBOT_CONTRIBUTION = _sentence(
+    r"la inversi[oó]n que programaste por (?:COP )?" + AMOUNT_TEXT + r" a tu plan (?P<plan>[^\n$]{1,60}?) en (?P<bot>Inve(?:st|s)bot)\b"
+)
+
+
+def _invesbot_contributions(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """A scheduled contribution: "... la inversion que programaste por $X a tu plan P en Invesbot".
+
+    The model took it for money received. The notice states no date, so it is the day it
+    arrived. The merchant names the plan, so each plan keeps one destination and its rule.
+    """
+    day = received_local(mail.received, preferences.timezone).date().isoformat()
+    proposals = {}
+    for match in INVESBOT_CONTRIBUTION.finditer(source):
+        merchant = f"{match['bot']} {' '.join(match['plan'].split())}"
+        identifier, event = _fixed_event(
+            mail, preferences, source, merchant, match["amount"], day, "investment", "Inversiones",
+            f"Aporte programado a {merchant}, leido del aviso sin Ollama. Confirma que es inversion.",
+        )
+        proposals[identifier] = event
+    return list(proposals.values())
+
+
 RECEIVED_TRANSFER = _sentence(
     r"recibiste una transferencia de\s+(?P<name>[^\n$]{2,80}?)\s+por\s+" + AMOUNT_TEXT
     + r"\s+en tu cuenta\s+\*?\d{4}[^\n]{0,80}?\s+el\s+(?P<day>\d{2}/\d{2}/\d{2,4})(?:\s+a las\s+(?P<time>\d{2}:\d{2}))?"
@@ -517,6 +540,7 @@ def _fixed_events(mail: Mail, preferences: Preferences, source: str) -> list[dic
         _card_payments(mail, preferences, source) or _account_transfers(mail, preferences, source)
         or _card_abonos(mail, preferences, source) or _key_transfers(mail, preferences, source)
         or _qr_payments(mail, preferences, source) or _product_payments(mail, preferences, source)
+        or _invesbot_contributions(mail, preferences, source)
         or _received_transfers(mail, preferences, source)
     )
 
