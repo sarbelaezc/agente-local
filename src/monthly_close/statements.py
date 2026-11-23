@@ -636,6 +636,19 @@ def _same_money(saving: Movement, other: Movement) -> bool:
     return saving.amount_minor == expected
 
 
+def _opposite_investment(movement: Movement, row: dict) -> bool:
+    """An addition to a fund never stands for a withdrawal of the same value, nor the reverse."""
+    decided = row.get("decision")
+    if movement.hint == "investment":
+        return decided == "investment_withdrawal" or (
+            decided != "investment" and row["merchant"].upper().startswith("RETIR")
+        )
+    if movement.hint == "investment_withdrawal":
+        # A person's decision outweighs the kind the model proposed.
+        return decided == "investment" or (decided is None and row["kind"] == "investment")
+    return False
+
+
 def match_existing(
     candidates: list[Candidate], rows: list[dict], owner: str = "santiago",
 ) -> tuple[list[tuple[Candidate, str]], list[Candidate]]:
@@ -653,6 +666,7 @@ def match_existing(
             if row["id"] not in used and row["currency"] == movement.currency
             and row["amount_minor"] == abs(movement.amount_minor)
             and abs((date.fromisoformat(row["day"]) - movement.day).days) <= 5
+            and not _opposite_investment(movement, row)
         ]
         if not options:
             missing.append(candidate)

@@ -1088,3 +1088,26 @@ def test_rules_never_decide_a_statement_line_marked_as_possible_duplicate(store)
         db.execute("UPDATE transactions SET note=? WHERE id='stmt:dup'", (DUPLICATE_NOTE + " de prueba",))
     store.add_rule("TIENDA DOBLE", "Compras", "personal")
     assert store.state()["transactions"][0]["decision"] is None
+
+
+def test_a_fund_addition_never_matches_a_withdrawal_of_the_same_value_and_day():
+    """Both happened on one day; matching only by value left two withdrawals and no addition."""
+    day = date(2026, 5, 26)
+    fund = st.Statement("FIDUCUENTA", "3del", date(2026, 5, 1), date(2026, 5, 31), [
+        st.Movement(day, "ADICION", 100, "COP", "investment"),
+        st.Movement(day, "RETIRO TRASLA", -100, "COP", "investment_withdrawal"),
+    ])
+    base = {"owner": "santiago", "day": "2026-05-26", "amount_minor": 100, "currency": "COP", "kind": "unknown"}
+    notice = {**base, "id": "out", "merchant": "Retiraste $1.00", "decision": "investment_withdrawal"}
+    candidates = st.pair_internal([fund])
+    matched, missing = st.match_existing(candidates, [notice])
+    assert [(c.movement.description, row) for c, row in matched] == [("RETIRO TRASLA", "out")]
+    assert [c.movement.description for c in missing] == ["ADICION"]
+    added = {**base, "id": "in", "merchant": "Fondo", "kind": "investment", "decision": "investment"}
+    matched, missing = st.match_existing(candidates, [added, notice])
+    assert {c.movement.description: row for c, row in matched} == {"ADICION": "in", "RETIRO TRASLA": "out"}
+    assert missing == []
+    # The model called this withdrawal an investment; the person's decision says what it is.
+    mistyped = {**notice, "kind": "investment"}
+    matched, _missing = st.match_existing(candidates, [mistyped])
+    assert [(c.movement.description, row) for c, row in matched] == [("RETIRO TRASLA", "out")]
