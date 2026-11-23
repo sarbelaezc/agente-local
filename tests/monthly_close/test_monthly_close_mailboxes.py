@@ -590,6 +590,24 @@ def test_a_notice_only_completes_a_file_movement_of_its_own_kind(tmp_path, prefe
     assert crossed["decision"] is None and crossed["note"].startswith("Posible duplicado de 1 movimiento importado del")
 
 
+def test_the_hour_tells_apart_two_file_movements_of_the_same_kind(tmp_path, preferences):
+    store = Store(tmp_path / "close.sqlite3")
+    store.configure(preferences.to_dict())
+    early, late = (insert_imported(store, "manuela", "2026-09-13", 500, legacy) for legacy in ("a", "b"))
+    with store.connect() as db:
+        db.execute("UPDATE transactions SET time='12:25' WHERE id=?", (early,))
+        db.execute("UPDATE transactions SET time='15:54' WHERE id=?", (late,))
+    for message, hour in (("m-none", None), ("m-far", "12:27"), ("m-late", "15:55")):
+        store.import_message(
+            message, [{**event(message, "2026-09-13", 500), "time": hour}], owner="manuela",
+        )
+    source = sources(store)
+    assert source[late] == "m-late" and "m-late" not in source  # one minute apart: the same movement
+    assert source[early].startswith("manuela-import:")
+    notes = {row["id"]: row["note"] for row in store.state()["transactions"]}
+    assert all(notes[name].startswith("Posible duplicado de 2") for name in ("m-none", "m-far"))
+
+
 def test_reprocessing_a_notice_never_deletes_the_file_movement_it_completed(tmp_path, preferences):
     store = Store(tmp_path / "close.sqlite3")
     store.configure(preferences.to_dict())

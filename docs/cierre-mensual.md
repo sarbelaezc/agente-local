@@ -380,7 +380,9 @@ a tarjeta, ingreso u otra salida; uno «desconocido» vale para cualquiera):
   identificador de mensaje, su comercio, su cuenta y su hora, y conserva la
   decisión, la categoría y la nota de Manuela. No se crea un movimiento nuevo. Se
   audita como `mailbox-complete-file-import`.
-- **Coincide con varios, o solo con uno de otro tipo.** Entra **pendiente** con la nota «Posible duplicado…»
+- **Coincide con varios del mismo tipo.** Se completa el único cuya hora esté a un
+  minuto o menos de la del aviso.
+- **Coincide con varios que la hora no distingue, o solo con otro tipo.** Entra **pendiente** con la nota «Posible duplicado…»
   y ninguna regla lo decide. Si es el mismo dinero, elige «No cuenta».
 
 Si decides un posible duplicado como gasto, ingreso, inversión, retiro o abono de
