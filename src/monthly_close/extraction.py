@@ -212,7 +212,7 @@ INCOME_CUE = re.compile(r"\b(?:recib\w+|consign\w+|nomina|te (?:pagaron|transfir
 # The bank states money left the account, with its amount. A card debt payment is excluded:
 # the model is told to drop those, and the fixed-sentence reader records the dated ones.
 MONEY_LEFT = re.compile(
-    r"\b(?:transferiste|compraste|retiraste|enviaste|pagaste(?![^.\n]{0,60}tarjeta\s+de\s+cr))\b"
+    r"\b(?:le\s+informa\s+recarga\b[^.\n$]{0,60}|transferiste|compraste|retiraste|enviaste|pagaste(?![^.\n]{0,60}tarjeta\s+de\s+cr))\b"
     r"[^.\n]{0,25}?(?:[$\u20ac\u00a3]|\b(?:COP|USD|EUR))\s*\d",
     re.IGNORECASE,
 )
@@ -345,6 +345,7 @@ def _fixed_event(mail: Mail, preferences: Preferences, source: str, merchant: st
     }
 
 
+SAVINGS_ACCOUNT = "Cuenta de ahorros"
 AMOUNT_TEXT = r"(?P<amount>\$\s?\d[\d.,]*\d|\$\s?\d)"
 
 
@@ -448,6 +449,30 @@ def _product_payments(mail: Mail, preferences: Preferences, source: str) -> list
             f"Pago a {name}, leido del aviso sin Ollama. Confirma su categoria.",
             time=match["time"],
         )
+        proposals[identifier] = event
+    return list(proposals.values())
+
+
+CARD_TOP_UP = _sentence(
+    r"Bancolombia le informa (?P<name>Recarga de Tarjeta Civica) por " + AMOUNT_TEXT
+    + r" desde cta \*\d{4}\. (?P<day>\d{2}/\d{2}/\d{4}) (?P<time>\d{1,2}:\d{2})"
+)
+
+
+def _card_top_ups(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+    """Topping up the prepaid metro pass: a pending purchase paid from the savings account.
+
+    The model names the bank as the merchant, or returns nothing at all.
+    """
+    proposals = {}
+    for match in CARD_TOP_UP.finditer(source):
+        identifier, event = _fixed_event(
+            mail, preferences, source, " ".join(match["name"].split()), match["amount"],
+            _notice_day(match["day"]), "purchase", preferences.categories[-1],
+            "Recarga leida del aviso, sin Ollama. Confirma su categoria.", time=match["time"].zfill(5),
+        )
+        if SAVINGS_ACCOUNT in preferences.accounts:
+            event["account"] = SAVINGS_ACCOUNT
         proposals[identifier] = event
     return list(proposals.values())
 
@@ -574,7 +599,7 @@ def _fixed_events(
         or _account_transfers(mail, preferences, source)
         or _card_abonos(mail, preferences, source) or _key_transfers(mail, preferences, source)
         or _qr_payments(mail, preferences, source) or _product_payments(mail, preferences, source)
-        or _invesbot_contributions(mail, preferences, source)
+        or _card_top_ups(mail, preferences, source) or _invesbot_contributions(mail, preferences, source)
         or _received_transfers(mail, preferences, source)
     )
 
