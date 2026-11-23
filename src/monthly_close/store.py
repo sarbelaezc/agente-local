@@ -12,6 +12,7 @@ from typing import Iterator
 
 from shared.local_panel import remote_device
 from monthly_close.destinations import QR_NOT_OWN_REASON
+from monthly_close.statements import TWIN_DAYS, names_merchant
 from monthly_close.domain import (
     COUNTERPART_KINDS, DECISIONS, HOUSEHOLD, INCOME_CATEGORIES, INCOME_KINDS, LOAN_DECISIONS, NON_EXPENSES,
     OWNERS, Preferences, clean_text, owner_id,
@@ -446,6 +447,24 @@ class Store:
              FILE_IMPORT_PREFIX.format(owner=owner) + "%"),
         ).fetchall()
 
+    @classmethod
+    def _statement_twins(cls, db: sqlite3.Connection, owner: str, event: dict) -> list[str]:
+        """Movements a statement brought before this notice: same value, kind and merchant.
+
+        A line already joined to a notice carries that notice's id and is left out. Loan
+        instalments stay with their statement: the credit registers look them up by it.
+        """
+        rows = db.execute(
+            """SELECT id, kind, merchant FROM transactions WHERE owner=? AND amount_minor=? AND currency=?
+            AND id LIKE 'stmt:%' AND message_id LIKE 'statement:%' AND kind<>'loan'
+            AND abs(julianday(day)-julianday(?))<=? ORDER BY id""",
+            (owner, event["amount_minor"], event["currency"], event["day"], TWIN_DAYS),
+        ).fetchall()
+        return [
+            row["id"] for row in rows
+            if cls._same_flow(row["kind"], event["kind"]) and names_merchant(row["merchant"], event["merchant"])
+        ]
+
     @staticmethod
     def _same_minute(first: str | None, second: str | None) -> bool:
         """Both hours are known and at most one minute apart."""
@@ -480,9 +499,10 @@ class Store:
                 not reprocess or db.execute(KEPT, (message_id,)).fetchone()
             ):
                 return
-            # A file-imported movement this notice completed keeps its own id and stays.
+            # A file or statement movement this notice completed keeps its own id and stays.
             replaced = db.execute(
-                "DELETE FROM transactions WHERE message_id=? AND id NOT LIKE ?", (message_id, f"{owner}:%"),
+                "DELETE FROM transactions WHERE message_id=? AND id NOT LIKE ? AND id NOT LIKE 'stmt:%'",
+                (message_id, f"{owner}:%"),
             ).rowcount
             if replaced:
                 self._audit(db, "reprocess-replace-card-payments", message_id, str(replaced))
@@ -507,6 +527,24 @@ class Store:
                                 "con el mismo valor: si es el mismo dinero, elige No cuenta",
                     }
                     self._audit(db, "mailbox-possible-duplicate", event["id"], ",".join(twin["id"] for twin in twins))
+                else:
+                    lines = self._statement_twins(db, owner, event)
+                    if len(lines) == 1:
+                        # The statement prevails: only the notice and its hour are added.
+                        db.execute(
+                            "UPDATE transactions SET message_id=?, time=coalesce(time,?) WHERE id=?",
+                            (message_id, event.get("time"), lines[0]),
+                        )
+                        self._audit(db, "mailbox-complete-statement", lines[0], message_id)
+                        imported.append(lines[0])
+                        continue
+                    if lines:
+                        event = {
+                            **event, "decision": None,
+                            "note": f"{DUPLICATE_NOTE} de {len(lines)} movimientos del extracto con el mismo valor: "
+                                    "si es el mismo dinero, elige No cuenta",
+                        }
+                        self._audit(db, "mailbox-possible-duplicate", event["id"], ",".join(lines))
                 imported.append(event["id"])
                 db.execute(
                     """INSERT INTO transactions (

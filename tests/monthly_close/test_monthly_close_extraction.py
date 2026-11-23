@@ -30,6 +30,17 @@ def test_a_misspelled_merchant_is_taken_from_the_card_purchase_sentence(preferen
     assert model.calls == 1  # no correction round
 
 
+@pytest.mark.parametrize("body", [
+    PURCHASE,
+    "Bancolombia: Compraste COP1.234,56 en APORTE FICTICIO*CO, el 01/03/2026 a las 10:15. "
+    "Esta compra esta asociada a T.Cred *1234.",
+])
+def test_the_purchase_sentence_names_the_merchant_even_if_the_model_copies_the_bank(preferences, body):
+    model = FakeExtractionModel(merchant="Bancolombia", amount_text="COP1.234,56", kind="transfer")
+    [event] = extract(purchase_mail(body), preferences, model)
+    assert (event["merchant"], event["kind"]) == ("APORTE FICTICIO*CO", "purchase")
+
+
 @pytest.mark.parametrize(("kind", "category"), [("income", "Otros ingresos"), ("investment", "Compras"), ("unknown", "Compras")])
 def test_a_card_purchase_is_a_purchase_whatever_the_model_calls_it(preferences, kind, category):
     """«APORTE EN ...» was read as income and as an investment, so it could not be an expense."""

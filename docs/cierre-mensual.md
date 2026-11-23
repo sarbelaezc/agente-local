@@ -392,6 +392,11 @@ guardar («Posible duplicado: ya cuenta un movimiento del …»), también al de
 destino completo. Cancelar no guarda nada; «No cuenta» se guarda sin preguntar.
 - **No coincide con ninguno.** Entra como cualquier aviso nuevo.
 
+Un aviso que llega después del extracto se une al movimiento que el extracto ya trajo
+si hay uno solo del mismo titular, tipo, valor, moneda y comercio a 3 días o menos: no
+se crea otro y se conserva su decisión (`mailbox-complete-statement`). Si hay varios,
+entra pendiente como «Posible duplicado».
+
 Los movimientos del archivo sin aviso en el correo se quedan como están. Los que
 traían una categoría dudosa siguen marcados «Categoría por confirmar» hasta que
 alguien los decida. Reprocesar un aviso con `-ReprocessEmpty` nunca borra el
@@ -954,8 +959,9 @@ confirmaciones del mismo aporte.
 Ollama, que propone la categoría y la cuenta. Si el aviso trae una sola frase así,
 Ollama propone un solo movimiento y el monto coincide, la frase manda en dos cosas:
 el movimiento es una compra aunque el comercio se llame «APORTE…» (salvo que Ollama
-lo lea como rechazado, promoción o verificación) y, si Ollama copia mal el nombre,
-el comercio se toma de la frase. Si algo no se cumple, el aviso sigue las reglas
+lo lea como rechazado, promoción o verificación) y el comercio se toma siempre de la
+frase. Vale también para «Compraste $X en COMERCIO, el DD/MM/AAAA… Esta compra esta
+asociada a T.Cred *NNNN». Si algo no se cumple, el aviso sigue las reglas
 normales y puede ir a la cola de revisión.
 
 Las cuentas y las llaves Bre-B y QR de destino se guardan completas, como las
@@ -1015,6 +1021,7 @@ etiquetas principales:
 | `qr-not-own-transfer` | Pago por QR que Ollama propuso como transferencia propia, vuelto transferencia |
 | `card-account-backfill` | Tarjeta corregida por los dígitos del aviso al releer los avisos ya importados (con la anterior) |
 | `payroll-deduction-income` | Ingreso espejo de una cuota descontada de la nómina |
+| `mailbox-complete-statement` | Movimiento del extracto unido al aviso que llegó después (con el mensaje) |
 | `mailbox-complete-file-import` | Movimiento del archivo de Manuela completado con su aviso de Gmail (con el mensaje) |
 | `mailbox-possible-duplicate` | Aviso de Gmail de Manuela igual a varios movimientos de su archivo, dejado pendiente |
 | `reprocess-replace-card-payments` | Pagos de tarjeta reemplazados por `-ReprocessEmpty` |

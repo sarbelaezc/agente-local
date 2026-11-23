@@ -677,6 +677,12 @@ def same_merchant(a: str, b: str) -> bool:
     return min(len(first), len(second)) >= 5 and (first.startswith(second) or second.startswith(first))
 
 
+def names_merchant(line: str, merchant: str) -> bool:
+    """The same merchant, or a line that also says what it was ("PAGO DE NOMI EMPRESA")."""
+    compact = _compact(merchant)
+    return same_merchant(line, merchant) or (len(compact) >= 8 and compact in _compact(line))
+
+
 def find_twins(
     lines: list[tuple[Candidate, str]], rows: list[dict], used: set[str], owner: str,
 ) -> list[tuple[Candidate, str, str]]:
