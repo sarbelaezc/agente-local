@@ -139,9 +139,12 @@ class FixedStatementLine:
     reason: str
 
 
+CARD_ABONO_LINE = r"ABONO SUCURSAL VIRTUAL"
+# Any plausible rate: it only keeps an unrelated payment of the same day from being taken.
+PESOS_PER_DOLLAR = (Decimal(2000), Decimal(6000))
 FIXED_STATEMENT_LINES = (
     FixedStatementLine(
-        r"ABONO SUCURSAL VIRTUAL", "Tarjeta de cr%", "card_payment", "exclude", None,
+        CARD_ABONO_LINE, "Tarjeta de cr%", "card_payment", "exclude", None,
         "en el extracto de la tarjeta es un pago propio desde la cuenta de ahorros: no cuenta.",
     ),
     FixedStatementLine(
@@ -1209,13 +1212,14 @@ class Store:
                 (owner_id(owner),),
             )]
 
+    def own_cards(self, owner: str) -> frozenset[str]:
+        """Last four digits of the credit cards that the member's own statements showed."""
+        return frozenset(suffix for _product, suffix in self.card_statement_suffixes(owner))
+
     def other_member_cards(self, owner: str) -> frozenset[str]:
         """Last four digits of the credit cards that only the other member's statements showed."""
-        mine = {suffix for _product, suffix in self.card_statement_suffixes(owner)}
-        return frozenset(
-            suffix for other in OWNERS if other != owner
-            for _product, suffix in self.card_statement_suffixes(other)
-        ) - mine
+        others = frozenset().union(*(self.own_cards(other) for other in OWNERS if other != owner))
+        return others - self.own_cards(owner)
 
     def own_account_suffixes(self, owner: str) -> list[str]:
         """Last four digits of the accounts registered as a member's own."""
@@ -1350,6 +1354,9 @@ class Store:
                 words = merchant_words(row["merchant"]).strip()
                 if not re.fullmatch(line.wording, words):
                     continue
+                if line.wording == CARD_ABONO_LINE and (paid := self._member_abono(db, row["id"])) is not None:
+                    decided += paid
+                    continue
                 self._decide(
                     db, row["id"], line.decision, line.category,
                     audit=("decision-statement-phrase", f"{line.decision}: {words}"),
@@ -1360,6 +1367,52 @@ class Store:
                 )
                 decided += 1
         return decided
+
+    def _member_abono(self, db: sqlite3.Connection, line_id: str) -> int | None:
+        """Settle a statement's card payment that the other member made, in pesos or dollars.
+
+        The other member's movement names the card («tarjeta de credito *NNNN»), the same
+        day. A payment already shown by another third-party payment is not taken again. None
+        when nobody else paid; with several payments it stays pending for a person (0).
+        """
+        line = db.execute("SELECT * FROM transactions WHERE id=?", (line_id,)).fetchone()
+        source = line["message_id"].split(":")  # statement:PRODUCT:SUFFIX:PERIOD_END[:OWNER]
+        suffix = source[2] if len(source) > 3 else ""
+        taken = {
+            row["cop_amount_minor"] if row["currency"] == "USD" else row["amount_minor"]
+            for row in db.execute(
+                """SELECT currency,amount_minor,cop_amount_minor FROM transactions WHERE owner=?
+                AND decision='third_party_payment' AND abs(julianday(day)-julianday(?))<=?""",
+                (line["owner"], line["day"], TWIN_DAYS),
+            )
+        }
+        options = []
+        for row in db.execute(
+            "SELECT * FROM transactions WHERE owner<>? AND kind='transfer' AND currency='COP' AND day=?",
+            (line["owner"], line["day"]),
+        ):
+            card = OTHER_CARD.fullmatch(row["merchant"])
+            if card is None or card[1] != suffix or row["amount_minor"] in taken:
+                continue
+            rate = Decimal(row["amount_minor"]) / Decimal(line["amount_minor"])
+            low, high = (1, 1) if line["currency"] == "COP" else PESOS_PER_DOLLAR
+            if low <= rate <= high:
+                options.append((row["id"], rate))
+        if len(options) != 1:
+            return 0 if options else None
+        payment, rate = options[0]
+        self._decide(
+            db, line_id, "third_party_payment", audit=("decision-statement-member-abono", payment),
+            exchange_rate=(
+                format(rate.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP), "f")
+                if line["currency"] == "USD" else None
+            ),
+        )
+        db.execute(
+            "UPDATE transactions SET between_owners=1, reason=? WHERE id=?",
+            ("Lo pago el otro titular el mismo dia: abono de tercero. Puedes cambiarlo aqui.", line_id),
+        )
+        return 1
 
     def reclassify_statement_movements(self, kinds: dict[str, str]) -> int:
         """Correct the kind of statement movements still pending, after the reader improved.

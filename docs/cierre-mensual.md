@@ -421,7 +421,14 @@ local):
   cuando solo los extractos del otro titular muestran esa tarjeta) entra como
   transferencia pendiente entre titulares, no como pago de tarjeta: puede ser gasto
   de quien paga y no cuenta en Hogar, donde ya cuentan las compras. Con «Aplicar
-  también a pagos futuros a este destino» la decisión vale para esa tarjeta.
+  también a pagos futuros a este destino» la decisión vale para esa tarjeta. Una
+  tarjeta que no está en ningún extracto entra igual, pero sin la marca entre
+  titulares (mientras no haya extractos de tarjeta propios, se toma como propia).
+- **El abono en la tarjeta de quien lo recibe**: si el extracto trae «ABONO SUCURSAL
+  VIRTUAL» y el otro titular pagó esa tarjeta el mismo día (mismo valor en pesos, o en
+  dólares con la tasa que resulta), queda como «Abono de tercero» entre titulares y no
+  cuenta en Hogar (`decision-statement-member-abono`). Un pago que ya tiene su abono no
+  se usa otra vez; si hay varios posibles, el abono queda pendiente.
 - También se marca a mano con el botón «Entre Santiago y Manuela» de la tarjeta del
   destino, que vale para pagos futuros a ese destino.
 - Las cuentas propias también se le indican a Ollama, para que una transferencia a
@@ -507,7 +514,7 @@ Fiducuenta, crédito de consumo e hipotecario):
 
   | Texto exacto | Dónde | Decisión |
   |---|---|---|
-  | «ABONO SUCURSAL VIRTUAL» | Extracto de tarjeta de crédito | **No cuenta**: pago propio desde la cuenta de ahorros; el gasto son las compras |
+  | «ABONO SUCURSAL VIRTUAL» | Extracto de tarjeta de crédito | **No cuenta**: pago propio desde la cuenta de ahorros; el gasto son las compras (salvo que lo haya pagado el otro titular) |
   | «PAGO SUC VIRT TC MASTER», «… AMEX» o «… VISA», con o sin «DOLAR» | Cuenta de ahorros | **No cuenta**: la salida con la que pagaste tu tarjeta |
   | «ABONO INTERESES AHORROS» | Cuenta de ahorros | **Ingreso**, categoría «Otros ingresos» |
 
@@ -937,7 +944,7 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 
 | Frase del aviso | Resultado |
 |---|---|
-| «Pagaste $X en la tarjeta de credito *NNNN desde la cuenta *NNNN, el DD/MM/AAAA» | Si la tarjeta es del otro titular, transferencia pendiente entre titulares. Si no, pago de tarjeta decidido «No cuenta» (no es gasto: el gasto son las compras). La cuenta queda `Desconocida` |
+| «Pagaste $X en la tarjeta de credito *NNNN desde la cuenta *NNNN, el DD/MM/AAAA» | Si la tarjeta es del otro titular, transferencia pendiente entre titulares; si no está en ningún extracto, transferencia pendiente. Si es propia, pago de tarjeta decidido «No cuenta» (no es gasto: el gasto son las compras). La cuenta queda `Desconocida` |
 | «Transferiste $X [por QR] desde tu cuenta *NNNN a la cuenta *NNNN, el …» | Transferencia pendiente a `cuenta *NNNN`, destino `tr:` con el número completo que escribe el aviso |
 | «Transferiste $X a la llave @alias o número desde tu cuenta …» (Bre-B) | Destino `bb:@alias` o `bb:` con el número completo de la llave |
 | «Pagaste $X por código QR desde tu cuenta *N a la llave K el DD/MM/AAAA a las HH:MM» | Transferencia pendiente «Pago QR a llave K» con la hora, destino `qr:` con la llave completa |
@@ -1022,6 +1029,7 @@ etiquetas principales:
 | `qr-not-own-transfer` | Pago por QR que Ollama propuso como transferencia propia, vuelto transferencia |
 | `card-account-backfill` | Tarjeta corregida por los dígitos del aviso al releer los avisos ya importados (con la anterior) |
 | `payroll-deduction-income` | Ingreso espejo de una cuota descontada de la nómina |
+| `decision-statement-member-abono` | Abono del extracto de tarjeta que pagó el otro titular (con el pago) |
 | `mailbox-complete-statement` | Movimiento del extracto unido al aviso que llegó después (con el mensaje) |
 | `mailbox-complete-file-import` | Movimiento del archivo de Manuela completado con su aviso de Gmail (con el mensaje) |
 | `mailbox-possible-duplicate` | Aviso de Gmail de Manuela igual a varios movimientos de su archivo, dejado pendiente |
