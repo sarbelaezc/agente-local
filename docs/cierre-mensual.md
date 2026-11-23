@@ -412,6 +412,11 @@ local):
   esos dígitos) se marcan **entre Santiago y Manuela**. La marca automática nunca
   quita una puesta a mano.
 - La marca no decide el movimiento: sigue pendiente hasta que elijas una decisión.
+- **Pagar la tarjeta del otro titular** («Pagaste $X en la tarjeta de credito *NNNN»,
+  cuando solo los extractos del otro titular muestran esa tarjeta) entra como
+  transferencia pendiente entre titulares, no como pago de tarjeta: puede ser gasto
+  de quien paga y no cuenta en Hogar, donde ya cuentan las compras. Con «Aplicar
+  también a pagos futuros a este destino» la decisión vale para esa tarjeta.
 - También se marca a mano con el botón «Entre Santiago y Manuela» de la tarjeta del
   destino, que vale para pagos futuros a ese destino.
 - Las cuentas propias también se le indican a Ollama, para que una transferencia a
@@ -926,7 +931,7 @@ Estas frases fijas se leen con reglas deterministas; el modelo no interviene.
 
 | Frase del aviso | Resultado |
 |---|---|
-| «Pagaste $X en la tarjeta de credito *NNNN desde la cuenta *NNNN, el DD/MM/AAAA» | Pago de tarjeta decidido «No cuenta» (no es gasto: el gasto son las compras). La cuenta queda `Desconocida` |
+| «Pagaste $X en la tarjeta de credito *NNNN desde la cuenta *NNNN, el DD/MM/AAAA» | Si la tarjeta es del otro titular, transferencia pendiente entre titulares. Si no, pago de tarjeta decidido «No cuenta» (no es gasto: el gasto son las compras). La cuenta queda `Desconocida` |
 | «Transferiste $X [por QR] desde tu cuenta *NNNN a la cuenta *NNNN, el …» | Transferencia pendiente a `cuenta *NNNN`, destino `tr:` con el número completo que escribe el aviso |
 | «Transferiste $X a la llave @alias o número desde tu cuenta …» (Bre-B) | Destino `bb:@alias` o `bb:` con el número completo de la llave |
 | «Pagaste $X por código QR desde tu cuenta *N a la llave K el DD/MM/AAAA a las HH:MM» | Transferencia pendiente «Pago QR a llave K» con la hora, destino `qr:` con la llave completa |

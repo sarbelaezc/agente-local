@@ -178,6 +178,10 @@ def merchant_rule_for(row: sqlite3.Row | dict, rules: list[dict]) -> dict | None
     return max(matches, key=lambda item: len(item["pattern"])) if matches else None
 
 
+# The payment of a card as its notice names it (see extraction.CARD_PAYMENT).
+OTHER_CARD = re.compile(r"tarjeta\s+de\s+cr[eé]dito\s+\*(\d{4})", re.IGNORECASE)
+
+
 def counterpart_owner(row: sqlite3.Row | dict, accounts: dict[str, str]) -> str | None:
     """Other household member whose account (by its last digits) the movement names."""
     if row["kind"] not in COUNTERPART_KINDS:
@@ -1167,6 +1171,14 @@ class Store:
                 (owner_id(owner),),
             )]
 
+    def other_member_cards(self, owner: str) -> frozenset[str]:
+        """Last four digits of the credit cards that only the other member's statements showed."""
+        mine = {suffix for _product, suffix in self.card_statement_suffixes(owner)}
+        return frozenset(
+            suffix for other in OWNERS if other != owner
+            for _product, suffix in self.card_statement_suffixes(other)
+        ) - mine
+
     def own_account_suffixes(self, owner: str) -> list[str]:
         """Last four digits of the accounts registered as a member's own."""
         with self.connect() as db:
@@ -1342,7 +1354,8 @@ class Store:
             (row["owner"], row["group_key"])
             for row in db.execute("SELECT owner,group_key FROM group_rules WHERE between_owners=1")
         }
-        if not accounts and not remembered:
+        cards = {owner: self.other_member_cards(owner) for owner in OWNERS}
+        if not accounts and not remembered and not any(cards.values()):
             return 0
         rows = db.execute("SELECT * FROM transactions WHERE between_owners=0").fetchall()
         if ids is not None:
@@ -1354,6 +1367,10 @@ class Store:
                 reason = "group-rule"
             elif counterpart_owner(row, accounts):
                 reason = "account"
+            elif row["kind"] == "transfer" and (card := OTHER_CARD.fullmatch(row["merchant"])) and (
+                card[1] in cards[row["owner"]]
+            ):
+                reason = "card"
             else:
                 continue
             db.execute("UPDATE transactions SET between_owners=1 WHERE id=?", (row["id"],))

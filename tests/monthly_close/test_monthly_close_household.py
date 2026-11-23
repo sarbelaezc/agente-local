@@ -5,7 +5,8 @@ import sqlite3
 
 import pytest
 
-from builders import file_imported, statement_line
+from builders import CARD_NOTICE, SENDER, file_imported, statement_line
+from monthly_close.extraction import Mail, extract
 from monthly_close.store import Store
 
 
@@ -160,6 +161,44 @@ def test_between_owners_mark_is_manual_audited_and_remembered(store):
     assert store.state()["group_rules"] == []
     with pytest.raises(ValueError):
         store.set_owner_account("santiago", "12345")
+
+
+def test_paying_the_other_members_card_is_own_spending_and_never_counts_twice_at_home(store):
+    """The card belongs to whom its statements say; paying one's own stays out of spending."""
+    check = {
+        "identity": "x", "product": "TARJETA_VISA", "suffix": "8243", "period_start": "2026-09-01",
+        "period_end": "2026-09-30", "movements": 0, "matched": 0, "missing": 0, "balance_minor": None,
+    }
+    store.record_statements([], [])
+    with store.connect() as db:
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(statement_checks)")}
+        values = {**check, "owner": "manuela", "checked_at": "2026-10-01T00:00:00+00:00"}
+        values = {key: value for key, value in values.items() if key in columns}
+        db.execute(
+            f"INSERT INTO statement_checks ({','.join(values)}) VALUES ({','.join('?' * len(values))})",
+            list(values.values()),
+        )
+    assert store.other_member_cards("santiago") == {"8243"} and store.other_member_cards("manuela") == frozenset()
+    mail = Mail("pay", SENDER, "Alertas", "2026-10-14T17:00:00Z", CARD_NOTICE)
+
+    class NoModel:
+        def complete_json(self, system, user):
+            raise AssertionError("fixed sentence")
+
+    own = extract(mail, store.preferences(), NoModel())
+    assert [(e["kind"], e["decision"]) for e in own] == [("card_payment", "exclude")]
+    events = extract(mail, store.preferences(), NoModel(), other_cards=store.other_member_cards("santiago"))
+    assert [(e["kind"], e["decision"]) for e in events] == [("transfer", None)]
+    store.import_message("pay", events)
+    row = store.state()["transactions"][0]
+    assert (row["between_owners"], row["decision"]) == (1, None)
+    store.decide_group("santiago", row["group"], "personal", remember=True, category="Otros gastos")
+    assert "personal 218699.00" in store.summary("2026-10")
+    assert "218699" not in store.summary("2026-10", "hogar")
+    # The next payment to that card follows the person's rule.
+    store.import_message("pay2", [{**events[0], "id": "pay2", "message_id": "pay2"}])
+    second = next(r for r in store.state()["transactions"] if r["id"] == "pay2")
+    assert (second["decision"], second["category"], second["between_owners"]) == ("personal", "Otros gastos", 1)
 
 
 def test_third_party_payment_only_for_card_payments_and_reduces_net(store):

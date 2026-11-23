@@ -106,6 +106,7 @@ class EvidenceError(ValueError):
 def extract(
     mail: Mail, preferences: Preferences, model: JsonModel, own_accounts: list[str] | None = None,
     known_credits: list[dict] | None = None, card_accounts: dict[str, str] | None = None,
+    other_cards: frozenset[str] = frozenset(),
 ) -> list[dict]:
     """Extract evidence-backed proposals; no model proposal is a human approval.
 
@@ -121,7 +122,7 @@ def extract(
         return []
     received = received_local(mail.received, preferences.timezone)
     source = _source(mail)
-    fixed = _fixed_events(mail, preferences, source)
+    fixed = _fixed_events(mail, preferences, source, other_cards)
     if fixed:
         return _notice_time(_mark_own_transfers(assign_destinations(fixed, source), own_accounts), received)
     if INVESBOT_NO_MOVEMENT.search(source):
@@ -234,14 +235,25 @@ CARD_PAYMENT = re.compile(
 CARD_PAYMENT_CATEGORY = "Pago de tarjeta"
 
 
-def _card_payments(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+def _card_payments(
+    mail: Mail, preferences: Preferences, source: str, other_cards: frozenset[str] = frozenset(),
+) -> list[dict]:
     """Card debt payments, read from the bank's fixed sentence without the model.
 
     Amount, card and date are copied from the notice. They are recorded as excluded
-    non-expenses: the purchases made with the card are what counts as spending.
+    non-expenses: the purchases made with the card are what counts as spending. Paying a
+    card of the other member is money given to them: a pending transfer.
     """
     proposals: dict[str, dict] = {}
     for match in CARD_PAYMENT.finditer(source):
+        if match["card"][-4:] in other_cards:
+            identifier, event = _fixed_event(
+                mail, preferences, source, match["card"], match["amount"], _notice_day(match["day"]),
+                "transfer", preferences.categories[-1],
+                "Pago a una tarjeta del otro titular, leido del aviso sin Ollama. Confirma si es gasto tuyo.",
+            )
+            proposals[identifier] = event
+            continue
         identifier, event = _fixed_event(
             mail, preferences, source, match["card"], match["amount"], _notice_day(match["day"]),
             "card_payment", CARD_PAYMENT_CATEGORY,
@@ -547,10 +559,12 @@ def _source(mail: Mail) -> str:
     return mail.subject + "\n" + clean_text(mail.body, 40000)
 
 
-def _fixed_events(mail: Mail, preferences: Preferences, source: str) -> list[dict]:
+def _fixed_events(
+    mail: Mail, preferences: Preferences, source: str, other_cards: frozenset[str] = frozenset(),
+) -> list[dict]:
     """Movements read from the bank's fixed sentences, without the model."""
     return (
-        _card_payments(mail, preferences, source) or _account_transfers(mail, preferences, source)
+        _card_payments(mail, preferences, source, other_cards) or _account_transfers(mail, preferences, source)
         or _card_abonos(mail, preferences, source) or _key_transfers(mail, preferences, source)
         or _qr_payments(mail, preferences, source) or _product_payments(mail, preferences, source)
         or _invesbot_contributions(mail, preferences, source)
