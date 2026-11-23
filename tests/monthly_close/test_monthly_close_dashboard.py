@@ -289,6 +289,21 @@ def test_usd_decision_requires_manual_rate_and_updates_cop_reports(dashboard):
     assert history.get_by_label(re.compile("Tasa estimada COP por USD")).input_value() == "4200.50"
 
 
+def test_year_tab_lists_frequent_merchants_of_the_year(dashboard):
+    page, store, month, _ = dashboard
+    year = month[:4]
+    other = f"{year}-01" if month != f"{year}-01" else f"{year}-02"
+    store.import_message("y1", [movement("y1", "FERRETERIA DEL ANO", message_id="y1", day=f"{other}-10",
+                                         amount_minor=900000, decision="personal")])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.locator("#tab-year").click()
+    ranking = page.locator("#year-merchant-ranking")
+    # The decided movements of every month count; the pending one of the fixture does not.
+    expect(ranking).to_contain_text("FERRETERIA DEL ANO · 1")
+    assert ranking.inner_text().count(" · ") == 2  # the fixture's merchant and the new one
+
+
 def test_grouped_usd_purchases_show_dollars_not_zero_cop(dashboard):
     page, store, month, _ = dashboard
     for number, amount in (("1", 1000), ("2", 2500)):

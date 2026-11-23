@@ -796,8 +796,9 @@ visuales > Efectos de animación), el panel cambia sin animaciones.
   la inversión neta, los retiros de inversión y la cobertura («X de N» meses
   revisados a mano o conciliados con los extractos).
 - Gráfica de ingresos (azul) y gastos (naranja), dos colores que se distinguen
-  también con daltonismo rojo-verde; categorías del año con barras y porcentaje, y
-  columnas por categoría con los mismos colores que el mes. El mes en curso se ve
+  también con daltonismo rojo-verde; categorías del año con barras y porcentaje;
+  comercios frecuentes del año, agrupados igual que en el mes; y columnas por
+  categoría con los mismos colores que el mes. El mes en curso se ve
   más claro.
 - **Inversiones y créditos:** una gráfica de línea para cada grupo con el saldo
   al cierre de cada mes, hasta el mes en curso: verde azulado para inversiones y
