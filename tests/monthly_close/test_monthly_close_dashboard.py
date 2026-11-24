@@ -325,6 +325,14 @@ def test_year_tab_lists_frequent_merchants_of_the_year(dashboard):
     # The decided movements of every month count; the pending one of the fixture does not.
     expect(ranking).to_contain_text("FERRETERIA DEL ANO · 1")
     assert ranking.inner_text().count(" · ") == 2  # the fixture's merchant and the new one
+    for letter in "ABCDEFGHIJ":
+        store.import_message(letter, [movement(letter, f"COMERCIO {letter * 3}", message_id=letter, day=f"{other}-11",
+                                               amount_minor=800000, decision="personal")])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.locator("#tab-year").click()
+    expect(ranking).to_contain_text("COMERCIO III")
+    assert ranking.inner_text().count(" · ") == 10
 
 
 def test_grouped_usd_purchases_show_dollars_not_zero_cop(dashboard):
@@ -855,8 +863,10 @@ def test_annual_chart_has_visible_numeric_axis_labels(dashboard):
 def test_year_category_legend_sits_under_the_chart(dashboard):
     page, _, _, _ = dashboard
     page.locator("#tab-year").click()
-    chart = page.locator("#year-chart-svg").bounding_box()
-    legend = page.locator("#year-category-legend").bounding_box()
+    # One reading for both: the tab fades in moving, so separate readings differ.
+    chart, legend = page.locator("#year-chart-svg, #year-category-legend").evaluate_all(
+        "nodes => nodes.map(node => node.getBoundingClientRect().toJSON())"
+    )
     assert legend["y"] >= chart["y"] + chart["height"] - 1
     assert legend["width"] > chart["width"] * .8  # it spans the card instead of a side column
 
@@ -880,7 +890,8 @@ def test_pending_card_hides_when_everything_is_decided_and_the_rest_share_one_ro
         heroes = page.locator(f"{panel} .metric.hero")
         expect(heroes).to_have_count(3)
         assert "Por decidir" not in page.locator(panel).inner_text()
-        tops = {round(heroes.nth(index).bounding_box()["y"]) for index in range(3)}
+        # One reading for all: the tab fades in moving, so separate readings differ.
+        tops = set(heroes.evaluate_all("nodes => nodes.map(node => Math.round(node.getBoundingClientRect().y))"))
         assert len(tops) == 1, (panel, tops)
 
 

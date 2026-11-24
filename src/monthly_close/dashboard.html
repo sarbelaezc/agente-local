@@ -1907,7 +1907,7 @@
       }
 
       const merchantKey = tx => typeof tx.merchant === "string" && tx.merchant.trim() ? merchantName(tx.merchant.trim()) : tx.merchant;
-      function renderRanking(selector, items, keyOf, missingLabel, filter = counted) {
+      function renderRanking(selector, items, keyOf, missingLabel, filter = counted, limit = 7) {
         const host = $(selector);
         host.replaceChildren();
         const groups = new Map();
@@ -1918,7 +1918,7 @@
           previous.count++;
           groups.set(key, previous);
         });
-        const top = Array.from(groups).sort((a, b) => b[1].total - a[1].total).slice(0, 7);
+        const top = Array.from(groups).sort((a, b) => b[1].total - a[1].total).slice(0, limit);
         if (!top.length) { host.append(el("div", "empty-state", "Sin datos decididos.")); return; }
         const max = Math.max(0, ...top.map(([, value]) => value.total));
         top.forEach(([name, value]) => host.append(barRow(
@@ -2165,7 +2165,7 @@
         $("#year-metrics").replaceChildren(heroes, ...(strip.childElementCount ? [strip] : []));
         fitTiles($("#year-metrics"));
 
-        renderRanking("#year-merchant-ranking", items, merchantKey, "Sin comercio");
+        renderRanking("#year-merchant-ranking", items, merchantKey, "Sin comercio", counted, 10);
         const categoryHost = $("#year-categories");
         categoryHost.replaceChildren();
         const ranked = Array.from(categoryTotals).filter(([, total]) => total > 0).sort((a, b) => b[1] - a[1]);
