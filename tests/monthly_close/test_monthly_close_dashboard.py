@@ -325,6 +325,14 @@ def test_year_tab_lists_frequent_merchants_of_the_year(dashboard):
     # The decided movements of every month count; the pending one of the fixture does not.
     expect(ranking).to_contain_text("FERRETERIA DEL ANO · 1")
     assert ranking.inner_text().count(" · ") == 2  # the fixture's merchant and the new one
+    for letter in "ABCDEFGHIJ":
+        store.import_message(letter, [movement(letter, f"COMERCIO {letter * 3}", message_id=letter, day=f"{other}-11",
+                                               amount_minor=800000, decision="personal")])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.locator("#tab-year").click()
+    expect(ranking).to_contain_text("COMERCIO III")
+    assert ranking.inner_text().count(" · ") == 10
 
 
 def test_grouped_usd_purchases_show_dollars_not_zero_cop(dashboard):
