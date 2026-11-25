@@ -52,6 +52,10 @@ class MailboxError(RuntimeError):
     """Microsoft Graph did not answer as expected; the batch stops instead of guessing."""
 
 
+class MessageChanged(LookupError):
+    """The message is no longer the one a person reviewed; it needs a new approval."""
+
+
 def token_cache_path() -> Path:
     return data_root() / "MailInvoiceAgent" / "graph_token_cache.bin"
 
@@ -492,6 +496,16 @@ def verify_destination(mailbox: GraphMailbox, message: dict, folder: str) -> Non
         raise LookupError("Destination message metadata differs; review Outlook manually")
 
 
+def verify_unchanged(mailbox: GraphMailbox, message: dict) -> MessageDetail:
+    """The message as it is now, only if it is still the reviewed one."""
+    detail = mailbox.message(message["conversation"])
+    if not _same_identity(detail, message):
+        raise MessageChanged("Conversation metadata changed; movement blocked")
+    if message.get("body_digest") and detail.body_digest != message["body_digest"]:
+        raise MessageChanged("Message body changed after review; movement blocked")
+    return detail
+
+
 def move_registered_message(
     mailbox: GraphMailbox, message: dict, folder: str, *, approved: bool,
     before_move: Callable[[], None] | None = None,
@@ -500,11 +514,7 @@ def move_registered_message(
     if not approved or not message["eligible"]:
         raise ValueError("Movement requires verified registration and explicit approval")
     destination = mailbox.folder(folder)
-    detail = mailbox.message(message["conversation"])
-    if not _same_identity(detail, message):
-        raise LookupError("Conversation metadata changed; movement blocked")
-    if message.get("body_digest") and detail.body_digest != message["body_digest"]:
-        raise LookupError("Message body changed after review; movement blocked")
+    detail = verify_unchanged(mailbox, message)
     # No retries after this side effect: a verification failure requires manual review.
     if before_move is not None:
         before_move()
