@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
+from zipfile import BadZipFile
 
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
@@ -118,7 +119,7 @@ def read_payments(config: LedgerConfig, since: date | None = None) -> list[Payme
     """
     try:
         book = load_workbook(config.path, read_only=True, data_only=True)
-    except (OSError, InvalidFileException) as exc:
+    except (OSError, InvalidFileException, BadZipFile) as exc:
         raise LedgerError(f"No se pudo abrir el registro del credito *{config.suffix}.") from exc
     try:
         if config.sheet not in book.sheetnames:

@@ -379,3 +379,20 @@ def test_one_bar_covers_the_whole_run_and_never_goes_back():
     progress.listing("Gmail", 12, 12)
     progress.update(("Gmail",), date(2026, 11, 1))
     assert bar().startswith("[########################] 100% | manuela · Gmail | 2026-11-01")
+
+
+def test_an_expired_session_stops_before_recording_coverage(tmp_path, preferences, monkeypatch):
+    store = Store(tmp_path / "coverage.sqlite3")
+    store.configure(preferences.to_dict())
+
+    def expired(*args):
+        raise GmailSessionError("Sesion de Google vencida.")
+
+    monkeypatch.setattr(app, "check_sessions", expired)
+    monkeypatch.setattr(app, "require_model", lambda settings: None)
+    monkeypatch.setattr(app, "open_source", lambda *args: pytest.fail("No debe abrir el buzón."))
+    with pytest.raises(GmailSessionError):
+        app.scan(store, tmp_path, {"folder_scan_verified": True}, preferences, date(2026, 2, 1), date(2026, 3, 1))
+    with store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM coverage").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM audit WHERE action='coverage'").fetchone()[0] == 0

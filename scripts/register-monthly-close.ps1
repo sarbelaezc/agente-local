@@ -6,7 +6,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 # $PSScriptRoot is not available yet when parameter defaults are evaluated with -File.
-if (-not $DataDir) { $DataDir = Join-Path (Split-Path $PSScriptRoot -Parent) ".local\MonthlyCloseAgent" }
+# Same folder as shared.storage.data_root().
+$localData = if ("$env:AGENTE_LOCAL_DATA".Trim()) { "$env:AGENTE_LOCAL_DATA".Trim() } else { Join-Path (Split-Path $PSScriptRoot -Parent) ".local" }
+if (-not $DataDir) { $DataDir = Join-Path $localData "MonthlyCloseAgent" }
 $name = "AgenteLocal-MonthlyClose"
 if ($Remove) {
     if ($PSCmdlet.ShouldProcess($name, "Eliminar tarea")) {

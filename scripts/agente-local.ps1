@@ -43,7 +43,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 # $PSScriptRoot is not available yet when parameter defaults are evaluated with -File.
-if (-not $DataDir) { $DataDir = Join-Path (Split-Path $PSScriptRoot -Parent) ".local\MonthlyCloseAgent" }
+# Same folder as shared.storage.data_root().
+$localData = if ("$env:AGENTE_LOCAL_DATA".Trim()) { "$env:AGENTE_LOCAL_DATA".Trim() } else { Join-Path (Split-Path $PSScriptRoot -Parent) ".local" }
+if (-not $DataDir) { $DataDir = Join-Path $localData "MonthlyCloseAgent" }
 function Get-PanelContent {
     $request = [System.Net.HttpWebRequest]::Create("http://127.0.0.1:8766")
     $request.Proxy = $null
@@ -177,11 +179,9 @@ if (-not (Test-Path -LiteralPath $python)) {
     throw "Falta .venv. Ejecuta scripts\bootstrap.ps1."
 }
 # One log per execution in each feature's local data folder; Python keeps the last 10.
-# Invoices follow AGENTE_LOCAL_DATA like shared.storage.data_root().
 # "login -Mailbox facturas" signs in to the invoice mailbox; the name is reserved for it.
 $invoiceLogin = $Command -eq "login" -and $Mailbox -eq "facturas"
 if ($Command -in @("invoices", "invoices-cleanup") -or $invoiceLogin) {
-    $localData = if ("$env:AGENTE_LOCAL_DATA".Trim()) { "$env:AGENTE_LOCAL_DATA".Trim() } else { Join-Path $root ".local" }
     $logDir = Join-Path $localData "MailInvoiceAgent\logs"
     $logCommand = if ($invoiceLogin) { "login" } elseif ($Command -eq "invoices-cleanup") { "cleanup" } elseif ($Resume) { "resume" } else { "batch" }
 } else {

@@ -325,7 +325,17 @@ Para quitarla: `.\scripts\register-monthly-close.ps1 -Remove`. Qué hace y cuán
 Por defecto todo se guarda en `.local` dentro del proyecto. Para usar otra
 carpeta (por ejemplo, fuera de OneDrive), define la variable de entorno
 `AGENTE_LOCAL_DATA` con esa ruta y ajusta las rutas de `settings.yaml` que
-apunten a `.local`. Las pruebas usan siempre una carpeta temporal y nunca leen ni
+apunten a `.local`. El lanzador y la tarea programada usan esa carpeta, salvo que
+indiques otra con `-DataDir`. Definir la variable no mueve los datos:
+
+1. Cierra los paneles y copia el contenido de `.local` a la carpeta nueva.
+2. Define la variable y abre una terminal nueva para que la tome.
+3. Si instalaste la tarea programada, regístrala otra vez con
+   `.\scripts\register-monthly-close.ps1`: guarda la ruta que había al instalarla.
+4. Comprueba con `.\scripts\agente-local.ps1 check-config` y borra la copia anterior
+   cuando todo funcione.
+
+Las pruebas usan siempre una carpeta temporal y nunca leen ni
 escriben `.local`.
 
 Los estados de lotes de facturas dependen de la app (`graph_client_id`), el libro

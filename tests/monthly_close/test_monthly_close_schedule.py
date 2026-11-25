@@ -285,7 +285,7 @@ def test_launcher_logs_a_scheduled_run_with_nothing_due(tmp_path):
     powershell, root, name = launcher(tmp_path, preflight_exit=3)
     result = subprocess.run(
         [powershell, "-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File", str(root / "scripts" / name), "scheduled"],
-        env=os.environ | {"LOCALAPPDATA": str(root)}, capture_output=True, text=True, timeout=60,
+        env=os.environ | {"LOCALAPPDATA": str(root), "AGENTE_LOCAL_DATA": ""}, capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stderr
     [log] = (root / ".local" / "MonthlyCloseAgent" / "logs").glob("*-scheduled.log")
@@ -297,7 +297,7 @@ def test_launcher_passes_this_runs_log_to_python(tmp_path):
     powershell, root, name = launcher(tmp_path, preflight_exit=0)
     result = subprocess.run(
         [powershell, "-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File", str(root / "scripts" / name), "serve"],
-        env=os.environ | {"LOCALAPPDATA": str(root)}, capture_output=True, text=True, timeout=60,
+        env=os.environ | {"LOCALAPPDATA": str(root), "AGENTE_LOCAL_DATA": ""}, capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stderr
     args = json.loads((root / "args.json").read_text(encoding="utf-8-sig"))

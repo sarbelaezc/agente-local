@@ -100,7 +100,7 @@ function Start-Process {
                 powershell, "-NoProfile", "-ExecutionPolicy", "RemoteSigned",
                 "-File", str(harness),
             ],
-            env=os.environ | {"LOCALAPPDATA": str(root), "PANEL_MODE": panel_mode}, capture_output=True,
+            env=os.environ | {"LOCALAPPDATA": str(root), "PANEL_MODE": panel_mode, "AGENTE_LOCAL_DATA": ""}, capture_output=True,
             text=True, timeout=30,
         )
         assert result.returncode == code, result.stderr
@@ -229,3 +229,58 @@ def test_launcher_signs_in_to_the_invoice_mailbox_with_its_own_log(tmp_path):
     assert args[2] == "mail_invoices.main" and "--login" in args and "monthly_close.main" not in args
     log = Path(args[args.index("--log-file") + 1])
     assert log.parent == data / "MailInvoiceAgent" / "logs" and log.name.endswith("-login.log")
+
+
+def run_copied_script(tmp_path, name, *arguments, local_data):
+    """Run a copy of a script in a temporary project whose Python only records its arguments."""
+    powershell = shutil.which("powershell.exe")
+    if not powershell:
+        pytest.skip("Requires Windows PowerShell.")
+    root = tmp_path / "project"
+    fake = root / ".venv" / "Scripts" / "python.ps1"
+    fake.parent.mkdir(parents=True)
+    # Not Set-Content: -WhatIf would suppress it.
+    fake.write_text(
+        "[IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'args.json'), ($args | ConvertTo-Json))\n"
+        "exit 0\n", encoding="utf-8",
+    )
+    script = root / "scripts" / name
+    script.parent.mkdir()
+    original = Path(__file__).parents[2] / "scripts" / name
+    script.write_text(
+        original.read_text(encoding="utf-8-sig").replace(".venv\\Scripts\\python.exe", ".venv\\Scripts\\python.ps1"),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File", str(script), *arguments],
+        env=os.environ | {"LOCALAPPDATA": str(root), "AGENTE_LOCAL_DATA": local_data},
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    args = json.loads((root / "args.json").read_text(encoding="utf-8-sig"))
+    return root, args[args.index("--data-dir") + 1], result.stdout
+
+
+@pytest.mark.parametrize("name,arguments", [
+    ("agente-local.ps1", ["serve"]), ("register-monthly-close.ps1", ["-WhatIf"]),
+])
+def test_scripts_keep_the_close_where_agente_local_data_says(tmp_path, name, arguments):
+    data = tmp_path / "datos fuera"
+    root, used, output = run_copied_script(tmp_path, name, *arguments, local_data=f" {data} ")
+    assert Path(used) == data / "MonthlyCloseAgent"
+    assert not (root / ".local").exists()
+    if name.startswith("register"):
+        assert str(data / "MonthlyCloseAgent") in output  # the task keeps the same folder
+
+
+@pytest.mark.parametrize("name,arguments", [
+    ("agente-local.ps1", ["serve"]), ("register-monthly-close.ps1", ["-WhatIf"]),
+])
+def test_scripts_default_to_the_project_folder_and_respect_an_explicit_one(tmp_path, name, arguments):
+    root, used, _ = run_copied_script(tmp_path / "a", name, *arguments, local_data="")
+    assert Path(used) == root / ".local" / "MonthlyCloseAgent"
+    explicit = tmp_path / "explicita"
+    _, used, _ = run_copied_script(
+        tmp_path / "b", name, *arguments, "-DataDir", str(explicit), local_data=str(tmp_path / "otra"),
+    )
+    assert Path(used) == explicit
