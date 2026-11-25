@@ -97,10 +97,16 @@ autorizaciones y el estado de recuperación.
 ## Corregir un correo bloqueado
 
 Un correo pasa a **bloqueado** cuando su registro choca con el Excel (por ejemplo,
-el número ya existe con otra fecha o valor) o cuando su cuerpo cambió después de
-aprobarlo.
+el número ya existe con otra fecha o valor) o cuando su remitente, asunto o cuerpo
+cambió después de aprobarlo.
 
-1. Ábrelo con `invoices -Resume`: aparece con los campos de la última revisión.
+1. Ábrelo:
+   - **Conflicto con el Excel:** con `invoices -Resume`; aparece con los campos de la
+     última revisión.
+   - **Correo cambiado:** con `invoices` (sin `-Resume`), mientras siga en la Bandeja
+     de entrada y entre en el lote (`-Days`, `-BatchSize`). Se lee de nuevo y aparece
+     con sus datos actuales, aún bloqueado; si no se puede leer sin errores se
+     conserva como estaba. Con `-Resume` no se relee y se volvería a bloquear.
 2. Corrige el conflicto en el Excel o en los datos del panel.
 3. Selecciónalo explícitamente y apruébalo de nuevo. La nueva aprobación vuelve a
    validar todo antes de registrar y mover; nunca modifica en silencio filas
