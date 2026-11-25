@@ -1164,27 +1164,29 @@ archivos de la carpeta nunca se tocan.
   - Pestaña Año: inversiones y créditos con detalle por producto, y los colores
     de «Ingresos y gastos».
 
+- Importación con el lector de ahorros corregido (2026-11-25): importados los
+  extractos de los dos titulares y decididos los pendientes que dejaron.
+- Tarjeta nueva (2026-11-25): la Visa de Manuela quedó registrada como tarjeta
+  nueva al responder la pregunta del lector de extractos.
+- Cola de revisión de Manuela (2026-11-25): releída con las frases de pago por QR
+  y de pago desde un producto; no queda nada pendiente de ella.
+- Avisos en USD (2026-11-25), según la base real: 220 movimientos de 2026, todos
+  con decisión. Las 167 compras que cuentan (121 familiares y 46 personales)
+  tienen su tasa y su valor en COP; los 9 sin tasa están excluidos y no suman al
+  estimado.
+
 **Pendiente**
 
-- Importar (no solo leer) los extractos de los dos titulares con el lector de
-  ahorros corregido, decidir los pendientes que dejen y ver qué meses vuelven a
-  conciliarse.
-- Responder la primera pregunta de tarjeta con número nuevo: la Visa de Manuela,
-  con extractos desde septiembre de 2026, y su Mastercard como única opción (las
-  dos tienen extractos de septiembre y octubre). Probado solo sobre una copia de la
-  base y con datos sintéticos.
-
-- Los avisos «tomaremos» de Invesbot de septiembre y octubre siguen decididos como
-  inversión: sin extracto de esas fechas no se sabe si fueron el único registro del
-  aporte.
-- Releer la cola de revisión de Manuela con las frases de pago por QR y de pago
-  desde un producto: probadas en solo lectura sobre sus 54 avisos en cola, sin
-  importar todavía.
 - La primera ejecución real de la tarea programada.
-- Cuánto dura en la práctica la sesión de Gmail en Testing, y si pasar la app a
-  producción lo evita.
-- Avisos reales en USD y las tasas elegidas.
+- Los avisos «tomaremos» de Invesbot de septiembre y octubre siguen decididos como
+  inversión: sin extracto de esas fechas no se sabe si fueron el único registro
+  del aporte. Los extractos no llegan al correo: hay que descargarlos de Invesbot.
 - Un `deltaLink` o un `historyId` caducados con datos reales.
+
+**Limitaciones conocidas**
+
+- La sesión de Gmail en modo Testing dura 7 días: pasado ese plazo hay que volver
+  a iniciar sesión. No se ha probado si pasar la app a producción lo evita.
 - Las transferencias entre titulares no se detectan solas en los datos actuales
-  (los avisos de Santiago no traen la cuenta destino); por ahora se marcan a mano
-  por destino.
+  (los avisos de Santiago no traen la cuenta destino); se marcan a mano por
+  destino.

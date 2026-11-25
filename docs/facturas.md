@@ -332,14 +332,16 @@ Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas y que la vista
 previa del valor lee los montos igual que el escritor del Excel) y el escritor de
 Excel con libros sintéticos.
 
+- Cambios de presentación del panel (vista previa del valor, carpeta sugerida,
+  barra compacta en el móvil) y aprobación desde el celular (2026-11-25): usados
+  por el usuario con lotes reales.
+
 **Pendiente**
 
 - Los nombres de archivo que usan los proveedores reales para emparejar XML y PDF
-  sueltos (probado con archivos sintéticos).
-- No consta una prueba con un PDF escaneado real (OCR).
+  sueltos (probado con archivos sintéticos). No se han visto en datos reales: las
+  facturas llegan en ZIP.
+- No consta una prueba con un PDF escaneado real (OCR); se puede comprobar con
+  `--analyze-file`, que solo lee.
 - Las pruebas no miden la precisión general del modelo: cada campo se revisa en el
   panel.
-- Los cambios de presentación del panel (vista previa del valor, carpeta sugerida,
-  barra compacta en el móvil) no se han usado todavía con un lote real.
-- Aprobar un lote real desde un celular con `invoices -Red` (probado con
-  pruebas HTTPS sobre una segunda dirección local).
