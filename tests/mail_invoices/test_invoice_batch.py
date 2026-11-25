@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from dataclasses import asdict, replace
 from datetime import date
 from decimal import Decimal
@@ -413,6 +414,111 @@ def test_excel_is_not_written_when_the_approved_message_cannot_be_confirmed(stor
     assert journal.load()[0].state == state
     assert journal.load()[0].last_error == str(error)
     assert not decisions.path.exists()
+
+
+def blocked_message():
+    return replace(approved(), state="blocked", body_digest="old", last_error="Message body changed after review")
+
+
+def test_a_changed_blocked_message_is_reviewed_again_from_its_current_content():
+    blocked = blocked_message()
+    current = replace(pending(), body_digest="new", folder="Hogar")
+    renewed = batch_workflow.renewed_message(blocked, current)
+    # What is shown for review comes from the current message, never from the old approval.
+    assert renewed.state == "blocked" and renewed.body_digest == "new" and renewed.invoices == []
+    assert renewed.items == current.items and renewed.folder == "Hogar"
+    assert (renewed.approver, renewed.approved_at) == (blocked.approver, blocked.approved_at)
+    assert "cambió" in renewed.last_error
+    retitled = replace(pending(), subject="Otro asunto", body_digest="old")
+    assert batch_workflow.renewed_message(blocked, retitled).subject == "Otro asunto"
+
+
+@pytest.mark.parametrize("current", [
+    replace(pending(), body_digest="old"),  # an Excel conflict keeps the person's corrections
+    replace(pending(), body_digest=""),
+    replace(pending(), body_digest="new", errors=["Unreadable attachment"]),
+])
+def test_a_blocked_message_is_kept_without_a_readable_change(current):
+    assert batch_workflow.renewed_message(blocked_message(), current) is None
+
+
+@pytest.mark.parametrize("state", ["approved", "registered", "moving", "moved"])
+def test_reading_the_mailbox_never_replaces_approved_work(state):
+    existing = replace(blocked_message(), state=state)
+    assert batch_workflow.renewed_message(existing, replace(pending(), body_digest="new")) is None
+
+
+def test_new_and_pending_messages_take_what_was_just_read():
+    current = replace(pending(), body_digest="new")
+    assert batch_workflow.renewed_message(None, current) is current
+    assert batch_workflow.renewed_message(pending(), current) is current
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_a_changed_blocked_message_can_be_approved_again_and_moved(stores, monkeypatch, tmp_path, registered):
+    from mail_invoices.batch_review import approve_batch
+
+    journal, workbook, decisions = stores
+    settings = MailSettings("11111111-2222-3333-4444-555555555555", workbook.path, tmp_path / "backups", "Hoja1", 20)
+    journal = BatchStateStore(journal.path, batch_scope(settings))
+    journal.save([blocked_message()])
+    if registered:
+        workbook.record(approved().invoices)
+    monkeypatch.setattr(batch_workflow, "batch_state_path", lambda: journal.path)
+    monkeypatch.setattr(batch_workflow, "decisions_path", lambda: decisions.path)
+    monkeypatch.setattr(batch_workflow, "open_mailbox", lambda config: nullcontext(None))
+    mock_folders(monkeypatch)
+    current = pending()
+    monkeypatch.setattr(batch_workflow, "simulate_classification", lambda *args, **kwargs: {"messages": [{
+        "conversation": current.conversation, "sender": current.sender, "subject": current.subject,
+        "errors": [], "review_items": current.items, "classification_context": asdict(current.context),
+        "folder": "Salud", "body_digest": "new",
+    }]})
+
+    class Review:
+        def __init__(self, messages, folders, config, journal, attachment_dir, lan=None):
+            self.messages, self.journal = messages, journal
+
+        def run(self):
+            assert [message.state for message in self.messages] == ["blocked"]  # never approved by itself
+            invoice = approved().invoices[0]
+            approve_batch(self.messages, ["Salud"], self.journal, workbook, {
+                "approver": "Santi", "messages": [{
+                    "id": current.conversation, "folder": "Salud", "invoices": [{
+                        "company": invoice.company, "legal_name": invoice.legal_name,
+                        "issued": invoice.issued.isoformat(), "amount": str(invoice.amount),
+                        "number": invoice.number, "currency": invoice.currency,
+                    }],
+                }],
+            })
+            return True
+
+        def executing(self):
+            pass
+
+        def finish(self, result):
+            pass
+
+    monkeypatch.setattr(batch_workflow, "BatchReviewPanel", Review)
+    checked = []
+
+    def verify(mailbox, data):
+        checked.append(data["body_digest"])
+        if data["body_digest"] != "new":
+            raise MessageChanged("Message body changed after review; movement blocked")
+
+    monkeypatch.setattr(batch_workflow, "verify_unchanged", verify)
+    monkeypatch.setattr(
+        batch_workflow, "move_registered_message",
+        lambda page, data, folder, *, approved, before_move: before_move(),
+    )
+    assert batch_workflow.process_invoice_batch(settings, 30, False, 5) == 0
+    assert checked == ["new"]
+    assert journal.load()[0].state == "moved"
+    book = load_workbook(workbook.path)
+    numbers = [row[0] for row in book["Hoja1"].iter_rows(min_row=2, min_col=6, max_col=6, values_only=True)]
+    book.close()
+    assert numbers.count("TEST-1") == 1
 
 
 def test_blocked_records_do_not_starve_ready_pending_messages():
