@@ -99,6 +99,13 @@ lectura falló, el panel se abre igual pero se conserva el código de error:
 abrirlo no significa que el recorrido terminara bien. `scan` hace lo mismo sin
 abrir el panel.
 
+Con `import -Red` el panel que se abre al terminar queda también disponible para tus
+[dispositivos emparejados](configuracion.md#11-paneles-desde-otros-dispositivos-opcional);
+la dirección y los códigos aparecen en la ventana de terminal del panel. Si ya hay un
+panel abierto sin `-Red`, se detiene antes de importar. Si el equipo no está en una
+red privada, lo importado se conserva, el panel no se abre y el comando termina con
+error.
+
 - **Sin fechas (incremental).** Lee solo lo que cambió desde la ejecución
   anterior, incluido el mes en curso. Ver
   [Lectura incremental](#lectura-incremental).
@@ -751,7 +758,7 @@ $env:PYTHONPATH = "src"
 ## El panel
 
 Se abre con `.\scripts\agente-local.ps1` en `http://127.0.0.1:8766`, solo en tu
-equipo. Con `serve -Red` también se puede usar desde tus dispositivos emparejados
+equipo. Con `serve -Red` o `import -Red` también se puede usar desde tus dispositivos emparejados
 de la red de casa, en `https://<dirección del equipo>:8767/` (ver
 [Paneles desde otros dispositivos](configuracion.md#11-paneles-desde-otros-dispositivos-opcional)). Arriba eliges el titular (**Santiago / Manuela / Hogar**, Hogar por defecto) y
 debajo las pestañas **Mes**, **Año** y **Decisión**; los dos siguen visibles al
@@ -1017,7 +1024,7 @@ el comercio es el destinatario nombrado, no el banco.
 
 Cada cambio de un movimiento queda en la tabla `audit` de `close.sqlite3` con su
 origen. Su columna `device` guarda el nombre del dispositivo emparejado desde el
-que se hizo (con `serve -Red`), o queda vacía si se hizo en el equipo. Las
+que se hizo (con `-Red`), o queda vacía si se hizo en el equipo. Las
 etiquetas principales:
 
 | Etiqueta | Origen |

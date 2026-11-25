@@ -369,6 +369,7 @@ que en el equipo. Solo entran los dispositivos que emparejas tú.
 
    ```powershell
    .\scripts\agente-local.ps1 serve -Red      # cierre mensual
+   .\scripts\agente-local.ps1 import -Red     # importa y luego abre el panel del cierre
    .\scripts\agente-local.ps1 invoices -Red   # lote de facturas
    ```
 
