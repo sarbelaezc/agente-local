@@ -9,7 +9,7 @@ from mail_invoices.documents import MAX_FILE_BYTES, InvoiceCandidate, rendered_x
 from mail_invoices.folders import IncomingMessage, bounded_context, suggest_folder
 from mail_invoices.classification_decisions import ClassificationDecisionStore, decisions_path
 from mail_invoices.graph_mailbox import (
-    MailboxError, discover_folders, filter_candidates, open_mailbox, read_history, scan_candidates,
+    discover_folders, filter_candidates, open_mailbox, read_history, scan_candidates,
 )
 from shared.local_model import LocalModelError, OllamaJsonModel
 from mail_invoices.settings import MailSettings, is_excluded_sender
@@ -142,7 +142,8 @@ def _classify(
             )
             result.update(folder=suggestion.folder, reason=suggestion.reason, source=suggestion.source)
             result["eligible"] = classification_ready(statuses, result["errors"])
-        except (LookupError, MailboxError, OSError, ValueError, LocalModelError) as error:
+        # A MailboxError (session, Graph) is not caught: it stops the whole run.
+        except (LookupError, OSError, ValueError, LocalModelError) as error:
             result["errors"].append(str(error))
             result["eligible"] = False
     return {
