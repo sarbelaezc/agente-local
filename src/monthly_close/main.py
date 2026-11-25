@@ -298,6 +298,8 @@ def scan(
         raise ValueError("El inicio debe ser anterior al fin exclusivo.")
     if not read_only:
         require_model(settings)
+    check_sessions(data_dir, boxes, relogin_minutes)
+    if not read_only:
         for month in months(start, end):
             store.coverage(
                 month, "partial",
@@ -305,7 +307,6 @@ def scan(
                 "eliminados y Dinero con todas sus subcarpetas; sin conciliar. "
                 "Otras carpetas y avisos borrados no estan cubiertos.",
             )
-    check_sessions(data_dir, boxes, relogin_minutes)
     model = None if read_only else OllamaJsonModel(settings["ollama_url"], settings["ollama_model"])
     mode = ScanMode(read_only, reprocess_empty, incremental)
     progress = Progress(start, end, oldest_first=incremental, mailboxes=len(boxes))
