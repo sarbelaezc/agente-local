@@ -100,6 +100,8 @@ STATE_COLUMNS = (
     "category_uncertain,between_owners"
 )
 INVESTMENT_FIGURES = ("opening_minor", "contributions_minor", "withdrawals_minor", "returns_minor")
+# Invesbot only: contributions the report implies against those recorded as movements.
+CONTRIBUTION_CHECKS = ("expected_contributions_minor", "recorded_contributions_minor")
 SPECIAL_CATEGORIES = {
     "investment": "Inversiones",
     "investment_withdrawal": "Retiros de inversión",
@@ -231,7 +233,7 @@ class Store:
             if "owner" not in checks:
                 db.execute("ALTER TABLE statement_checks ADD COLUMN owner TEXT NOT NULL DEFAULT 'santiago'")
             # Investment figures of a period (Protección); NULL for other statements.
-            for column in INVESTMENT_FIGURES:
+            for column in (*INVESTMENT_FIGURES, *CONTRIBUTION_CHECKS):
                 if column not in checks:
                     db.execute(f"ALTER TABLE statement_checks ADD COLUMN {column} INTEGER")
             # A destination rule may also remember the category chosen with it.
@@ -1267,18 +1269,22 @@ class Store:
                 db.execute(
                     """INSERT INTO statement_checks (identity,owner,product,suffix,period_start,period_end,
                     movements,matched,missing,balance_minor,checked_at,due_minor,paid_minor,
-                    opening_minor,contributions_minor,withdrawals_minor,returns_minor) VALUES (
+                    opening_minor,contributions_minor,withdrawals_minor,returns_minor,
+                    expected_contributions_minor,recorded_contributions_minor) VALUES (
                     :identity,:owner,:product,:suffix,:period_start,:period_end,:movements,:matched,
                     :missing,:balance_minor,:checked_at,:due_minor,:paid_minor,
-                    :opening_minor,:contributions_minor,:withdrawals_minor,:returns_minor) ON CONFLICT(identity) DO UPDATE SET
+                    :opening_minor,:contributions_minor,:withdrawals_minor,:returns_minor,
+                    :expected_contributions_minor,:recorded_contributions_minor) ON CONFLICT(identity) DO UPDATE SET
                     movements=excluded.movements,matched=excluded.matched,missing=excluded.missing,
                     balance_minor=excluded.balance_minor,checked_at=excluded.checked_at,
                     due_minor=excluded.due_minor,
                     paid_minor=COALESCE(excluded.paid_minor, statement_checks.paid_minor),
                     opening_minor=excluded.opening_minor,contributions_minor=excluded.contributions_minor,
-                    withdrawals_minor=excluded.withdrawals_minor,returns_minor=excluded.returns_minor""",
+                    withdrawals_minor=excluded.withdrawals_minor,returns_minor=excluded.returns_minor,
+                    expected_contributions_minor=excluded.expected_contributions_minor,
+                    recorded_contributions_minor=excluded.recorded_contributions_minor""",
                     {
-                        "due_minor": None, "paid_minor": None, **dict.fromkeys(INVESTMENT_FIGURES),
+                        "due_minor": None, "paid_minor": None, **dict.fromkeys((*INVESTMENT_FIGURES, *CONTRIBUTION_CHECKS)),
                         **check, "checked_at": now,
                     },
                 )

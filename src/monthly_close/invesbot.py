@@ -167,3 +167,37 @@ def read_reports(data_dir: Path) -> list[Report]:
                 raise ReportError(f"{path.name}: difiere de {found[key][1]}, del mismo plan y mes.")
             found.setdefault(key, (report, path.name))
     return [found[key][0] for key in sorted(found)]
+
+
+def period_checks(reports: list[Report]) -> list[dict]:
+    """One statement check per report, with the figures of its own period.
+
+    The period figures are the difference with the previous report of the same plan (a
+    gap of months is covered by the difference); without one, the plan starts at balance 0.
+    """
+    checks: list[dict] = []
+    previous: dict[tuple[str, str], Report] = {}
+    for report in sorted(reports, key=lambda r: (r.owner, r.plan, r.period_end)):
+        before = previous.get((report.owner, report.plan))
+        opening = before.balance_minor if before else 0
+        contributions = report.opening_minor + report.additional_minor - (
+            before.opening_minor + before.additional_minor if before else 0)
+        withdrawals = report.withdrawals_minor - (before.withdrawals_minor if before else 0)
+        previous[(report.owner, report.plan)] = report
+        checks.append({
+            "identity": f"{INVESBOT_PRODUCT}:{report.plan}:{report.period_end}:{report.owner}",
+            "product": INVESBOT_PRODUCT,
+            "suffix": report.plan,
+            "owner": report.owner,
+            "period_start": report.period_end.replace(day=1).isoformat(),
+            "period_end": report.period_end.isoformat(),
+            "movements": 0,
+            "matched": 0,
+            "missing": 0,
+            "balance_minor": report.balance_minor,
+            "opening_minor": opening,
+            "contributions_minor": contributions,
+            "withdrawals_minor": withdrawals,
+            "returns_minor": report.balance_minor - opening - contributions + withdrawals,
+        })
+    return checks

@@ -82,3 +82,67 @@ def test_a_pdf_that_is_not_a_report_stops_naming_the_file(tmp_path, monkeypatch)
 
 def test_without_folders_there_is_nothing_to_read(tmp_path):
     assert invesbot.read_reports(tmp_path) == []
+
+
+def report(month=2, opening=50_000, additional=100_000, balance=150_500, withdrawals=0,
+           plan="Plan Ficticio", owner="santiago"):
+    """A report with figures in pesos (cents are derived)."""
+    last = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
+    return invesbot.Report(
+        owner, plan, date(2026, month, last), date(2026, 1, 13), balance * 100, opening * 100,
+        additional * 100, 1, withdrawals * 100, (balance - opening - additional + withdrawals) * 100,
+    )
+
+
+def test_period_figures_come_from_the_previous_report():
+    feb = report(month=2, opening=50_000, additional=100_000, balance=150_500)
+    may = report(month=5, opening=50_000, additional=400_000, balance=452_000)
+    [first, second] = invesbot.period_checks([may, feb])
+    assert (first["opening_minor"], first["contributions_minor"], first["returns_minor"]) == (
+        0, 15000000, 50000)
+    assert (second["opening_minor"], second["contributions_minor"], second["withdrawals_minor"],
+            second["returns_minor"]) == (15050000, 30000000, 0, 150000)
+    assert second["identity"] == "INVESBOT:Plan Ficticio:2026-05-31:santiago"
+    assert (second["product"], second["suffix"], second["owner"]) == (
+        "INVESBOT", "Plan Ficticio", "santiago")
+    assert (second["period_start"], second["period_end"]) == ("2026-05-01", "2026-05-31")
+    assert (second["movements"], second["matched"], second["missing"]) == (0, 0, 0)
+    assert second["balance_minor"] == 45200000
+
+
+def test_a_loss_and_withdrawals_are_read_from_the_difference():
+    jan = report(month=1, opening=50_000, additional=100_000, balance=140_000)
+    feb = report(month=2, opening=50_000, additional=100_000, balance=100_000, withdrawals=30_000)
+    [_, second] = invesbot.period_checks([jan, feb])
+    assert second["returns_minor"] == (100_000 - 140_000 - 0 + 30_000) * 100
+    assert second["withdrawals_minor"] == 3000000
+    assert second["contributions_minor"] == 0
+    assert second["returns_minor"] == -1000000
+
+
+def test_plans_and_owners_are_independent_and_ordered():
+    rows = invesbot.period_checks([
+        report(month=3, plan="B"), report(month=2, plan="A", owner="manuela"),
+        report(month=2, plan="A"), report(month=1, plan="B"),
+    ])
+    assert [(r["owner"], r["suffix"], r["period_end"]) for r in rows] == [
+        ("manuela", "A", "2026-02-28"), ("santiago", "A", "2026-02-28"),
+        ("santiago", "B", "2026-01-31"), ("santiago", "B", "2026-03-31"),
+    ]
+    assert rows[1]["opening_minor"] == 0
+
+
+def test_checks_are_stored_and_repeating_changes_nothing(make_store):
+    store = make_store()
+    checks = invesbot.period_checks([report(month=2), report(month=3, balance=160_000)])
+    store.record_statements(checks, [])
+    first = store.state()["statement_checks"]
+    store.record_statements(checks, [])
+    rows = store.state()["statement_checks"]
+    assert [{k: v for k, v in row.items() if k != "checked_at"} for row in rows] == [
+        {k: v for k, v in row.items() if k != "checked_at"} for row in first]
+    invesbot_rows = [row for row in rows if row["product"] == "INVESBOT"]
+    assert len(invesbot_rows) == 2
+    assert invesbot_rows[1]["opening_minor"] == 15050000
+    assert invesbot_rows[0]["expected_contributions_minor"] is None
+    assert invesbot_rows[0]["recorded_contributions_minor"] is None
