@@ -321,7 +321,7 @@ def test_an_approved_message_is_moved_once_and_verified(mailbox, graph):
     ({"body_digest": "0" * 64}, "body changed after review"),
 ])
 def test_a_message_that_changed_after_review_is_never_moved(mailbox, graph, changes, error):
-    with pytest.raises(LookupError, match=error):
+    with pytest.raises(gm.MessageChanged, match=error):
         gm.move_registered_message(mailbox, approved_data(**changes), "Salud", approved=True)
     assert graph.moves == []
 
@@ -472,7 +472,7 @@ def test_classification_reads_downloads_and_suggests_without_moving(graph, tmp_p
     assert not (tmp_path / "tmp").exists() or list((tmp_path / "tmp").iterdir()) == []
 
 
-def test_a_graph_failure_on_one_message_is_reported_on_that_message(graph, tmp_path, monkeypatch):
+def test_a_graph_failure_while_reading_a_message_stops_the_batch(graph, tmp_path, monkeypatch):
     from mail_invoices import classification
     from mail_invoices.settings import MailSettings
 
@@ -486,9 +486,8 @@ def test_a_graph_failure_on_one_message_is_reported_on_that_message(graph, tmp_p
         CLIENT_ID, tmp_path / "book.xlsx", tmp_path, "Hoja1", 5, attachments_dir=tmp_path / "tmp",
         tesseract_executable=tmp_path / "missing.exe",
     )
-    report = classification.simulate_classification(settings, 30, [], False, mailbox=mailbox)
-    assert report["messages"][0]["errors"] == ["Graph respondio 503"]
-    assert report["messages"][0]["eligible"] is False
+    with pytest.raises(gm.MailboxError, match="503"):
+        classification.simulate_classification(settings, 30, [], False, mailbox=mailbox)
 
 
 # ---------------------------------------------------------------- unexpected Graph answers stop

@@ -64,7 +64,9 @@ aprobación automática: cada lote necesita a una persona en el panel.
 
 «Cerrar sin ejecutar», o cerrar la pestaña, termina sin escribir el Excel ni mover
 correos; los pendientes se conservan para la próxima vez. El lote se detiene en el
-primer fallo y conserva las demás aprobaciones. No se pueden ejecutar dos lotes a
+primer fallo y conserva las demás aprobaciones. Si la sesión o Microsoft Graph
+fallan mientras se prepara el lote, todo se detiene sin abrir el panel ni cambiar
+los pendientes guardados. No se pueden ejecutar dos lotes a
 la vez.
 
 Ollama tarda unos 3 a 10 segundos por correo; el límite de 20 es lo que conviene
@@ -253,11 +255,12 @@ no entrenamiento del modelo; siempre puedes cambiar la carpeta antes de aprobar.
 | `registered` | Registrado y verificado; falta mover el correo |
 | `moving` | Se pidió el movimiento; si se cortó, solo se verifica |
 | `moved` | Archivado y verificado; no se procesa de nuevo |
-| `blocked` | Conflicto con el Excel o cuerpo cambiado; requiere nueva aprobación |
+| `blocked` | Conflicto con el Excel, o remitente, asunto o cuerpo cambiados; requiere nueva aprobación |
 
 La identidad de cada correo incluye remitente, asunto y una huella SHA-256 del
-cuerpo leído; un cambio antes de mover lo bloquea, y el agente nunca mueve con una
-aprobación obsoleta. El Excel y el buzón no forman una transacción atómica: por
+cuerpo leído. Se comprueba antes de registrar en el Excel y otra vez antes de
+mover: un cambio lo bloquea, y el agente nunca registra ni mueve con una aprobación
+obsoleta. El Excel y el buzón no forman una transacción atómica: por
 eso existen estos estados y la verificación de cada paso.
 
 ## El libro de Excel

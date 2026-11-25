@@ -17,7 +17,8 @@ from mail_invoices.classification import simulate_classification
 from mail_invoices.classification_decisions import ClassificationDecisionStore, decisions_path
 from mail_invoices.folders import ConfirmedExample
 from mail_invoices.graph_mailbox import (
-    MailboxError, discover_folders, move_registered_message, open_mailbox, verify_destination,
+    MailboxError, MessageChanged, discover_folders, move_registered_message, open_mailbox,
+    verify_destination, verify_unchanged,
 )
 from mail_invoices.review_server import ReviewPanel
 from shared.lan_access import LanAccess
@@ -99,10 +100,7 @@ def _active_messages(
 def _persist_execution_error(
     message: BatchMessage, journal: BatchStateStore, error: Exception,
 ) -> None:
-    if (
-        message.state == "registered"
-        and "body changed after review" in str(error).casefold()
-    ):
+    if isinstance(error, MessageChanged) and message.state in {"approved", "registered"}:
         message.state = "blocked"
     message.last_error = str(error)
     journal.save([message])
@@ -122,6 +120,8 @@ def execute_message(
     }
     try:
         if message.state == "approved":
+            # Checked again right before moving: a batch may resume much later.
+            verify_unchanged(mailbox, data)
             try:
                 workbook.record(message.invoices)
             except WorkbookError:

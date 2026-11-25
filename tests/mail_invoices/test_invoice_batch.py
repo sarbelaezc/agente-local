@@ -13,9 +13,16 @@ from mail_invoices.batch_review import prepare_pdf_preview
 from mail_invoices.classification_decisions import ClassificationDecisionStore
 from mail_invoices.documents import InvoiceCandidate
 from mail_invoices.folders import IncomingMessage
+from mail_invoices.graph_mailbox import MailboxError, MessageChanged
 from mail_invoices.review import ReviewItem
 from mail_invoices.settings import MailSettings
 from mail_invoices.workbook import InvoiceWorkbook, ReviewedInvoice
+
+
+@pytest.fixture(autouse=True)
+def unchanged_message(monkeypatch):
+    """These tests have no mailbox: the approved message is the reviewed one unless a test says otherwise."""
+    monkeypatch.setattr(batch_workflow, "verify_unchanged", lambda mailbox, message: None, raising=False)
 
 
 def pending(number="TEST-1"):
@@ -371,7 +378,7 @@ def test_changed_registered_message_requires_manual_reapproval(stores, monkeypat
     monkeypatch.setattr(
         batch_workflow, "move_registered_message",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            LookupError("Message body changed after review; movement blocked")
+            MessageChanged("Message body changed after review; movement blocked")
         ),
     )
 
@@ -381,6 +388,31 @@ def test_changed_registered_message_requires_manual_reapproval(stores, monkeypat
     persisted = journal.load()[0]
     assert persisted.state == "blocked"
     assert persisted.last_error == "Message body changed after review; movement blocked"
+
+
+@pytest.mark.parametrize("error,state", [
+    (MessageChanged("Message body changed after review; movement blocked"), "blocked"),
+    # An unreachable mailbox says nothing about the message: the approval is kept.
+    (MailboxError("Graph respondio 503"), "approved"),
+])
+def test_excel_is_not_written_when_the_approved_message_cannot_be_confirmed(stores, monkeypatch, error, state):
+    journal, workbook, decisions = stores
+    message = approved()
+    journal.save([message])
+    before = workbook.path.read_bytes()
+
+    def fail(mailbox, data):
+        assert (data["conversation"], data["body_digest"]) == (message.conversation, message.body_digest)
+        raise error
+
+    monkeypatch.setattr(batch_workflow, "verify_unchanged", fail, raising=False)
+    monkeypatch.setattr(batch_workflow, "move_registered_message", lambda *a, **kw: pytest.fail("Move attempted"))
+    with pytest.raises(type(error)):
+        batch_workflow.execute_message(message, journal, workbook, decisions, None)
+    assert workbook.path.read_bytes() == before
+    assert journal.load()[0].state == state
+    assert journal.load()[0].last_error == str(error)
+    assert not decisions.path.exists()
 
 
 def test_blocked_records_do_not_starve_ready_pending_messages():
