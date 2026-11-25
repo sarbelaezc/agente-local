@@ -10,7 +10,7 @@ import calendar
 import io
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -33,6 +33,8 @@ START_MONTHS = {
     "ene": 1, "feb": 2, "mar": 3, "abr": 4, "may": 5, "jun": 6, "jul": 7, "ago": 8,
     "sep": 9, "oct": 10, "nov": 11, "dec": 12, "dic": 12,
 }
+MONTH_NAMES = {number: name for name, number in MONTHS.items() if name != "sptiembre"}
+SAVINGS_TRANSFER = "TRASLADO A FONDO DE INVERSION"
 AMOUNT = re.compile(r"(-?)\s*\$\s*(-?)\s*(\d[\d.]*,\d{2})")
 
 
@@ -185,7 +187,7 @@ def period_checks(reports: list[Report]) -> list[dict]:
         withdrawals = report.withdrawals_minor - (before.withdrawals_minor if before else 0)
         previous[(report.owner, report.plan)] = report
         checks.append({
-            "identity": f"{INVESBOT_PRODUCT}:{report.plan}:{report.period_end}:{report.owner}",
+            "identity": report_identity(report),
             "product": INVESBOT_PRODUCT,
             "suffix": report.plan,
             "owner": report.owner,
@@ -201,3 +203,82 @@ def period_checks(reports: list[Report]) -> list[dict]:
             "returns_minor": report.balance_minor - opening - contributions + withdrawals,
         })
     return checks
+
+
+def report_identity(report: Report) -> str:
+    return f"{INVESBOT_PRODUCT}:{report.plan}:{report.period_end}:{report.owner}"
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """Movements to count as investment, and per report identity (expected, recorded).
+
+    justified_by names, for each movement to restore, the report identity that shows it.
+    """
+
+    restore: list[str]
+    differences: dict[str, tuple[int, int]]
+    justified_by: dict[str, str] = field(default_factory=dict)
+
+
+def _is_plan_movement(movement: dict, report: Report, plans_by_owner: dict[str, set[str]]) -> bool:
+    """«Invesbot <plan>», or bare «Invesbot» when it is the owner's only plan."""
+    merchant = movement["merchant"]
+    return merchant == f"Invesbot {report.plan}" or (
+        merchant == "Invesbot" and plans_by_owner.get(report.owner) == {report.plan})
+
+
+def plan_outcome(
+    reports: list[Report], movements: list[dict], plans_by_owner: dict[str, set[str]],
+    restored: set[str],
+) -> Outcome:
+    """Compare each report's contributions with the recorded ones and propose corrections.
+
+    Per plan, oldest report first: what a report misses is filled first with savings
+    transfers of its month decided as investment, then with excluded contributions of the
+    plan of its month, each only when it fits in what is still missing. What counted for
+    one report keeps counting for the next. Movements in restored are never proposed again.
+    """
+    restore: list[str] = []
+    differences: dict[str, tuple[int, int]] = {}
+    justified_by: dict[str, str] = {}
+    counted_transfers: dict[str, str] = {}  # transfer id -> the plan it counted for
+    ordered = sorted(movements, key=lambda m: (m["day"], m["id"]))
+    for report in sorted(reports, key=lambda r: (r.owner, r.plan, r.period_end)):
+        start, end = report.plan_start.isoformat(), report.period_end.isoformat()
+        month = end[:7]
+        own = [m for m in ordered if m["owner"] == report.owner and start <= m["day"] <= end]
+        plan = [m for m in own if _is_plan_movement(m, report, plans_by_owner)]
+        recorded = sum(
+            m["amount_minor"] if m["decision"] == "investment" or m["id"] in justified_by
+            else -m["amount_minor"] if m["decision"] == "investment_withdrawal" else 0
+            for m in plan
+        ) + sum(m["amount_minor"] for m in own if counted_transfers.get(m["id"]) == report.plan)
+        expected = report.opening_minor + report.additional_minor - report.withdrawals_minor
+        identity = report_identity(report)
+        for movement in own:
+            missing = expected - recorded
+            if missing <= 0 or movement["day"][:7] != month:
+                continue
+            if (movement["merchant"] == SAVINGS_TRANSFER and movement["decision"] == "investment"
+                    and movement["id"] not in counted_transfers and movement["amount_minor"] <= missing):
+                counted_transfers[movement["id"]] = report.plan
+                recorded += movement["amount_minor"]
+        for movement in plan:
+            missing = expected - recorded
+            if missing <= 0 or movement["day"][:7] != month:
+                continue
+            if (movement["decision"] == "exclude" and movement["id"] not in restored
+                    and movement["id"] not in justified_by and movement["amount_minor"] <= missing):
+                restore.append(movement["id"])
+                justified_by[movement["id"]] = identity
+                recorded += movement["amount_minor"]
+        differences[identity] = (expected, recorded)
+    return Outcome(restore, differences, justified_by)
+
+
+def restore_note(identity: str) -> str:
+    """Note of a movement counted as a contribution because of the report identity."""
+    period_end = date.fromisoformat(identity.rsplit(":", 2)[1])
+    return (f"Contado como aporte: el informe de Invesbot de {MONTH_NAMES[period_end.month]} "
+            f"de {period_end.year} muestra el aporte.")

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterator
 
 from shared.local_panel import remote_device
+from monthly_close import invesbot
 from monthly_close.destinations import QR_NOT_OWN_REASON
 from monthly_close.statements import TWIN_DAYS, names_merchant
 from monthly_close.domain import (
@@ -1256,39 +1257,9 @@ class Store:
         statement line and existing ids are skipped. twins pairs a statement line's id with
         another movement that duplicates it: the statement prevails (see _settle_twin).
         """
-        now = datetime.now(timezone.utc).isoformat()
         inserted: list[str] = []
         with self.connect() as db:
-            for check in checks:
-                check = {"owner": "santiago", **check}
-                known = db.execute(
-                    "SELECT owner FROM statement_checks WHERE identity=?", (check["identity"],),
-                ).fetchone()
-                if known is not None and known["owner"] != check["owner"]:
-                    raise ValueError("Un extracto ya registrado de otro titular no cambia de titular.")
-                db.execute(
-                    """INSERT INTO statement_checks (identity,owner,product,suffix,period_start,period_end,
-                    movements,matched,missing,balance_minor,checked_at,due_minor,paid_minor,
-                    opening_minor,contributions_minor,withdrawals_minor,returns_minor,
-                    expected_contributions_minor,recorded_contributions_minor) VALUES (
-                    :identity,:owner,:product,:suffix,:period_start,:period_end,:movements,:matched,
-                    :missing,:balance_minor,:checked_at,:due_minor,:paid_minor,
-                    :opening_minor,:contributions_minor,:withdrawals_minor,:returns_minor,
-                    :expected_contributions_minor,:recorded_contributions_minor) ON CONFLICT(identity) DO UPDATE SET
-                    movements=excluded.movements,matched=excluded.matched,missing=excluded.missing,
-                    balance_minor=excluded.balance_minor,checked_at=excluded.checked_at,
-                    due_minor=excluded.due_minor,
-                    paid_minor=COALESCE(excluded.paid_minor, statement_checks.paid_minor),
-                    opening_minor=excluded.opening_minor,contributions_minor=excluded.contributions_minor,
-                    withdrawals_minor=excluded.withdrawals_minor,returns_minor=excluded.returns_minor,
-                    expected_contributions_minor=excluded.expected_contributions_minor,
-                    recorded_contributions_minor=excluded.recorded_contributions_minor""",
-                    {
-                        "due_minor": None, "paid_minor": None, **dict.fromkeys((*INVESTMENT_FIGURES, *CONTRIBUTION_CHECKS)),
-                        **check, "checked_at": now,
-                    },
-                )
-                self._audit(db, "statement-check", check["identity"], f"{check['matched']}/{check['movements']}")
+            self._record_checks(db, checks)
             for event in events:
                 if event["decision"] is not None or not event["id"].startswith("stmt:"):
                     raise ValueError("Un movimiento de extracto solo entra pendiente.")
@@ -1309,6 +1280,88 @@ class Store:
             self._decide_fixed_statement_lines(db)
         self.apply_rules()
         return len(inserted)
+
+    def _record_checks(self, db: sqlite3.Connection, checks: list[dict]) -> None:
+        """Upsert each statement's reconciliation figures, audited; an owner never changes."""
+        now = datetime.now(timezone.utc).isoformat()
+        for check in checks:
+            check = {"owner": "santiago", **check}
+            known = db.execute(
+                "SELECT owner FROM statement_checks WHERE identity=?", (check["identity"],),
+            ).fetchone()
+            if known is not None and known["owner"] != check["owner"]:
+                raise ValueError("Un extracto ya registrado de otro titular no cambia de titular.")
+            db.execute(
+                """INSERT INTO statement_checks (identity,owner,product,suffix,period_start,period_end,
+                movements,matched,missing,balance_minor,checked_at,due_minor,paid_minor,
+                opening_minor,contributions_minor,withdrawals_minor,returns_minor,
+                expected_contributions_minor,recorded_contributions_minor) VALUES (
+                :identity,:owner,:product,:suffix,:period_start,:period_end,:movements,:matched,
+                :missing,:balance_minor,:checked_at,:due_minor,:paid_minor,
+                :opening_minor,:contributions_minor,:withdrawals_minor,:returns_minor,
+                :expected_contributions_minor,:recorded_contributions_minor) ON CONFLICT(identity) DO UPDATE SET
+                movements=excluded.movements,matched=excluded.matched,missing=excluded.missing,
+                balance_minor=excluded.balance_minor,checked_at=excluded.checked_at,
+                due_minor=excluded.due_minor,
+                paid_minor=COALESCE(excluded.paid_minor, statement_checks.paid_minor),
+                opening_minor=excluded.opening_minor,contributions_minor=excluded.contributions_minor,
+                withdrawals_minor=excluded.withdrawals_minor,returns_minor=excluded.returns_minor,
+                expected_contributions_minor=excluded.expected_contributions_minor,
+                recorded_contributions_minor=excluded.recorded_contributions_minor""",
+                {
+                    "due_minor": None, "paid_minor": None, **dict.fromkeys((*INVESTMENT_FIGURES, *CONTRIBUTION_CHECKS)),
+                    **check, "checked_at": now,
+                },
+            )
+            self._audit(db, "statement-check", check["identity"], f"{check['matched']}/{check['movements']}")
+
+    def invesbot_movements(self, owner: str) -> list[dict]:
+        """An owner's movements in pesos that may be Invesbot contributions or savings transfers."""
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT id,day,merchant,amount_minor,kind,decision,owner FROM transactions
+                WHERE owner=? AND currency='COP'
+                AND (substr(merchant,1,8)='Invesbot' OR merchant=?) ORDER BY day,id""",
+                (owner, invesbot.SAVINGS_TRANSFER),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def restored_invesbot_ids(self) -> set[str]:
+        """Movements ever counted as contributions because of a report; never touched again."""
+        with self.connect() as db:
+            rows = db.execute("SELECT target FROM audit WHERE action='invesbot-restore'").fetchall()
+        return {row["target"] for row in rows}
+
+    def apply_invesbot(self, checks: list[dict], outcome: invesbot.Outcome) -> int:
+        """Store the report checks with their contribution comparison and apply the restores.
+
+        All in one transaction: a failure stores nothing. Each restored movement becomes
+        investment, audited with the report that justified it, and gets a note saying so.
+        Returns how many movements were restored.
+        """
+        filled = []
+        for check in checks:
+            if check["product"] == invesbot.INVESBOT_PRODUCT:
+                if check["identity"] not in outcome.differences:
+                    raise ValueError("Falta la comparación de aportes de un informe de Invesbot.")
+                expected, recorded = outcome.differences[check["identity"]]
+                check = {**check, "expected_contributions_minor": expected,
+                         "recorded_contributions_minor": recorded}
+            filled.append(check)
+        with self.connect() as db:
+            self._record_checks(db, filled)
+            for event_id in outcome.restore:
+                identity = outcome.justified_by[event_id]
+                row = db.execute("SELECT decision FROM transactions WHERE id=?", (event_id,)).fetchone()
+                if row is None or row["decision"] != "exclude" or db.execute(
+                    "SELECT 1 FROM audit WHERE action='invesbot-restore' AND target=?", (event_id,),
+                ).fetchone():
+                    raise ValueError("Un aporte de Invesbot por corregir cambió antes de corregirlo.")
+                self._decide(db, event_id, "investment", audit=("invesbot-restore", identity))
+                db.execute(
+                    "UPDATE transactions SET note=? WHERE id=?", (invesbot.restore_note(identity), event_id),
+                )
+        return len(outcome.restore)
 
     def _settle_twin(self, db: sqlite3.Connection, line_id: str, twin_id: str) -> None:
         """The statement shows a purchase once and the panel has it twice: the statement prevails.

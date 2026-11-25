@@ -146,3 +146,170 @@ def test_checks_are_stored_and_repeating_changes_nothing(make_store):
     assert invesbot_rows[1]["opening_minor"] == 15050000
     assert invesbot_rows[0]["expected_contributions_minor"] is None
     assert invesbot_rows[0]["recorded_contributions_minor"] is None
+
+
+TRANSFER = "TRASLADO A FONDO DE INVERSION"
+JULY = "INVESBOT:Plan Ficticio:2026-07-31:santiago"
+AUGUST = "INVESBOT:Plan Ficticio:2026-08-31:santiago"
+ONE_PLAN = {"santiago": {"Plan Ficticio"}}
+
+
+def move(identifier, day, amount=100_000, merchant="Invesbot Plan Ficticio", decision="investment",
+         owner="santiago", kind="transfer"):
+    """A movement row as Store.invesbot_movements gives it, with the amount in pesos."""
+    return {"id": identifier, "day": day, "merchant": merchant, "amount_minor": amount * 100,
+            "kind": kind, "decision": decision, "owner": owner}
+
+
+def monthly(months=6, merchant="Invesbot Plan Ficticio"):
+    """Plan contributions of 100.000 decided as investment, from January."""
+    return [move(f"m{month}", f"2026-{month:02d}-15", merchant=merchant) for month in range(1, months + 1)]
+
+
+def july_report(plan="Plan Ficticio"):
+    return report(month=7, opening=100_000, additional=600_000, balance=710_000, plan=plan)
+
+
+def august_report():
+    return report(month=8, opening=100_000, additional=700_000, balance=815_000)
+
+
+def test_the_spec_example_restores_july_counts_the_august_transfer_and_warns():
+    movements = [
+        *monthly(),
+        move("jul", "2026-07-01", merchant="Invesbot", decision="exclude"),
+        move("tr", "2026-08-31", merchant=TRANSFER),
+        move("ago", "2026-08-03", merchant="Invesbot", decision="exclude"),
+    ]
+    outcome = invesbot.plan_outcome([august_report(), july_report()], movements, ONE_PLAN, set())
+    assert outcome.restore == ["jul"]
+    assert outcome.differences[JULY] == (70000000, 70000000)
+    assert outcome.differences[AUGUST] == (80000000, 80000000)
+
+
+def test_a_missing_contribution_without_an_excluded_one_is_a_difference():
+    outcome = invesbot.plan_outcome([july_report()], monthly(), ONE_PLAN, set())
+    assert outcome.restore == []
+    assert outcome.differences[JULY] == (70000000, 60000000)
+
+
+def test_a_transfer_that_does_not_fit_is_another_fund():
+    movements = [*monthly(), move("grande", "2026-07-02", amount=9_000_000, merchant=TRANSFER),
+                 move("tr", "2026-07-20", merchant=TRANSFER)]
+    outcome = invesbot.plan_outcome([july_report()], movements, ONE_PLAN, set())
+    assert outcome.differences[JULY] == (70000000, 70000000)
+    movements.pop()
+    outcome = invesbot.plan_outcome([july_report()], movements, ONE_PLAN, set())
+    assert outcome.differences[JULY] == (70000000, 60000000)
+
+
+def test_a_transfer_counts_for_one_plan_only():
+    movements = [*monthly(), *monthly(merchant="Invesbot Otro"), move("tr", "2026-07-02", merchant=TRANSFER)]
+    plans = {"santiago": {"Plan Ficticio", "Otro"}}
+    outcome = invesbot.plan_outcome([july_report(), july_report("Otro")], movements, plans, set())
+    assert sorted(outcome.differences.values()) == [(70000000, 60000000), (70000000, 70000000)]
+
+
+def test_a_restored_movement_the_person_reverted_is_left_alone():
+    movements = [*monthly(), move("jul", "2026-07-01", decision="exclude")]
+    outcome = invesbot.plan_outcome([july_report()], movements, ONE_PLAN, {"jul"})
+    assert outcome.restore == []
+    assert outcome.differences[JULY] == (70000000, 60000000)
+
+
+@pytest.mark.parametrize("plans,restore,recorded", [
+    ({"santiago": {"Plan Ficticio"}}, ["jul"], 70000000),
+    ({"santiago": {"Plan Ficticio", "Otro"}}, [], 50000000),
+])
+def test_bare_invesbot_counts_only_with_one_plan(plans, restore, recorded):
+    movements = [*monthly(5), move("jun", "2026-06-15", merchant="Invesbot"),
+                 move("jul", "2026-07-01", merchant="Invesbot", decision="exclude")]
+    outcome = invesbot.plan_outcome([july_report()], movements, plans, set())
+    assert outcome.restore == restore
+    assert outcome.differences[JULY] == (70000000, recorded)
+
+
+def test_only_excluded_plan_contributions_are_restored():
+    movements = [
+        *monthly(),
+        move("pendiente", "2026-07-01", decision=None),
+        move("personal", "2026-07-02", decision="personal"),
+        move("otro-plan", "2026-07-03", merchant="Invesbot Otro", decision="exclude"),
+        move("de-ella", "2026-07-04", decision="exclude", owner="manuela"),
+        move("traslado-de-ella", "2026-07-05", merchant=TRANSFER, owner="manuela"),
+        move("antes", "2026-06-30", decision="exclude"),
+        move("grande", "2026-07-06", amount=200_000, decision="exclude"),
+    ]
+    outcome = invesbot.plan_outcome([july_report()], movements, ONE_PLAN, set())
+    assert outcome.restore == []
+    assert outcome.differences[JULY] == (70000000, 60000000)
+
+
+def test_movements_before_the_plan_started_do_not_count():
+    movements = [move("viejo", "2026-01-12"), *monthly()]
+    outcome = invesbot.plan_outcome([july_report()], movements, ONE_PLAN, set())
+    assert outcome.differences[JULY] == (70000000, 60000000)
+
+
+def insert(store, rows):
+    with store.connect() as db:
+        for row in rows:
+            db.execute(
+                """INSERT INTO transactions (id,message_id,day,merchant,account,amount_minor,currency,
+                category,kind,decision,reason,owner) VALUES (:id,:id,:day,:merchant,'Cuenta A',
+                :amount_minor,:currency,'Inversiones',:kind,:decision,'Propuesta',:owner)""",
+                {"currency": "COP", **row},
+            )
+
+
+def test_the_movements_of_an_owner_are_read_by_merchant(make_store):
+    store = make_store()
+    insert(store, [
+        move("a", "2026-07-01"), move("b", "2026-07-02", merchant=TRANSFER),
+        move("c", "2026-07-03", merchant="Tienda"), move("d", "2026-07-04", owner="manuela"),
+        {**move("e", "2026-07-05"), "currency": "USD"},
+    ])
+    assert [row["id"] for row in store.invesbot_movements("santiago")] == ["a", "b"]
+    assert store.invesbot_movements("santiago")[0] == move("a", "2026-07-01")
+
+
+def test_applying_is_audited_and_repeating_changes_nothing(make_store):
+    store = make_store()
+    insert(store, [*monthly(), move("jul", "2026-07-01", merchant="Invesbot", decision="exclude")])
+    reports = [july_report()]
+    checks = invesbot.period_checks(reports)
+    with store.connect() as db:
+        count = db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+
+    def apply() -> int:
+        outcome = invesbot.plan_outcome(
+            reports, store.invesbot_movements("santiago"), ONE_PLAN, store.restored_invesbot_ids())
+        return store.apply_invesbot(checks, outcome)
+
+    assert apply() == 1
+    assert apply() == 0
+    with store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == count
+        row = db.execute("SELECT decision, category, note FROM transactions WHERE id='jul'").fetchone()
+        audit = db.execute(
+            "SELECT target, value FROM audit WHERE action='invesbot-restore'").fetchall()
+    assert (row["decision"], row["category"]) == ("investment", "Inversiones")
+    assert row["note"] == "Contado como aporte: el informe de Invesbot de julio de 2026 muestra el aporte."
+    assert [tuple(entry) for entry in audit] == [("jul", JULY)]
+    assert store.restored_invesbot_ids() == {"jul"}
+    [stored] = [r for r in store.state()["statement_checks"] if r["product"] == "INVESBOT"]
+    assert (stored["expected_contributions_minor"], stored["recorded_contributions_minor"]) == (
+        70000000, 70000000)
+
+
+def test_a_failed_correction_stores_nothing(make_store):
+    store = make_store()
+    insert(store, [*monthly(), move("jul", "2026-07-01", decision="exclude")])
+    reports = [july_report()]
+    outcome = invesbot.plan_outcome(reports, store.invesbot_movements("santiago"), ONE_PLAN, set())
+    with store.connect() as db:
+        db.execute("UPDATE transactions SET decision='personal' WHERE id='jul'")
+    with pytest.raises(ValueError):
+        store.apply_invesbot(invesbot.period_checks(reports), outcome)
+    assert [r for r in store.state()["statement_checks"] if r["product"] == "INVESBOT"] == []
+    assert store.restored_invesbot_ids() == set()
