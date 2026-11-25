@@ -72,7 +72,7 @@ estas opciones a los comandos de Python.
 | `serve [-Red]` (predeterminado) | Abre el panel del cierre mensual; con `-Red`, también para tus [dispositivos emparejados](docs/configuracion.md#11-paneles-desde-otros-dispositivos-opcional) | Opcional: solo los botones de sugerencias |
 | `login [-Mailbox <buzón>]` | Inicia sesión: sin `-Mailbox`, el Outlook de Santiago; `-Mailbox manuela`, su Gmail; `-Mailbox facturas`, el buzón de facturas | No |
 | `check-config` | Comprueba el paso 0 y la configuración del cierre | No |
-| `import [-Start AAAA-MM-DD -End AAAA-MM-DD]` | `check-config`, `scan` y apertura del panel; al leer concilia los extractos e importa el Excel de los créditos | Sí; en los extractos, solo sugiere categorías de compras |
+| `import [-Start AAAA-MM-DD -End AAAA-MM-DD] [-Red]` | `check-config`, `scan` y apertura del panel (con `-Red`, también para tus dispositivos emparejados); al leer concilia los extractos e importa el Excel de los créditos | Sí; en los extractos, solo sugiere categorías de compras |
 | `scan [-Start … -End …] [-ReadOnly] [-ReprocessEmpty]` | Lee los buzones: sin fechas, solo lo nuevo; con fechas, el rango completo | Sí, salvo con `-ReadOnly` |
 | `pilot [-ReadOnly]` | Prueba la lectura con un solo aviso | Sí, salvo con `-ReadOnly` |
 | `summary -Month AAAA-MM [-Owner santiago\|manuela\|hogar]` | Resumen de un mes en la terminal | No |
