@@ -302,6 +302,20 @@ def test_applying_is_audited_and_repeating_changes_nothing(make_store):
         70000000, 70000000)
 
 
+def test_a_restore_keeps_the_existing_note(make_store):
+    store = make_store()
+    insert(store, [*monthly(), move("jul", "2026-07-01", decision="exclude")])
+    with store.connect() as db:
+        db.execute("UPDATE transactions SET note='Nota de la persona' WHERE id='jul'")
+    reports = [july_report()]
+    outcome = invesbot.plan_outcome(reports, store.invesbot_movements("santiago"), ONE_PLAN, set())
+    assert store.apply_invesbot(invesbot.period_checks(reports), outcome) == 1
+    with store.connect() as db:
+        note = db.execute("SELECT note FROM transactions WHERE id='jul'").fetchone()["note"]
+    assert note == ("Nota de la persona · Contado como aporte: el informe de Invesbot de julio "
+                    "de 2026 muestra el aporte.")
+
+
 def test_a_failed_correction_stores_nothing(make_store):
     store = make_store()
     insert(store, [*monthly(), move("jul", "2026-07-01", decision="exclude")])

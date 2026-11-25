@@ -1358,8 +1358,11 @@ class Store:
                 ).fetchone():
                     raise ValueError("Un aporte de Invesbot por corregir cambió antes de corregirlo.")
                 self._decide(db, event_id, "investment", audit=("invesbot-restore", identity))
+                # A person's note or a «Posible duplicado» note is kept; the restore note follows it.
                 db.execute(
-                    "UPDATE transactions SET note=? WHERE id=?", (invesbot.restore_note(identity), event_id),
+                    """UPDATE transactions SET note=CASE WHEN note IS NULL OR note='' THEN :note
+                    ELSE note || ' · ' || :note END WHERE id=:id""",
+                    {"note": invesbot.restore_note(identity), "id": event_id},
                 )
         return len(outcome.restore)
 
