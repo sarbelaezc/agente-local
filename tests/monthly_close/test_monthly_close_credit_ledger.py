@@ -228,6 +228,13 @@ def test_sheet_with_header_below_and_without_capital_payment_column(tmp_path):
     assert sources == ["payroll", "bonus"]
 
 
+def test_a_damaged_register_stops_with_a_controlled_error(tmp_path):
+    (tmp_path / "libro.xlsx").write_bytes(b"not a workbook")
+    config = credit_ledger.LedgerConfig("santiago", "4444", "Consumo", tmp_path / "libro.xlsx", "Hoja", (6, 12), payroll=True)
+    with pytest.raises(credit_ledger.LedgerError, match="No se pudo abrir"):
+        credit_ledger.read_payments(config)
+
+
 def test_register_settings_are_validated(tmp_path):
     assert credit_ledger.load_configs(tmp_path) == []
     (tmp_path / credit_ledger.LEDGERS_FILE).write_text(json.dumps([{"suffix": "12a4"}]), encoding="utf-8")
