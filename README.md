@@ -72,7 +72,7 @@ estas opciones a los comandos de Python.
 | `serve [-Red]` (predeterminado) | Abre el panel del cierre mensual; con `-Red`, también para tus [dispositivos emparejados](docs/configuracion.md#11-paneles-desde-otros-dispositivos-opcional) | Opcional: solo los botones de sugerencias |
 | `login [-Mailbox <buzón>]` | Inicia sesión: sin `-Mailbox`, el Outlook de Santiago; `-Mailbox manuela`, su Gmail; `-Mailbox facturas`, el buzón de facturas | No |
 | `check-config` | Comprueba el paso 0 y la configuración del cierre | No |
-| `import [-Start AAAA-MM-DD -End AAAA-MM-DD] [-Red]` | `check-config`, `scan` y apertura del panel (con `-Red`, también para tus dispositivos emparejados); al leer concilia los extractos e importa el Excel de los créditos | Sí; en los extractos, solo sugiere categorías de compras |
+| `import [-Start AAAA-MM-DD -End AAAA-MM-DD] [-Red]` | `check-config`, `scan` y apertura del panel (con `-Red`, también para tus dispositivos emparejados); al leer concilia los extractos, importa el Excel de los créditos y lee los informes de Invesbot | Sí; en los extractos, solo sugiere categorías de compras |
 | `scan [-Start … -End …] [-ReadOnly] [-ReprocessEmpty]` | Lee los buzones: sin fechas, solo lo nuevo; con fechas, el rango completo | Sí, salvo con `-ReadOnly` |
 | `pilot [-ReadOnly]` | Prueba la lectura con un solo aviso | Sí, salvo con `-ReadOnly` |
 | `summary -Month AAAA-MM [-Owner santiago\|manuela\|hogar]` | Resumen de un mes en la terminal | No |
@@ -111,7 +111,12 @@ También puedes habilitarlo solo para la terminal actual con
   se concilia con los movimientos de su titular. Cuando los extractos de los dos
   cuadran y no queda nada pendiente, el mes se marca solo como **Conciliado**. Si
   aparece una tarjeta de crédito con un número nuevo, el panel pregunta si
-  reemplaza a otra tarjeta o si es una tarjeta nueva. Ver
+  reemplaza a otra tarjeta o si es una tarjeta nueva. Los informes mensuales de
+  Invesbot que dejes en `invesbot\santiago` o `invesbot\manuela` (dentro de la
+  carpeta de datos del cierre) se leen en cada recorrido sin Ollama: cada plan
+  aparece en Inversiones y los aportes del plan que figuren «No cuenta» y el
+  informe muestre pasan a Inversión; un informe que no se lee con exactitud
+  detiene todo sin guardar nada. Ver
   [docs/cierre-mensual.md](docs/cierre-mensual.md).
 - **Seguridad.** El cliente de Graph solo hace peticiones `GET` y el de Gmail
   usa el permiso `gmail.readonly`: nunca envía, mueve ni marca correos. Solo abre
@@ -142,7 +147,7 @@ ignora. Para guardarlo en otro lugar, define la variable de entorno
 
 | Ruta | Contenido |
 |---|---|
-| `.local\MonthlyCloseAgent\` | `runtime.json`, `close.sqlite3` (movimientos, decisiones, reglas y auditoría) y sus 3 copias más recientes, sesiones de Microsoft y Google, `statements.json` (contraseñas de los extractos de cada titular), `credit_ledgers.json` y `last-close.txt` |
+| `.local\MonthlyCloseAgent\` | `runtime.json`, `close.sqlite3` (movimientos, decisiones, reglas y auditoría) y sus 3 copias más recientes, sesiones de Microsoft y Google, `statements.json` (contraseñas de los extractos de cada titular), `credit_ledgers.json`, `invesbot\` (los informes PDF de Invesbot, en una carpeta por titular) y `last-close.txt` |
 | `.local\MailInvoiceAgent\` | Sesión de Microsoft de facturas, estados de lotes, decisiones de carpetas, copias del Excel (las 5 más recientes) y `tessdata` |
 | `.local\red-local\` | Solo si usas `-Red`: el certificado de la red de casa y su clave, el certificado del servidor y los dispositivos emparejados de cada panel (solo un resumen de su sesión) |
 | `…\logs\` (en cada carpeta) | Un registro por ejecución; se conservan los 10 más recientes |

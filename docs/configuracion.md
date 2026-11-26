@@ -9,7 +9,7 @@ raíz del proyecto en PowerShell.
 - [3. App de Microsoft (ambas funcionalidades)](#3-app-de-microsoft-ambas-funcionalidades)
 - [4. Cierre mensual: runtime.json y paso 0](#4-cierre-mensual-runtimejson-y-paso-0)
 - [5. Gmail de Manuela (opcional)](#5-gmail-de-manuela-opcional)
-- [6. Extractos y créditos (opcional)](#6-extractos-y-créditos-opcional)
+- [6. Extractos, créditos e informes de Invesbot (opcional)](#6-extractos-créditos-e-informes-de-invesbot-opcional)
 - [7. Facturas: settings.yaml](#7-facturas-settingsyaml)
 - [8. OCR para PDF escaneados (opcional)](#8-ocr-para-pdf-escaneados-opcional)
 - [9. Tarea programada del cierre (opcional)](#9-tarea-programada-del-cierre-opcional)
@@ -207,7 +207,7 @@ concede cualquier permiso distinto de `gmail.readonly`, la sesión no se guarda.
 El recorrido de solo lectura muestra, por buzón, cuántos mensajes listó y cuántos
 son de remitentes aprobados. Revísalo y cambia `verified` a `true`.
 
-## 6. Extractos y créditos (opcional)
+## 6. Extractos, créditos e informes de Invesbot (opcional)
 
 **Extractos del banco y de Protección.** Crea
 `.local\MonthlyCloseAgent\statements.json`:
@@ -251,6 +251,14 @@ descríbelo en `.local\MonthlyCloseAgent\credit_ledgers.json`:
 | `category` | Categoría de gasto configurada en el paso 0 |
 
 Uso en [Créditos](cierre-mensual.md#créditos-y-nómina).
+
+**Informes de Invesbot.** Descarga del banco el informe mensual de cada plan y guarda los
+PDF en `.local\MonthlyCloseAgent\invesbot\santiago` o `…\invesbot\manuela`, según de quién
+sea el plan: el titular es el de la carpeta. No hay archivo de configuración ni
+contraseña. `scan`, `import` y el cierre programado (sin `-ReadOnly`) los leen en cada
+ejecución. Si la carpeta de datos está en OneDrive, los informes también; con
+`AGENTE_LOCAL_DATA` las carpetas van dentro de la que definas. Uso en
+[Informes de Invesbot](cierre-mensual.md#informes-de-invesbot).
 
 ## 7. Facturas: settings.yaml
 
