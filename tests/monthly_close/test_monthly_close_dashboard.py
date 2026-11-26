@@ -1265,10 +1265,11 @@ def test_invesbot_plans_are_investments_with_their_figures(dashboard):
     today = date.today()
     previous = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
 
-    def report(period: str, balance: int, returns: int, expected: int, recorded: int) -> dict:
+    def report(period: str, balance: int, returns: int, expected: int, recorded: int,
+               plan: str = "Plan Ficticio") -> dict:
         return {
-            "identity": f"INVESBOT|Plan Ficticio|{period}", "owner": "santiago", "product": "INVESBOT",
-            "suffix": "Plan Ficticio", "period_start": f"{period}-01", "period_end": f"{period}-28",
+            "identity": f"INVESBOT|{plan}|{period}", "owner": "santiago", "product": "INVESBOT",
+            "suffix": plan, "period_start": f"{period}-01", "period_end": f"{period}-28",
             "movements": 0, "matched": 0, "missing": 0, "balance_minor": balance, "opening_minor": 100000000,
             "contributions_minor": 80000000, "withdrawals_minor": 0, "returns_minor": returns,
             "expected_contributions_minor": expected, "recorded_contributions_minor": recorded,
@@ -1277,17 +1278,27 @@ def test_invesbot_plans_are_investments_with_their_figures(dashboard):
     store.record_statements([
         report(previous, 150000000, 2000000, 60000000, 50000000),
         report(month, 170000000, -5000000, 80000000, 70000000),
+        report(month, 90000000, 1000000, 90000000, 90000000, plan="Plan Igual"),
     ], [])
     page.reload()
     expect(page.locator("main")).to_have_attribute("aria-busy", "false")
-    block = page.locator("#statement-sections details").filter(has_text="Inversiones")
-    block.locator("summary").click()
-    row = block.locator(".statement-row")
-    assert row.count() == 1
-    text = row.inner_text()
+
+    def investment_rows():
+        block = page.locator("#statement-sections details").filter(has_text="Inversiones")
+        block.locator("summary").click()
+        return block.locator(".statement-row")
+
+    rows = investment_rows()
+    assert rows.count() == 2
+    text = rows.filter(has_text="Plan Ficticio").inner_text()
     assert "Invesbot Plan Ficticio" in text and "*" not in text
     assert re.search(r"aportes .*800\.000.* · retiros .* · rendimientos [-−]\s?.*50\.000", text), text
     assert re.search(r"El informe cuenta .*800\.000.* en aportes; hay .*700\.000.* registrados", text), text
-    assert "600.000" not in text
+    # The report says as much as was recorded: no difference line.
+    assert "El informe cuenta" not in rows.filter(has_text="Plan Igual").inner_text()
+    # The older report has its own difference, but only the newest report of a plan shows one.
+    page.locator(f"#month-chips button[data-month='{previous}']").click()
+    older = investment_rows().filter(has_text="Plan Ficticio").inner_text()
+    assert "Invesbot Plan Ficticio" in older and "El informe cuenta" not in older, older
     page.locator("#tab-year").click()
     expect(page.locator("#investment-balances")).to_contain_text("Invesbot Plan Ficticio")
