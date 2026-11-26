@@ -23,6 +23,7 @@ from shared.storage import data_root
 from monthly_close.model import OllamaJsonModel
 from monthly_close.rule_suggestions import propose_statement_categories
 from monthly_close import credit_ledger
+from monthly_close import invesbot
 from monthly_close import statements as statements_module
 from monthly_close.domain import EMAIL, OWNERS, Preferences, received_local
 from monthly_close.extraction import EvidenceError, extract, income_category
@@ -767,6 +768,53 @@ def import_credit_ledgers(store: Store, data_dir: Path, preferences: Preferences
     return lines
 
 
+def import_invesbot_reports(store: Store, data_dir: Path) -> list[str]:
+    """Store the Invesbot report checks and restore the contributions they show; lines carry no amounts.
+
+    Every report is read and validated before anything is stored, and all of them are
+    used on every run so an older report added later recalculates the next one.
+    """
+    reports = invesbot.read_reports(data_dir)
+    if not reports:
+        return []
+    plans_by_owner: dict[str, set[str]] = {}
+    for report in reports:
+        plans_by_owner.setdefault(report.owner, set()).add(report.plan)
+    restored = store.restored_invesbot_ids()
+    restore: list[str] = []
+    differences: dict[str, tuple[int, int]] = {}
+    justified_by: dict[str, str] = {}
+    blocked: list[str] = []
+    for owner in plans_by_owner:
+        movements = store.invesbot_movements(owner)
+        if invesbot.has_unattributed(movements, owner, plans_by_owner):
+            blocked.append(owner)
+        outcome = invesbot.plan_outcome(
+            [r for r in reports if r.owner == owner], movements, plans_by_owner, restored)
+        restore += outcome.restore
+        differences |= outcome.differences
+        justified_by |= outcome.justified_by
+    store.apply_invesbot(invesbot.period_checks(reports), invesbot.Outcome(restore, differences, justified_by))
+    lines = []
+    for owner, plan in sorted({(r.owner, r.plan) for r in reports}):
+        own = [r for r in reports if (r.owner, r.plan) == (owner, plan)]
+        identities = {invesbot.report_identity(r) for r in own}
+        again = sum(1 for identity in justified_by.values() if identity in identities)
+        lines.append(f"Invesbot {plan} ({owner}): {len(own)} informes leídos; {again} aportes contados de nuevo.")
+        latest = max(own, key=lambda r: r.period_end)
+        expected, recorded = differences.get(invesbot.report_identity(latest), (0, 0))
+        if expected != recorded:
+            more = "más" if expected > recorded else "menos"
+            lines.append(
+                f"Invesbot {plan}: el informe de {invesbot.MONTH_NAMES[latest.period_end.month]} "
+                f"cuenta {more} aportes que los registrados; revisa el panel.")
+    lines += [
+        f"Invesbot ({owner}): hay aportes de Invesbot que no son de ningún plan con informe; "
+        "no se corrige ninguno automáticamente." for owner in sorted(blocked)
+    ]
+    return lines
+
+
 def refresh_reconciled_coverage(store: Store, preferences: Preferences) -> None:
     """Mark the closed months the statements reconcile, and undo those that stopped qualifying."""
     today = datetime.now(ZoneInfo(preferences.timezone)).date()
@@ -778,7 +826,7 @@ def refresh_reconciled_coverage(store: Store, preferences: Preferences) -> None:
 
 
 def run_complements(store: Store, data_dir: Path, settings: dict, preferences: Preferences, start: date) -> None:
-    """After a mailbox scan: reconcile the bank statements, then import the credit registers.
+    """After a mailbox scan: reconcile the bank statements, then import the credit registers and the Invesbot reports.
 
     Each step runs only when its local configuration exists. Statements come first,
     because the registers are checked against their balances and payments. Any
@@ -794,6 +842,9 @@ def run_complements(store: Store, data_dir: Path, settings: dict, preferences: P
         )
     if credit_ledger.load_configs(data_dir):
         print("\n".join(import_credit_ledgers(store, data_dir, preferences)), flush=True)
+    lines = import_invesbot_reports(store, data_dir)
+    if lines:
+        print("\n".join(lines), flush=True)
     refresh_reconciled_coverage(store, preferences)
 
 
