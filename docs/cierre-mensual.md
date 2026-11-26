@@ -609,13 +609,18 @@ movimientos del plan decididos como Inversión, menos los decididos como Retiro 
 inversión. Son del plan los de comercio «Invesbot \<plan\>», o «Invesbot» a secas cuando el
 titular solo tiene un plan con informes, y los «TRASLADO A FONDO DE INVERSION» del ahorro
 de ese mes ya decididos como Inversión que quepan en lo que falta (un traslado grande a
-una Fiducuenta queda fuera). Un traslado pendiente o decidido «No cuenta» no cuenta.
+una Fiducuenta queda fuera). Un traslado pendiente o decidido «No cuenta» no cuenta. Un
+traslado cuenta para un solo mes y un solo plan; si el titular tiene dos planes con
+informes, va al primero en orden alfabético.
 
 **Corrección automática.** Si al informe le falta un aporte, se buscan los movimientos del
 plan por nombre de ese mismo mes decididos «No cuenta», del más antiguo al más nuevo, y
-pasan a Inversión mientras quepan en lo que falta. Solo se corrige un movimiento que la
-decisión Inversión admite: uno que no sea pago de tarjeta, rechazado, promoción,
-verificación, préstamo ni ingreso, y cuya cuenta no esté excluida en el paso 0.
+pasan a Inversión mientras quepan en lo que falta: uno que no cabe se salta y se prueban
+los siguientes (lo mismo vale para los traslados). Se corrige también un «No cuenta» que
+se marcó como copia de otro aviso («Mismo aporte que…» o «Posible duplicado»): el informe
+del banco prima. Solo se corrige un movimiento que la decisión Inversión admite: uno que
+no sea pago de tarjeta, rechazado, promoción, verificación, préstamo ni ingreso, y cuya
+cuenta no esté excluida en el paso 0.
 
 No se corrige nada, y la diferencia se avisa, cuando podría contarse dos veces el mismo
 dinero:
@@ -628,6 +633,8 @@ dinero:
   (\<titular\>): hay aportes de Invesbot que no son de ningún plan con informe; no se
   corrige ninguno automáticamente.»
 
+Cuando sí se corrige:
+
 - Cada cambio queda auditado como `invesbot-restore`, con el informe que lo justificó, y el
   movimiento recibe al final de su nota «Contado como aporte: el informe de Invesbot de
   \<mes\> de \<año\> muestra el aporte.»; una nota anterior se conserva.
@@ -636,8 +643,7 @@ dinero:
 - Ejemplo ficticio con aportes mensuales de 100: el informe de julio espera 700 y hay 600
   registrados; un aporte del plan del 1 de julio marcado «No cuenta» pasa a Inversión. En
   agosto espera 800 y hay 700: un traslado del ahorro de 100 de ese mes, decidido como
-  Inversión, cuenta para el plan
-  y otro «No cuenta» de agosto no se toca.
+  Inversión, cuenta para el plan y otro «No cuenta» de agosto no se toca.
 
 **Aviso de diferencia.** Lo que sigue faltando, o sobrando, no se resuelve solo. Se avisa
 solo la diferencia del informe más reciente de cada plan, porque es acumulada: en la
