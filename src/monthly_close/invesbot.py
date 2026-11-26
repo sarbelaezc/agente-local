@@ -237,7 +237,8 @@ def plan_outcome(
     Per plan, oldest report first: what a report misses is filled first with savings
     transfers of its month decided as investment, then with excluded contributions of the
     plan of its month, each only when it fits in what is still missing. What counted for
-    one report keeps counting for the next. Movements in restored are never proposed again.
+    one report keeps counting for the next. Movements in restored, and those whose
+    restorable is false (Store._decide would refuse them as investment), are never proposed.
     """
     restore: list[str] = []
     differences: dict[str, tuple[int, int]] = {}
@@ -268,7 +269,8 @@ def plan_outcome(
             missing = expected - recorded
             if missing <= 0 or movement["day"][:7] != month:
                 continue
-            if (movement["decision"] == "exclude" and movement["id"] not in restored
+            if (movement["decision"] == "exclude" and movement["restorable"]
+                    and movement["id"] not in restored
                     and movement["id"] not in justified_by and movement["amount_minor"] <= missing):
                 restore.append(movement["id"])
                 justified_by[movement["id"]] = identity

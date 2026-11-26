@@ -110,6 +110,14 @@ SPECIAL_CATEGORIES = {
 }
 
 
+def investment_allowed(kind: str, account: str, preferences: Preferences | None) -> bool:
+    """Whether Store._decide accepts the decision investment for a movement in pesos."""
+    return (
+        kind not in NON_EXPENSES and kind not in {"loan", "income"}
+        and not (preferences and account in preferences.excluded_accounts)
+    )
+
+
 # A corrected payment of a credit register is looked for this many days around the old one,
 # less than a fortnight so it never reaches the next instalment.
 CORRECTION_DAYS = 10
@@ -1316,15 +1324,24 @@ class Store:
             self._audit(db, "statement-check", check["identity"], f"{check['matched']}/{check['movements']}")
 
     def invesbot_movements(self, owner: str) -> list[dict]:
-        """An owner's movements in pesos that may be Invesbot contributions or savings transfers."""
+        """An owner's movements in pesos that may be Invesbot contributions or savings transfers.
+
+        restorable says whether _decide would accept the movement as investment.
+        """
         with self.connect() as db:
+            settings = db.execute("SELECT value FROM settings WHERE id=1").fetchone()
+            preferences = Preferences.parse(json.loads(settings["value"])) if settings else None
             rows = db.execute(
-                """SELECT id,day,merchant,amount_minor,kind,decision,owner FROM transactions
+                """SELECT id,day,merchant,amount_minor,kind,decision,owner,account FROM transactions
                 WHERE owner=? AND currency='COP'
-                AND (substr(merchant,1,8)='Invesbot' OR merchant=?) ORDER BY day,id""",
+                AND (merchant='Invesbot' OR merchant LIKE 'Invesbot %' OR merchant=?) ORDER BY day,id""",
                 (owner, invesbot.SAVINGS_TRANSFER),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [
+            {**{key: row[key] for key in row.keys() if key != "account"},
+             "restorable": investment_allowed(row["kind"], row["account"], preferences)}
+            for row in rows
+        ]
 
     def restored_invesbot_ids(self) -> set[str]:
         """Movements ever counted as contributions because of a report; never touched again."""

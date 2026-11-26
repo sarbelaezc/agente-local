@@ -158,7 +158,7 @@ def move(identifier, day, amount=100_000, merchant="Invesbot Plan Ficticio", dec
          owner="santiago", kind="transfer"):
     """A movement row as Store.invesbot_movements gives it, with the amount in pesos."""
     return {"id": identifier, "day": day, "merchant": merchant, "amount_minor": amount * 100,
-            "kind": kind, "decision": decision, "owner": owner}
+            "kind": kind, "decision": decision, "owner": owner, "restorable": True}
 
 
 def monthly(months=6, merchant="Invesbot Plan Ficticio"):
@@ -245,6 +245,21 @@ def test_only_excluded_plan_contributions_are_restored():
     assert outcome.differences[JULY] == (70000000, 60000000)
 
 
+def test_a_restore_that_does_not_fit_is_skipped_and_later_ones_are_tried():
+    movements = [*monthly(), move("grande", "2026-07-01", amount=200_000, decision="exclude"),
+                 move("jul", "2026-07-20", decision="exclude")]
+    outcome = invesbot.plan_outcome([july_report()], movements, ONE_PLAN, set())
+    assert outcome.restore == ["jul"]
+    assert outcome.differences[JULY] == (70000000, 70000000)
+
+
+def test_a_movement_the_decision_would_refuse_is_never_restored():
+    movements = [*monthly(), {**move("jul", "2026-07-01", decision="exclude"), "restorable": False}]
+    outcome = invesbot.plan_outcome([july_report()], movements, ONE_PLAN, set())
+    assert outcome.restore == []
+    assert outcome.differences[JULY] == (70000000, 60000000)
+
+
 def test_movements_before_the_plan_started_do_not_count():
     movements = [move("viejo", "2026-01-12"), *monthly()]
     outcome = invesbot.plan_outcome([july_report()], movements, ONE_PLAN, set())
@@ -256,9 +271,9 @@ def insert(store, rows):
         for row in rows:
             db.execute(
                 """INSERT INTO transactions (id,message_id,day,merchant,account,amount_minor,currency,
-                category,kind,decision,reason,owner) VALUES (:id,:id,:day,:merchant,'Cuenta A',
+                category,kind,decision,reason,owner) VALUES (:id,:id,:day,:merchant,:account,
                 :amount_minor,:currency,'Inversiones',:kind,:decision,'Propuesta',:owner)""",
-                {"currency": "COP", **row},
+                {"currency": "COP", "account": "Cuenta A", **row},
             )
 
 
@@ -268,9 +283,40 @@ def test_the_movements_of_an_owner_are_read_by_merchant(make_store):
         move("a", "2026-07-01"), move("b", "2026-07-02", merchant=TRANSFER),
         move("c", "2026-07-03", merchant="Tienda"), move("d", "2026-07-04", owner="manuela"),
         {**move("e", "2026-07-05"), "currency": "USD"},
+        move("f", "2026-07-06", merchant="Invesbotito"), move("g", "2026-07-07", merchant="Invesbot"),
     ])
-    assert [row["id"] for row in store.invesbot_movements("santiago")] == ["a", "b"]
+    assert [row["id"] for row in store.invesbot_movements("santiago")] == ["a", "b", "g"]
     assert store.invesbot_movements("santiago")[0] == move("a", "2026-07-01")
+
+
+def test_an_incoming_or_excluded_account_contribution_is_not_restored(make_store):
+    store = make_store(excluded_accounts=["Cuenta B"])
+    insert(store, [
+        *monthly(),
+        move("entra", "2026-07-01", decision="exclude", kind="income"),
+        {**move("excluida", "2026-07-02", decision="exclude"), "account": "Cuenta B"},
+        move("pago", "2026-07-03", decision="exclude", kind="card_payment"),
+    ])
+    movements = store.invesbot_movements("santiago")
+    assert [m["id"] for m in movements if not m["restorable"]] == ["entra", "excluida", "pago"]
+    reports = [july_report()]
+    outcome = invesbot.plan_outcome(reports, movements, ONE_PLAN, set())
+    assert outcome.restore == []
+    assert store.apply_invesbot(invesbot.period_checks(reports), outcome) == 0
+
+
+@pytest.mark.parametrize("kind", ["income", "loan", "card_payment", "transfer", "investment", "unknown"])
+@pytest.mark.parametrize("account", ["Cuenta A", "Cuenta B"])
+def test_restorable_agrees_with_the_decision(make_store, kind, account):
+    store = make_store(excluded_accounts=["Cuenta B"])
+    insert(store, [{**move("x", "2026-07-01", decision="exclude", kind=kind), "account": account}])
+    [movement] = store.invesbot_movements("santiago")
+    try:
+        store.decide("x", "investment")
+        accepted = True
+    except ValueError:
+        accepted = False
+    assert movement["restorable"] is accepted
 
 
 def test_applying_is_audited_and_repeating_changes_nothing(make_store):
