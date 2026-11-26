@@ -4,7 +4,7 @@ import json
 import os
 import re
 import socket
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -1258,3 +1258,36 @@ def test_income_and_spending_bars_use_colours_apart_for_colour_blindness(dashboa
       return [fillOf('Ingresos'), fillOf('Gastos'), style.getPropertyValue('--s1').trim(), style.getPropertyValue('--s2').trim()];
     }""")
     assert fills[0] == fills[2] and fills[1] == fills[3]
+
+
+def test_invesbot_plans_are_investments_with_their_figures(dashboard):
+    page, store, month, _ = dashboard
+    today = date.today()
+    previous = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+
+    def report(period: str, balance: int, returns: int, expected: int, recorded: int) -> dict:
+        return {
+            "identity": f"INVESBOT|Plan Ficticio|{period}", "owner": "santiago", "product": "INVESBOT",
+            "suffix": "Plan Ficticio", "period_start": f"{period}-01", "period_end": f"{period}-28",
+            "movements": 0, "matched": 0, "missing": 0, "balance_minor": balance, "opening_minor": 100000000,
+            "contributions_minor": 80000000, "withdrawals_minor": 0, "returns_minor": returns,
+            "expected_contributions_minor": expected, "recorded_contributions_minor": recorded,
+        }
+
+    store.record_statements([
+        report(previous, 150000000, 2000000, 60000000, 50000000),
+        report(month, 170000000, -5000000, 80000000, 70000000),
+    ], [])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    block = page.locator("#statement-sections details").filter(has_text="Inversiones")
+    block.locator("summary").click()
+    row = block.locator(".statement-row")
+    assert row.count() == 1
+    text = row.inner_text()
+    assert "Invesbot Plan Ficticio" in text and "*" not in text
+    assert re.search(r"aportes .*800\.000.* · retiros .* · rendimientos [-−]\s?.*50\.000", text), text
+    assert re.search(r"El informe cuenta .*800\.000.* en aportes; hay .*700\.000.* registrados", text), text
+    assert "600.000" not in text
+    page.locator("#tab-year").click()
+    expect(page.locator("#investment-balances")).to_contain_text("Invesbot Plan Ficticio")

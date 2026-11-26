@@ -1575,9 +1575,15 @@
         CTA_AHORROS: "Cuenta de ahorros", TARJETA_MASTERCARD: "Mastercard", TARJETA_AMEX: "Amex",
         TARJETA_VISA: "Visa", FIDUCUENTA: "Fiducuenta", CREDITO: "Crédito", HIPOTECARIO: "Hipotecario",
         PROTECCION_VOLUNTARIA: "Pensión voluntaria Protección", PROTECCION_CESANTIAS: "Cesantías Protección",
-        PROTECCION_OBLIGATORIA: "Pensión obligatoria Protección"
+        PROTECCION_OBLIGATORIA: "Pensión obligatoria Protección", INVESBOT: "Invesbot"
       };
-      const investmentProducts = ["FIDUCUENTA", "PROTECCION_VOLUNTARIA", "PROTECCION_CESANTIAS", "PROTECCION_OBLIGATORIA"];
+      const investmentProducts = ["FIDUCUENTA", "PROTECCION_VOLUNTARIA", "PROTECCION_CESANTIAS", "PROTECCION_OBLIGATORIA", "INVESBOT"];
+      // A card is told apart by its number (*1234); an Invesbot plan by its name.
+      function productLabel(product, suffix) {
+        const name = productNames[product] || product;
+        if (!suffix) return name;
+        return product === "INVESBOT" ? `${name} ${suffix}` : `${name} *${suffix}`;
+      }
       // Protección statements carry the period figures instead of movements to reconcile.
       function investmentFigures(check) {
         const figure = (label, value) => Number.isSafeInteger(value) ? `${label} ${formatMoney(value, "COP")}` : "";
@@ -1598,9 +1604,11 @@
           : `Los ${check.movements} movimientos coinciden con los avisos`);
         return pill;
       }
+      // The latest report of each Invesbot plan, by owner: only it shows the contribution difference.
+      let latestPlanReports = new Set();
       function statementRow(check) {
         const row = el("div", "statement-row");
-        const name = el("span", "statement-name", `${productNames[check.product] || check.product}${check.suffix ? ` *${check.suffix}` : ""}`);
+        const name = el("span", "statement-name", productLabel(check.product, check.suffix));
         if (state.owner === "hogar") name.append(ownerTag(check.owner));
         row.append(name);
         const pill = conciliationPill(check);
@@ -1608,14 +1616,21 @@
         if (hasBalance) row.append(el("strong", "", formatMoney(check.balance_minor, "COP")));
         else if (pill) row.append(pill);
         const details = [];
+        let difference = "";
         const figures = investmentFigures(check);
         if (figures) details.push(figures);
+        if (check.product === "INVESBOT" && latestPlanReports.has(check.identity)
+          && Number.isSafeInteger(check.expected_contributions_minor) && Number.isSafeInteger(check.recorded_contributions_minor)
+          && check.expected_contributions_minor !== check.recorded_contributions_minor) {
+          difference = `El informe cuenta ${formatMoney(check.expected_contributions_minor, "COP")} en aportes; hay ${formatMoney(check.recorded_contributions_minor, "COP")} registrados`;
+        }
         if (check.missing) details.push(`${check.matched} de ${check.movements} coinciden con los avisos; ${check.missing} ${check.missing === 1 ? "entró" : "entraron"} como ${check.missing === 1 ? "pendiente" : "pendientes"}`);
         if (details.length || (hasBalance && pill)) {
           const detail = el("div", "statement-detail", details.join(" · "));
           if (hasBalance && pill && !check.missing) detail.prepend(pill, document.createTextNode(details.length ? " " : ""));
           row.append(detail);
         }
+        if (difference) row.append(el("div", "statement-detail", difference));
         return row;
       }
       // Each owner sees the statements of their own mailbox; the household view sees them all.
@@ -1632,6 +1647,12 @@
           latest.set(`${check.owner}|${check.product}|${check.suffix}`, check);
         });
         const inMonth = checks.filter(check => check.period_end.slice(0, 7) === state.month);
+        const newestPlan = new Map();
+        checks.filter(check => check.product === "INVESBOT").forEach(check => {
+          const key = `${check.owner}|${check.suffix}`;
+          if (!newestPlan.has(key) || newestPlan.get(key).period_end < check.period_end) newestPlan.set(key, check);
+        });
+        latestPlanReports = new Set(Array.from(newestPlan.values(), check => check.identity));
         const credits = ["CREDITO", "HIPOTECARIO"];
         const sections = [
           ["Tarjetas y cuentas", "Conciliación de los extractos del mes con los avisos", check => !investmentProducts.includes(check.product) && !credits.includes(check.product), false],
@@ -2214,7 +2235,7 @@
           ["credits", "#credit-balances", "Créditos", ["CREDITO", "HIPOTECARIO"], "--s7", 2, false]
         ];
         const latestBy = (list, end) => list.filter(check => check.period_end <= end).pop();
-        const nameOf = check => `${productNames[check.product] || check.product}${check.suffix ? ` *${check.suffix}` : ""}`;
+        const nameOf = check => productLabel(check.product, check.suffix);
         const current = currentMonth();
         const months = [];
         for (let index = 0; index < 12; index++) {
@@ -2621,7 +2642,7 @@
       }
 
       function cardName(product, suffix) {
-        return `${productNames[product] || product} *${suffix}`;
+        return productLabel(product, suffix);
       }
 
       // A new card number: the person says which earlier card it replaces, or that it is a new card.
