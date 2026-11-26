@@ -1261,14 +1261,17 @@ archivos de la carpeta nunca se tocan.
   con decisión. Las 167 compras que cuentan (121 familiares y 46 personales)
   tienen su tasa y su valor en COP; los 9 sin tasa están excluidos y no suman al
   estimado.
+- Informes de Invesbot (2026-11-25), con `import`: 8 informes mensuales de un plan de
+  Santiago (febrero a septiembre) leídos y cuadrados; un «No cuenta» pasó a Inversión
+  con su auditoría y ningún movimiento se creó. El informe más reciente cuadra con lo
+  registrado. Antes, sobre una copia de la base, una segunda ejecución no cambió nada.
 
 **Pendiente**
 
 - La primera ejecución real de la tarea programada.
-- Invesbot: la primera importación real con informes (descargados a mano en
-  `invesbot\<titular>`), que dirá qué aportes corrige, si queda alguna diferencia y si
-  los avisos «tomaremos» de septiembre y octubre, hoy decididos como inversión, fueron
-  el único registro del aporte.
+- Invesbot: el informe de octubre, que dirá si los avisos «tomaremos» de ese mes, hoy
+  decididos como inversión, fueron el único registro del aporte, y los primeros
+  informes de Manuela.
 - Un `deltaLink` o un `historyId` caducados con datos reales.
 
 **Limitaciones conocidas**
