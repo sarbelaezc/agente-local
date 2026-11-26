@@ -10,13 +10,14 @@ import calendar
 import io
 import re
 import unicodedata
+import zlib
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 from pypdf import PdfReader
-from pypdf.errors import PdfReadError
+from pypdf.errors import PyPdfError
 
 from .statements import MAX_PDF_BYTES
 
@@ -36,6 +37,9 @@ START_MONTHS = {
 MONTH_NAMES = {number: name for name, number in MONTHS.items() if name != "sptiembre"}
 SAVINGS_TRANSFER = "TRASLADO A FONDO DE INVERSION"
 AMOUNT = re.compile(r"(-?)\s*\$\s*(-?)\s*(\d[\d.]*,\d{2})")
+# What pypdf raises on a damaged file besides its own errors.
+PDF_READ_ERRORS = (PyPdfError, ValueError, KeyError, IndexError, TypeError, zlib.error)
+
 
 class ReportError(ValueError):
     """A report that cannot be read exactly; it is reported, never guessed."""
@@ -63,11 +67,11 @@ def _pdf_text(content: bytes) -> str:
         raise ReportError("Informe demasiado grande.")
     try:
         reader = PdfReader(io.BytesIO(content))
-        if reader.is_encrypted:
-            raise ReportError("El informe está cifrado.")
-        return "\n".join(page.extract_text() or "" for page in reader.pages[:2])
-    except PdfReadError as exc:
+        if not reader.is_encrypted:
+            return "\n".join(page.extract_text() or "" for page in reader.pages[:2])
+    except PDF_READ_ERRORS as exc:
         raise ReportError("PDF de informe ilegible.") from exc
+    raise ReportError("El informe está cifrado.")
 
 
 def _lines(text: str) -> list[str]:
@@ -158,10 +162,14 @@ def read_reports(data_dir: Path) -> list[Report]:
         if not folder.is_dir():
             continue
         for path in sorted(folder.glob("*.pdf")):
+            # Only the file name: the message never carries the local path.
             try:
                 content = path.read_bytes()
+            except OSError as exc:
+                raise ReportError(f"{path.name}: no se pudo leer el archivo.") from exc
+            try:
                 report = parse_report(_pdf_text(content), owner)
-            except (OSError, ReportError) as exc:
+            except ReportError as exc:
                 raise ReportError(f"{path.name}: {exc}") from exc
             key = (owner, report.plan, report.period_end)
             if key in found and found[key][0] != report:

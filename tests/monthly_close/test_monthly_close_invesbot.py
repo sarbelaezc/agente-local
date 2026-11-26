@@ -1,6 +1,9 @@
+import zlib
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
+from pypdf.errors import PyPdfError
 
 from monthly_close import invesbot
 
@@ -82,6 +85,37 @@ def test_a_pdf_that_is_not_a_report_stops_naming_the_file(tmp_path, monkeypatch)
 
 def test_without_folders_there_is_nothing_to_read(tmp_path):
     assert invesbot.read_reports(tmp_path) == []
+
+
+def test_a_file_that_cannot_be_read_names_the_file_but_not_its_folder(tmp_path):
+    folder = tmp_path / "invesbot" / "santiago"
+    (folder / "carpeta.pdf").mkdir(parents=True)  # read_bytes fails with an OSError
+    with pytest.raises(invesbot.ReportError) as error:
+        invesbot.read_reports(tmp_path)
+    assert str(error.value) == "carpeta.pdf: no se pudo leer el archivo."
+
+
+@pytest.mark.parametrize("failure", [
+    PyPdfError("dañado"), ValueError("dañado"), KeyError("dañado"), IndexError("dañado"),
+    TypeError("dañado"), zlib.error("dañado"),
+])
+def test_a_damaged_pdf_stops_naming_the_file(tmp_path, monkeypatch, failure):
+    def broken(stream):
+        raise failure
+
+    monkeypatch.setattr(invesbot, "PdfReader", broken)
+    folder = tmp_path / "invesbot" / "santiago"
+    folder.mkdir(parents=True)
+    (folder / "danado.pdf").write_bytes(b"%PDF-1.4")
+    with pytest.raises(invesbot.ReportError) as error:
+        invesbot.read_reports(tmp_path)
+    assert str(error.value) == "danado.pdf: PDF de informe ilegible."
+
+
+def test_an_encrypted_report_says_so(monkeypatch):
+    monkeypatch.setattr(invesbot, "PdfReader", lambda stream: SimpleNamespace(is_encrypted=True))
+    with pytest.raises(invesbot.ReportError, match="cifrado"):
+        invesbot._pdf_text(b"%PDF-1.4")
 
 
 def report(month=2, opening=50_000, additional=100_000, balance=150_500, withdrawals=0,
