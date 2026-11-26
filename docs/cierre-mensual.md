@@ -578,12 +578,14 @@ lo registrado.
   cierre (`.local\MonthlyCloseAgent\` por defecto, o la que fije `AGENTE_LOCAL_DATA`). El
   titular es el de la carpeta, no se lee del PDF. Solo se leen los `*.pdf` de esas dos
   carpetas, de hasta 10 MB; no hace falta contraseña. Si no hay ningún PDF, no pasa nada.
-  Si el proyecto está en OneDrive, las carpetas también.
+  Si la carpeta del proyecto está dentro de OneDrive, OneDrive sincroniza también estos
+  informes; `AGENTE_LOCAL_DATA` los lleva a otra carpeta.
 - **Cuándo se leen.** En cada `scan`, `import` y cierre programado sin `-ReadOnly`, después
   de conciliar los extractos de ahorros (que pueden importar traslados) y de importar los
   créditos. Se leen en memoria, sin Ollama, y se usan todos en cada ejecución, así que un
   informe antiguo agregado después recalcula el siguiente. Repetir no cambia nada.
-- **Qué se valida.** Del texto de la página 2 salen el plan, el mes del informe, la fecha de
+- **Qué se valida.** El nombre del plan sale de la página 1 (la línea que sigue al título
+  «Invesbot | Reporte plan inversión»). De la página 2 salen el mes del informe, la fecha de
   inicio, el saldo al cierre, la apertura, los aportes adicionales (y cuántos son), los
   retiros y los rendimientos acumulados. Apertura + aportes adicionales − retiros +
   rendimientos debe dar el saldo, exacto al centavo. Un informe ilegible, sin alguno de
@@ -606,13 +608,25 @@ con lo registrado desde el inicio del plan hasta el último día del mes. Regist
 movimientos del plan decididos como Inversión, menos los decididos como Retiro de
 inversión. Son del plan los de comercio «Invesbot \<plan\>», o «Invesbot» a secas cuando el
 titular solo tiene un plan con informes, y los «TRASLADO A FONDO DE INVERSION» del ahorro
-de ese mes que quepan en lo que falta (un traslado grande a una Fiducuenta queda fuera).
+de ese mes ya decididos como Inversión que quepan en lo que falta (un traslado grande a
+una Fiducuenta queda fuera). Un traslado pendiente o decidido «No cuenta» no cuenta.
 
 **Corrección automática.** Si al informe le falta un aporte, se buscan los movimientos del
 plan por nombre de ese mismo mes decididos «No cuenta», del más antiguo al más nuevo, y
 pasan a Inversión mientras quepan en lo que falta. Solo se corrige un movimiento que la
 decisión Inversión admite: uno que no sea pago de tarjeta, rechazado, promoción,
 verificación, préstamo ni ingreso, y cuya cuenta no esté excluida en el paso 0.
+
+No se corrige nada, y la diferencia se avisa, cuando podría contarse dos veces el mismo
+dinero:
+
+- En un mes con un «TRASLADO A FONDO DE INVERSION» del titular aún sin decidir: decídelo y
+  la siguiente ejecución vuelve a comparar.
+- Para todos los planes de un titular que tiene algún movimiento decidido como Inversión
+  con comercio «Invesbot…» que no es de ningún plan con informes (otro nombre de plan, o
+  «Invesbot» a secas con dos planes). La terminal lo dice, sin cifras: «Invesbot
+  (\<titular\>): hay aportes de Invesbot que no son de ningún plan con informe; no se
+  corrige ninguno automáticamente.»
 
 - Cada cambio queda auditado como `invesbot-restore`, con el informe que lo justificó, y el
   movimiento recibe al final de su nota «Contado como aporte: el informe de Invesbot de
@@ -621,7 +635,8 @@ verificación, préstamo ni ingreso, y cuya cuenta no esté excluida en el paso 
 - Nunca se crean movimientos: el informe no trae fechas de aportes.
 - Ejemplo ficticio con aportes mensuales de 100: el informe de julio espera 700 y hay 600
   registrados; un aporte del plan del 1 de julio marcado «No cuenta» pasa a Inversión. En
-  agosto espera 800 y hay 700: un traslado del ahorro de 100 de ese mes cuenta para el plan
+  agosto espera 800 y hay 700: un traslado del ahorro de 100 de ese mes, decidido como
+  Inversión, cuenta para el plan
   y otro «No cuenta» de agosto no se toca.
 
 **Aviso de diferencia.** Lo que sigue faltando, o sobrando, no se resuelve solo. Se avisa
@@ -1250,12 +1265,10 @@ archivos de la carpeta nunca se tocan.
 **Pendiente**
 
 - La primera ejecución real de la tarea programada.
-- Los avisos «tomaremos» de Invesbot de septiembre y octubre siguen decididos como
-  inversión: sin extracto de esas fechas no se sabe si fueron el único registro
-  del aporte. Los informes no llegan al correo: hay que descargarlos de Invesbot y dejarlos
-  en `invesbot\<titular>`.
-- La primera importación real con informes de Invesbot: qué aportes corrige y si queda
-  alguna diferencia.
+- Invesbot: la primera importación real con informes (descargados a mano en
+  `invesbot\<titular>`), que dirá qué aportes corrige, si queda alguna diferencia y si
+  los avisos «tomaremos» de septiembre y octubre, hoy decididos como inversión, fueron
+  el único registro del aporte.
 - Un `deltaLink` o un `historyId` caducados con datos reales.
 
 **Limitaciones conocidas**

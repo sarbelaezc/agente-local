@@ -35,6 +35,8 @@ src/
                      comando que los lista o revoca
     pairing.html     página de emparejamiento
   monthly_close/   cierre mensual (Graph, Gmail, extractos, panel)
+    invesbot.py      informes de Invesbot: lectura de los PDF, cifras del período y
+                     aportes por corregir, sin tocar la base
   mail_invoices/   facturas (Graph, extracción, panel de revisión, Excel)
 tests/
   conftest.py      dirige cada prueba a una carpeta de datos temporal

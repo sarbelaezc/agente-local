@@ -115,7 +115,8 @@ También puedes habilitarlo solo para la terminal actual con
   Invesbot que dejes en `invesbot\santiago` o `invesbot\manuela` (dentro de la
   carpeta de datos del cierre) se leen en cada recorrido sin Ollama: cada plan
   aparece en Inversiones y los aportes del plan que figuren «No cuenta» y el
-  informe muestre pasan a Inversión; un informe que no se lee con exactitud
+  informe muestre pasan a Inversión, salvo cuando podrían contarse dos veces (entonces
+  solo se avisa); un informe que no se lee con exactitud
   detiene todo sin guardar nada. Ver
   [docs/cierre-mensual.md](docs/cierre-mensual.md).
 - **Seguridad.** El cliente de Graph solo hace peticiones `GET` y el de Gmail

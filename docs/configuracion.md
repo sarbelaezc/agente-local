@@ -256,8 +256,8 @@ Uso en [Créditos](cierre-mensual.md#créditos-y-nómina).
 PDF en `.local\MonthlyCloseAgent\invesbot\santiago` o `…\invesbot\manuela`, según de quién
 sea el plan: el titular es el de la carpeta. No hay archivo de configuración ni
 contraseña. `scan`, `import` y el cierre programado (sin `-ReadOnly`) los leen en cada
-ejecución. Si la carpeta de datos está en OneDrive, los informes también; con
-`AGENTE_LOCAL_DATA` las carpetas van dentro de la que definas. Uso en
+ejecución. Las carpetas `invesbot` van dentro de la carpeta de datos
+([10. Carpeta de datos](#10-carpeta-de-datos)). Uso en
 [Informes de Invesbot](cierre-mensual.md#informes-de-invesbot).
 
 ## 7. Facturas: settings.yaml
