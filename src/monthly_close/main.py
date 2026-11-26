@@ -784,10 +784,13 @@ def import_invesbot_reports(store: Store, data_dir: Path) -> list[str]:
     restore: list[str] = []
     differences: dict[str, tuple[int, int]] = {}
     justified_by: dict[str, str] = {}
+    blocked: list[str] = []
     for owner in plans_by_owner:
+        movements = store.invesbot_movements(owner)
+        if invesbot.has_unattributed(movements, owner, plans_by_owner):
+            blocked.append(owner)
         outcome = invesbot.plan_outcome(
-            [r for r in reports if r.owner == owner], store.invesbot_movements(owner),
-            plans_by_owner, restored)
+            [r for r in reports if r.owner == owner], movements, plans_by_owner, restored)
         restore += outcome.restore
         differences |= outcome.differences
         justified_by |= outcome.justified_by
@@ -805,6 +808,10 @@ def import_invesbot_reports(store: Store, data_dir: Path) -> list[str]:
             lines.append(
                 f"Invesbot {plan}: el informe de {invesbot.MONTH_NAMES[latest.period_end.month]} "
                 f"cuenta {more} aportes que los registrados; revisa el panel.")
+    lines += [
+        f"Invesbot ({owner}): hay aportes de Invesbot que no son de ningún plan con informe; "
+        "no se corrige ninguno automáticamente." for owner in sorted(blocked)
+    ]
     return lines
 
 

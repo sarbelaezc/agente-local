@@ -37,7 +37,6 @@ MONTH_NAMES = {number: name for name, number in MONTHS.items() if name != "sptie
 SAVINGS_TRANSFER = "TRASLADO A FONDO DE INVERSION"
 AMOUNT = re.compile(r"(-?)\s*\$\s*(-?)\s*(\d[\d.]*,\d{2})")
 
-
 class ReportError(ValueError):
     """A report that cannot be read exactly; it is reported, never guessed."""
 
@@ -228,6 +227,22 @@ def _is_plan_movement(movement: dict, report: Report, plans_by_owner: dict[str, 
         merchant == "Invesbot" and plans_by_owner.get(report.owner) == {report.plan})
 
 
+def has_unattributed(movements: list[dict], owner: str, plans_by_owner: dict[str, set[str]]) -> bool:
+    """Whether the owner has an Invesbot movement decided as investment of no plan with reports.
+
+    Such a movement is missing from every comparison, so a restore could count the same
+    money twice: the owner gets no automatic correction while it exists.
+    """
+    plans = plans_by_owner.get(owner, set())
+    attributed = {f"Invesbot {plan}" for plan in plans} | ({"Invesbot"} if len(plans) == 1 else set())
+    return any(
+        m["owner"] == owner and m["decision"] == "investment"
+        and (m["merchant"] == "Invesbot" or m["merchant"].startswith("Invesbot "))
+        and m["merchant"] not in attributed
+        for m in movements
+    )
+
+
 def plan_outcome(
     reports: list[Report], movements: list[dict], plans_by_owner: dict[str, set[str]],
     restored: set[str],
@@ -239,16 +254,22 @@ def plan_outcome(
     plan of its month, each only when it fits in what is still missing. What counted for
     one report keeps counting for the next. Movements in restored, and those whose
     restorable is false (Store._decide would refuse them as investment), are never proposed.
+    Nothing is proposed for an owner with an unattributed Invesbot investment, nor in a
+    month with a savings transfer of the owner still undecided (it may be the same money).
     """
     restore: list[str] = []
     differences: dict[str, tuple[int, int]] = {}
     justified_by: dict[str, str] = {}
     counted_transfers: dict[str, str] = {}  # transfer id -> the plan it counted for
     ordered = sorted(movements, key=lambda m: (m["day"], m["id"]))
+    blocked = {r.owner for r in reports if has_unattributed(movements, r.owner, plans_by_owner)}
     for report in sorted(reports, key=lambda r: (r.owner, r.plan, r.period_end)):
         start, end = report.plan_start.isoformat(), report.period_end.isoformat()
         month = end[:7]
         own = [m for m in ordered if m["owner"] == report.owner and start <= m["day"] <= end]
+        restorable = report.owner not in blocked and not any(
+            m["merchant"] == SAVINGS_TRANSFER and m["decision"] is None and m["day"][:7] == month
+            for m in own)
         plan = [m for m in own if _is_plan_movement(m, report, plans_by_owner)]
         recorded = sum(
             m["amount_minor"] if m["decision"] == "investment" or m["id"] in justified_by
@@ -265,7 +286,7 @@ def plan_outcome(
                     and movement["id"] not in counted_transfers and movement["amount_minor"] <= missing):
                 counted_transfers[movement["id"]] = report.plan
                 recorded += movement["amount_minor"]
-        for movement in plan:
+        for movement in plan if restorable else []:
             missing = expected - recorded
             if missing <= 0 or movement["day"][:7] != month:
                 continue

@@ -174,7 +174,7 @@ def august_report():
     return report(month=8, opening=100_000, additional=700_000, balance=815_000)
 
 
-def test_the_spec_example_restores_july_counts_the_august_transfer_and_warns():
+def test_the_spec_example_restores_july_and_counts_the_august_transfer():
     movements = [
         *monthly(),
         move("jul", "2026-07-01", merchant="Invesbot", decision="exclude"),
@@ -258,6 +258,30 @@ def test_a_movement_the_decision_would_refuse_is_never_restored():
     outcome = invesbot.plan_outcome([july_report()], movements, ONE_PLAN, set())
     assert outcome.restore == []
     assert outcome.differences[JULY] == (70000000, 60000000)
+
+
+@pytest.mark.parametrize("other,plans,blocked,restore", [
+    (move("otro", "2026-03-10", merchant="Invesbot Sin Informe"), ONE_PLAN, True, []),
+    (move("otro", "2026-03-10", merchant="Invesbot"), {"santiago": {"Plan Ficticio", "Otro"}}, True, []),
+    (move("otro", "2026-03-10", merchant="Invesbot Sin Informe", decision="exclude"), ONE_PLAN, False, ["jul"]),
+    (move("otro", "2026-03-10", merchant="Invesbot Sin Informe", owner="manuela"), ONE_PLAN, False, ["jul"]),
+    (move("otro", "2026-03-10", merchant=TRANSFER), ONE_PLAN, False, ["jul"]),
+    (move("otro", "2026-03-10", merchant="Invesbot"), ONE_PLAN, False, []),  # of the plan: nothing missing
+])
+def test_an_investment_of_no_reported_plan_stops_the_owner_corrections(other, plans, blocked, restore):
+    movements = [*monthly(), other, move("jul", "2026-07-01", decision="exclude")]
+    outcome = invesbot.plan_outcome([july_report()], movements, plans, set())
+    assert outcome.restore == restore
+    assert invesbot.has_unattributed(movements, "santiago", plans) is blocked
+
+
+@pytest.mark.parametrize("transfer_day,restore", [("2026-07-10", []), ("2026-06-10", ["jul"])])
+def test_a_pending_savings_transfer_of_the_month_stops_its_corrections(transfer_day, restore):
+    movements = [*monthly(), move("tr", transfer_day, merchant=TRANSFER, decision=None),
+                 move("jul", "2026-07-01", decision="exclude")]
+    outcome = invesbot.plan_outcome([july_report()], movements, ONE_PLAN, set())
+    assert outcome.restore == restore
+    assert outcome.differences[JULY] == (70000000, 70000000 if restore else 60000000)
 
 
 def test_movements_before_the_plan_started_do_not_count():
@@ -424,6 +448,22 @@ def test_the_lines_carry_counts_and_the_latest_difference_without_amounts(tmp_pa
         "Invesbot Plan Ficticio: el informe de agosto cuenta más aportes que los registrados; revisa el panel.",
     ]
     assert not any("$" in line for line in lines)
+
+
+def test_an_investment_of_no_reported_plan_is_told_and_nothing_is_restored(tmp_path, monkeypatch, make_store):
+    from monthly_close import main as app
+    store = make_store()
+    insert(store, [*monthly(), move("otro", "2026-03-10", merchant="Invesbot Sin Informe"),
+                   move("jul", "2026-07-01", decision="exclude")])
+    monkeypatch.setattr(app.invesbot, "read_reports", lambda data_dir: [july_report()])
+    lines = app.import_invesbot_reports(store, tmp_path)
+    assert lines == [
+        "Invesbot Plan Ficticio (santiago): 1 informes leídos; 0 aportes contados de nuevo.",
+        "Invesbot Plan Ficticio: el informe de julio cuenta más aportes que los registrados; revisa el panel.",
+        "Invesbot (santiago): hay aportes de Invesbot que no son de ningún plan con informe; "
+        "no se corrige ninguno automáticamente.",
+    ]
+    assert store.restored_invesbot_ids() == set()
 
 
 def test_an_older_report_added_later_recalculates_the_next(tmp_path, monkeypatch, make_store):
