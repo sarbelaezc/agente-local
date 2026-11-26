@@ -17,7 +17,8 @@ from mail_invoices.classification import simulate_classification
 from mail_invoices.classification_decisions import ClassificationDecisionStore, decisions_path
 from mail_invoices.folders import ConfirmedExample
 from mail_invoices.graph_mailbox import (
-    MailboxError, discover_folders, move_registered_message, open_mailbox, verify_destination,
+    MailboxError, MessageChanged, discover_folders, move_registered_message, open_mailbox,
+    verify_destination, verify_unchanged,
 )
 from mail_invoices.review_server import ReviewPanel
 from shared.lan_access import LanAccess
@@ -96,13 +97,30 @@ def _active_messages(
     )[:limit]
 
 
+def renewed_message(existing: BatchMessage | None, prepared: BatchMessage) -> BatchMessage | None:
+    """What to save for a message just read from the mailbox; None keeps the stored one.
+
+    A blocked message whose content changed goes back to review with its current content:
+    it stays blocked, and keeps who approved it before, until a person approves it again.
+    """
+    if existing is None or existing.state == "pending":
+        return prepared
+    if existing.state != "blocked" or prepared.errors or not prepared.body_digest:
+        return None
+    # Like verify_unchanged, a record without a digest has no body to compare.
+    body_changed = bool(existing.body_digest) and existing.body_digest != prepared.body_digest
+    if not body_changed and (existing.sender, existing.subject) == (prepared.sender, prepared.subject):
+        return None
+    return replace(
+        prepared, state="blocked", approver=existing.approver, approved_at=existing.approved_at,
+        last_error="El correo cambió después de aprobarlo: revisa los datos leídos de nuevo.",
+    )
+
+
 def _persist_execution_error(
     message: BatchMessage, journal: BatchStateStore, error: Exception,
 ) -> None:
-    if (
-        message.state == "registered"
-        and "body changed after review" in str(error).casefold()
-    ):
+    if isinstance(error, MessageChanged) and message.state in {"approved", "registered"}:
         message.state = "blocked"
     message.last_error = str(error)
     journal.save([message])
@@ -122,6 +140,8 @@ def execute_message(
     }
     try:
         if message.state == "approved":
+            # Checked again right before moving: a batch may resume much later.
+            verify_unchanged(mailbox, data)
             try:
                 workbook.record(message.invoices)
             except WorkbookError:
@@ -210,10 +230,10 @@ def _process_invoice_batch(
                         missing_identity.append(raw["errors"])
                         continue
                     prepared = BatchMessage.from_report(raw)
-                    existing = stored.get(prepared.conversation)
-                    if existing is None or existing.state == "pending":
-                        journal.save([prepared])
-                        stored[prepared.conversation] = prepared
+                    renewed = renewed_message(stored.get(prepared.conversation), prepared)
+                    if renewed is not None:
+                        journal.save([renewed])
+                        stored[prepared.conversation] = renewed
                 active = _active_messages(list(stored.values()), batch_size, settings.excluded_senders)
                 progress(f"Clasificados {_plural(len(report['messages']), 'correo', 'correos')}.")
                 if missing_identity:

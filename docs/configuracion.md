@@ -9,7 +9,7 @@ raíz del proyecto en PowerShell.
 - [3. App de Microsoft (ambas funcionalidades)](#3-app-de-microsoft-ambas-funcionalidades)
 - [4. Cierre mensual: runtime.json y paso 0](#4-cierre-mensual-runtimejson-y-paso-0)
 - [5. Gmail de Manuela (opcional)](#5-gmail-de-manuela-opcional)
-- [6. Extractos y créditos (opcional)](#6-extractos-y-créditos-opcional)
+- [6. Extractos, créditos e informes de Invesbot (opcional)](#6-extractos-créditos-e-informes-de-invesbot-opcional)
 - [7. Facturas: settings.yaml](#7-facturas-settingsyaml)
 - [8. OCR para PDF escaneados (opcional)](#8-ocr-para-pdf-escaneados-opcional)
 - [9. Tarea programada del cierre (opcional)](#9-tarea-programada-del-cierre-opcional)
@@ -207,7 +207,7 @@ concede cualquier permiso distinto de `gmail.readonly`, la sesión no se guarda.
 El recorrido de solo lectura muestra, por buzón, cuántos mensajes listó y cuántos
 son de remitentes aprobados. Revísalo y cambia `verified` a `true`.
 
-## 6. Extractos y créditos (opcional)
+## 6. Extractos, créditos e informes de Invesbot (opcional)
 
 **Extractos del banco y de Protección.** Crea
 `.local\MonthlyCloseAgent\statements.json`:
@@ -251,6 +251,14 @@ descríbelo en `.local\MonthlyCloseAgent\credit_ledgers.json`:
 | `category` | Categoría de gasto configurada en el paso 0 |
 
 Uso en [Créditos](cierre-mensual.md#créditos-y-nómina).
+
+**Informes de Invesbot.** Descarga del banco el informe mensual de cada plan y guarda los
+PDF en `.local\MonthlyCloseAgent\invesbot\santiago` o `…\invesbot\manuela`, según de quién
+sea el plan: el titular es el de la carpeta. No hay archivo de configuración ni
+contraseña. `scan`, `import` y el cierre programado (sin `-ReadOnly`) los leen en cada
+ejecución. Las carpetas `invesbot` van dentro de la carpeta de datos
+([10. Carpeta de datos](#10-carpeta-de-datos)). Uso en
+[Informes de Invesbot](cierre-mensual.md#informes-de-invesbot).
 
 ## 7. Facturas: settings.yaml
 
@@ -325,7 +333,17 @@ Para quitarla: `.\scripts\register-monthly-close.ps1 -Remove`. Qué hace y cuán
 Por defecto todo se guarda en `.local` dentro del proyecto. Para usar otra
 carpeta (por ejemplo, fuera de OneDrive), define la variable de entorno
 `AGENTE_LOCAL_DATA` con esa ruta y ajusta las rutas de `settings.yaml` que
-apunten a `.local`. Las pruebas usan siempre una carpeta temporal y nunca leen ni
+apunten a `.local`. El lanzador y la tarea programada usan esa carpeta, salvo que
+indiques otra con `-DataDir`. Definir la variable no mueve los datos:
+
+1. Cierra los paneles y copia el contenido de `.local` a la carpeta nueva.
+2. Define la variable y abre una terminal nueva para que la tome.
+3. Si instalaste la tarea programada, regístrala otra vez con
+   `.\scripts\register-monthly-close.ps1`: guarda la ruta que había al instalarla.
+4. Comprueba con `.\scripts\agente-local.ps1 check-config` y borra la copia anterior
+   cuando todo funcione.
+
+Las pruebas usan siempre una carpeta temporal y nunca leen ni
 escriben `.local`.
 
 Los estados de lotes de facturas dependen de la app (`graph_client_id`), el libro
@@ -359,6 +377,7 @@ que en el equipo. Solo entran los dispositivos que emparejas tú.
 
    ```powershell
    .\scripts\agente-local.ps1 serve -Red      # cierre mensual
+   .\scripts\agente-local.ps1 import -Red     # importa y luego abre el panel del cierre
    .\scripts\agente-local.ps1 invoices -Red   # lote de facturas
    ```
 

@@ -64,7 +64,9 @@ aprobación automática: cada lote necesita a una persona en el panel.
 
 «Cerrar sin ejecutar», o cerrar la pestaña, termina sin escribir el Excel ni mover
 correos; los pendientes se conservan para la próxima vez. El lote se detiene en el
-primer fallo y conserva las demás aprobaciones. No se pueden ejecutar dos lotes a
+primer fallo y conserva las demás aprobaciones. Si la sesión o Microsoft Graph
+fallan mientras se prepara el lote, todo se detiene sin abrir el panel ni cambiar
+los pendientes guardados. No se pueden ejecutar dos lotes a
 la vez.
 
 Ollama tarda unos 3 a 10 segundos por correo; el límite de 20 es lo que conviene
@@ -95,10 +97,16 @@ autorizaciones y el estado de recuperación.
 ## Corregir un correo bloqueado
 
 Un correo pasa a **bloqueado** cuando su registro choca con el Excel (por ejemplo,
-el número ya existe con otra fecha o valor) o cuando su cuerpo cambió después de
-aprobarlo.
+el número ya existe con otra fecha o valor) o cuando su remitente, asunto o cuerpo
+cambió después de aprobarlo.
 
-1. Ábrelo con `invoices -Resume`: aparece con los campos de la última revisión.
+1. Ábrelo:
+   - **Conflicto con el Excel:** con `invoices -Resume`; aparece con los campos de la
+     última revisión.
+   - **Correo cambiado:** con `invoices` (sin `-Resume`), mientras siga en la Bandeja
+     de entrada y entre en el lote (`-Days`, `-BatchSize`). Se lee de nuevo y aparece
+     con sus datos actuales, aún bloqueado; si no se puede leer sin errores se
+     conserva como estaba. Con `-Resume` no se relee y se volvería a bloquear.
 2. Corrige el conflicto en el Excel o en los datos del panel.
 3. Selecciónalo explícitamente y apruébalo de nuevo. La nueva aprobación vuelve a
    validar todo antes de registrar y mover; nunca modifica en silencio filas
@@ -253,11 +261,12 @@ no entrenamiento del modelo; siempre puedes cambiar la carpeta antes de aprobar.
 | `registered` | Registrado y verificado; falta mover el correo |
 | `moving` | Se pidió el movimiento; si se cortó, solo se verifica |
 | `moved` | Archivado y verificado; no se procesa de nuevo |
-| `blocked` | Conflicto con el Excel o cuerpo cambiado; requiere nueva aprobación |
+| `blocked` | Conflicto con el Excel, o remitente, asunto o cuerpo cambiados; requiere nueva aprobación |
 
 La identidad de cada correo incluye remitente, asunto y una huella SHA-256 del
-cuerpo leído; un cambio antes de mover lo bloquea, y el agente nunca mueve con una
-aprobación obsoleta. El Excel y el buzón no forman una transacción atómica: por
+cuerpo leído. Se comprueba antes de registrar en el Excel y otra vez antes de
+mover: un cambio lo bloquea, y el agente nunca registra ni mueve con una aprobación
+obsoleta. El Excel y el buzón no forman una transacción atómica: por
 eso existen estos estados y la verificación de cada paso.
 
 ## El libro de Excel
@@ -332,14 +341,16 @@ Chromium (incluido un contraste mínimo de 4,5:1 en ambos temas y que la vista
 previa del valor lee los montos igual que el escritor del Excel) y el escritor de
 Excel con libros sintéticos.
 
+- Cambios de presentación del panel (vista previa del valor, carpeta sugerida,
+  barra compacta en el móvil) y aprobación desde el celular (2026-11-25): usados
+  por el usuario con lotes reales.
+
 **Pendiente**
 
 - Los nombres de archivo que usan los proveedores reales para emparejar XML y PDF
-  sueltos (probado con archivos sintéticos).
-- No consta una prueba con un PDF escaneado real (OCR).
+  sueltos (probado con archivos sintéticos). No se han visto en datos reales: las
+  facturas llegan en ZIP.
+- No consta una prueba con un PDF escaneado real (OCR); se puede comprobar con
+  `--analyze-file`, que solo lee.
 - Las pruebas no miden la precisión general del modelo: cada campo se revisa en el
   panel.
-- Los cambios de presentación del panel (vista previa del valor, carpeta sugerida,
-  barra compacta en el móvil) no se han usado todavía con un lote real.
-- Aprobar un lote real desde un celular con `invoices -Red` (probado con
-  pruebas HTTPS sobre una segunda dirección local).

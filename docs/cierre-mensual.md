@@ -99,6 +99,13 @@ lectura falló, el panel se abre igual pero se conserva el código de error:
 abrirlo no significa que el recorrido terminara bien. `scan` hace lo mismo sin
 abrir el panel.
 
+Con `import -Red` el panel que se abre al terminar queda también disponible para tus
+[dispositivos emparejados](configuracion.md#11-paneles-desde-otros-dispositivos-opcional);
+la dirección y los códigos aparecen en la ventana de terminal del panel. Si ya hay un
+panel abierto sin `-Red`, se detiene antes de importar. Si el equipo no está en una
+red privada, lo importado se conserva, el panel no se abre y el comando termina con
+error.
+
 - **Sin fechas (incremental).** Lee solo lo que cambió desde la ejecución
   anterior, incluido el mes en curso. Ver
   [Lectura incremental](#lectura-incremental).
@@ -454,7 +461,7 @@ descuentos de nómina no tienen hora.
 
 ## Conciliar extractos
 
-Requiere `statements.json` ([configuración](configuracion.md#6-extractos-y-créditos-opcional)).
+Requiere `statements.json` ([configuración](configuracion.md#6-extractos-créditos-e-informes-de-invesbot-opcional)).
 Se ejecuta con cada `scan` o `import` (sin `-ReadOnly`) y con la tarea programada,
 desde el 1 de enero del año en que empieza la lectura. No hay un comando aparte:
 para conciliar ahora, corre un `import`.
@@ -561,6 +568,91 @@ de producto, así que el buzón dice de quién es cada uno:
 - Los correos de Protección no se envían a Ollama: se marcan como procesados sin
   movimientos, porque la información la aporta el PDF.
 
+### Informes de Invesbot
+
+Los informes mensuales de cada plan de Invesbot no llegan al correo: los descargas del
+banco y los dejas en una carpeta del cierre. El informe lo genera el banco y prima sobre
+lo registrado.
+
+- **Carpetas.** `invesbot\santiago` y `invesbot\manuela`, dentro de la carpeta de datos del
+  cierre (`.local\MonthlyCloseAgent\` por defecto, o la que fije `AGENTE_LOCAL_DATA`). El
+  titular es el de la carpeta, no se lee del PDF. Solo se leen los `*.pdf` de esas dos
+  carpetas, de hasta 10 MB; no hace falta contraseña. Si no hay ningún PDF, no pasa nada.
+  Si la carpeta del proyecto está dentro de OneDrive, OneDrive sincroniza también estos
+  informes; `AGENTE_LOCAL_DATA` los lleva a otra carpeta.
+- **Cuándo se leen.** En cada `scan`, `import` y cierre programado sin `-ReadOnly`, después
+  de conciliar los extractos de ahorros (que pueden importar traslados) y de importar los
+  créditos. Se leen en memoria, sin Ollama, y se usan todos en cada ejecución, así que un
+  informe antiguo agregado después recalcula el siguiente. Repetir no cambia nada.
+- **Qué se valida.** El nombre del plan sale de la página 1 (la línea que sigue al título
+  «Invesbot | Reporte plan inversión»). De la página 2 salen el mes del informe, la fecha de
+  inicio, el saldo al cierre, la apertura, los aportes adicionales (y cuántos son), los
+  retiros y los rendimientos acumulados. Apertura + aportes adicionales − retiros +
+  rendimientos debe dar el saldo, exacto al centavo. Un informe ilegible, sin alguno de
+  esos rótulos, cuyas cifras no suman, o que difiere de otro del mismo titular, plan y mes,
+  detiene todo sin guardar nada y dice qué archivo es; dos informes iguales cuentan una
+  vez. No se guarda el contenido del PDF, solo las cifras.
+- **Cifras del período.** El informe trae cifras acumuladas desde el inicio del plan. Las
+  del mes salen de la diferencia con el informe anterior del mismo plan (si faltan meses,
+  la diferencia cubre el hueco); sin informe anterior, desde el inicio del plan con saldo
+  0. Los rendimientos son el saldo menos la apertura del período, menos los aportes, más
+  los retiros, y pueden ser negativos. No se usan las cifras «último mes» del informe:
+  contradicen las acumuladas.
+- **Panel.** Cada plan aparece en Inversiones como «Invesbot \<plan\>» (pestaña Mes y
+  gráfica del año), con saldo, aportes, retiros y rendimientos del período. En **Hogar**
+  lleva la etiqueta del titular.
+
+**Aportes registrados.** Para cada informe, de más antiguo a más nuevo, se compara lo que
+el informe espera (apertura + aportes adicionales − retiros, acumulado al cierre del mes)
+con lo registrado desde el inicio del plan hasta el último día del mes. Registrado son los
+movimientos del plan decididos como Inversión, menos los decididos como Retiro de
+inversión. Son del plan los de comercio «Invesbot \<plan\>», o «Invesbot» a secas cuando el
+titular solo tiene un plan con informes, y los «TRASLADO A FONDO DE INVERSION» del ahorro
+de ese mes ya decididos como Inversión que quepan en lo que falta (un traslado grande a
+una Fiducuenta queda fuera). Un traslado pendiente o decidido «No cuenta» no cuenta. Un
+traslado cuenta para un solo mes y un solo plan; si el titular tiene dos planes con
+informes, va al primero en orden alfabético.
+
+**Corrección automática.** Si al informe le falta un aporte, se buscan los movimientos del
+plan por nombre de ese mismo mes decididos «No cuenta», del más antiguo al más nuevo, y
+pasan a Inversión mientras quepan en lo que falta: uno que no cabe se salta y se prueban
+los siguientes (lo mismo vale para los traslados). Se corrige también un «No cuenta» que
+se marcó como copia de otro aviso («Mismo aporte que…» o «Posible duplicado»): el informe
+del banco prima. Solo se corrige un movimiento que la decisión Inversión admite: uno que
+no sea pago de tarjeta, rechazado, promoción, verificación, préstamo ni ingreso, y cuya
+cuenta no esté excluida en el paso 0.
+
+No se corrige nada, y la diferencia se avisa, cuando podría contarse dos veces el mismo
+dinero:
+
+- En un mes con un «TRASLADO A FONDO DE INVERSION» del titular aún sin decidir: decídelo y
+  la siguiente ejecución vuelve a comparar.
+- Para todos los planes de un titular que tiene algún movimiento decidido como Inversión
+  con comercio «Invesbot…» que no es de ningún plan con informes (otro nombre de plan, o
+  «Invesbot» a secas con dos planes). La terminal lo dice, sin cifras: «Invesbot
+  (\<titular\>): hay aportes de Invesbot que no son de ningún plan con informe; no se
+  corrige ninguno automáticamente.»
+
+Cuando sí se corrige:
+
+- Cada cambio queda auditado como `invesbot-restore`, con el informe que lo justificó, y el
+  movimiento recibe al final de su nota «Contado como aporte: el informe de Invesbot de
+  \<mes\> de \<año\> muestra el aporte.»; una nota anterior se conserva.
+- Un movimiento corregido una vez no se vuelve a tocar, aunque lo devuelvas a «No cuenta».
+- Nunca se crean movimientos: el informe no trae fechas de aportes.
+- Ejemplo ficticio con aportes mensuales de 100: el informe de julio espera 700 y hay 600
+  registrados; un aporte del plan del 1 de julio marcado «No cuenta» pasa a Inversión. En
+  agosto espera 800 y hay 700: un traslado del ahorro de 100 de ese mes, decidido como
+  Inversión, cuenta para el plan y otro «No cuenta» de agosto no se toca.
+
+**Aviso de diferencia.** Lo que sigue faltando, o sobrando, no se resuelve solo. Se avisa
+solo la diferencia del informe más reciente de cada plan, porque es acumulada: en la
+terminal («Invesbot \<plan\>: el informe de \<mes\> cuenta más (o menos) aportes que los
+registrados; revisa el panel.») y en la fila del plan del panel («El informe cuenta X en
+aportes; hay Y registrados»). Al terminar, la terminal dice por plan cuántos informes leyó
+y «N aportes contados de nuevo»: solo los corregidos en esa ejecución, no los de ejecuciones
+anteriores.
+
 En el panel, la tarjeta «Extractos y saldos» de la pestaña Mes tiene un bloque
 por tipo de producto. Cada extracto con corte en el mes va en una fila con su
 nombre a la izquierda y su saldo o estado a la derecha.
@@ -569,9 +661,10 @@ nombre a la izquierda y su saldo o estado a la derecha.
   («✓ 21/21») indica que todos los movimientos coinciden. Una naranja («⚠ 3
   pendientes») indica que algunos solo venían en el extracto: entraron como
   pendientes y debajo se indica cuántos coinciden.
-- **Inversiones** (Fiducuenta, pensión voluntaria, cesantías y pensión obligatoria) y **Créditos**: el
+- **Inversiones** (Fiducuenta, pensión voluntaria, cesantías, pensión obligatoria y los
+  planes de Invesbot) y **Créditos**: el
   total del último saldo conocido de cada producto hasta ese mes, con la fecha
-  del saldo. Protección muestra además aportes, retiros y rendimientos.
+  del saldo. Protección e Invesbot muestran además aportes, retiros y rendimientos.
 
 Un extracto sin movimientos no muestra conciliación. Cada titular ve sus
 extractos; **Hogar** los ve todos, con la etiqueta del titular.
@@ -592,7 +685,7 @@ curso). Un mes queda **Conciliado** si se cumple todo:
    cubren todos sus días
    (en las tarjetas, los de ese mes y el siguiente; ver abajo).
    Los créditos (solo traen saldos; sus pagos salen de la cuenta de ahorros) y
-   Protección (solo cifras) no cuentan.
+   Protección e Invesbot (solo cifras) no cuentan.
 2. Ninguno de esos extractos dejó movimientos sin coincidir.
 3. No hay movimientos pendientes de decisión ese mes, **de ningún titular**.
 4. No hay avisos de ese mes en la cola «Avisos sin extraer», de ningún buzón.
@@ -751,7 +844,7 @@ $env:PYTHONPATH = "src"
 ## El panel
 
 Se abre con `.\scripts\agente-local.ps1` en `http://127.0.0.1:8766`, solo en tu
-equipo. Con `serve -Red` también se puede usar desde tus dispositivos emparejados
+equipo. Con `serve -Red` o `import -Red` también se puede usar desde tus dispositivos emparejados
 de la red de casa, en `https://<dirección del equipo>:8767/` (ver
 [Paneles desde otros dispositivos](configuracion.md#11-paneles-desde-otros-dispositivos-opcional)). Arriba eliges el titular (**Santiago / Manuela / Hogar**, Hogar por defecto) y
 debajo las pestañas **Mes**, **Año** y **Decisión**; los dos siguen visibles al
@@ -826,7 +919,7 @@ visuales > Efectos de animación), el panel cambia sin animaciones.
   revisados a mano o conciliados con los extractos).
 - Gráfica de ingresos (azul) y gastos (naranja), dos colores que se distinguen
   también con daltonismo rojo-verde; categorías del año con barras y porcentaje;
-  comercios frecuentes del año, agrupados igual que en el mes; y columnas por
+  los 10 comercios del año con más gasto, agrupados igual que en el mes; y columnas por
   categoría con los mismos colores que el mes. El mes en curso se ve
   más claro.
 - **Inversiones y créditos:** una gráfica de línea para cada grupo con el saldo
@@ -1017,7 +1110,7 @@ el comercio es el destinatario nombrado, no el banco.
 
 Cada cambio de un movimiento queda en la tabla `audit` de `close.sqlite3` con su
 origen. Su columna `device` guarda el nombre del dispositivo emparejado desde el
-que se hizo (con `serve -Red`), o queda vacía si se hizo en el equipo. Las
+que se hizo (con `-Red`), o queda vacía si se hizo en el equipo. Las
 etiquetas principales:
 
 | Etiqueta | Origen |
@@ -1164,27 +1257,33 @@ archivos de la carpeta nunca se tocan.
   - Pestaña Año: inversiones y créditos con detalle por producto, y los colores
     de «Ingresos y gastos».
 
+- Importación con el lector de ahorros corregido (2026-11-25): importados los
+  extractos de los dos titulares y decididos los pendientes que dejaron.
+- Tarjeta nueva (2026-11-25): la Visa de Manuela quedó registrada como tarjeta
+  nueva al responder la pregunta del lector de extractos.
+- Cola de revisión de Manuela (2026-11-25): releída con las frases de pago por QR
+  y de pago desde un producto; no queda nada pendiente de ella.
+- Avisos en USD (2026-11-25), según la base real: 220 movimientos de 2026, todos
+  con decisión. Las 167 compras que cuentan (121 familiares y 46 personales)
+  tienen su tasa y su valor en COP; los 9 sin tasa están excluidos y no suman al
+  estimado.
+- Informes de Invesbot (2026-11-25), con `import`: 8 informes mensuales de un plan de
+  Santiago (febrero a septiembre) leídos y cuadrados; un «No cuenta» pasó a Inversión
+  con su auditoría y ningún movimiento se creó. El informe más reciente cuadra con lo
+  registrado. Antes, sobre una copia de la base, una segunda ejecución no cambió nada.
+
 **Pendiente**
 
-- Importar (no solo leer) los extractos de los dos titulares con el lector de
-  ahorros corregido, decidir los pendientes que dejen y ver qué meses vuelven a
-  conciliarse.
-- Responder la primera pregunta de tarjeta con número nuevo: la Visa de Manuela,
-  con extractos desde septiembre de 2026, y su Mastercard como única opción (las
-  dos tienen extractos de septiembre y octubre). Probado solo sobre una copia de la
-  base y con datos sintéticos.
-
-- Los avisos «tomaremos» de Invesbot de septiembre y octubre siguen decididos como
-  inversión: sin extracto de esas fechas no se sabe si fueron el único registro del
-  aporte.
-- Releer la cola de revisión de Manuela con las frases de pago por QR y de pago
-  desde un producto: probadas en solo lectura sobre sus 54 avisos en cola, sin
-  importar todavía.
 - La primera ejecución real de la tarea programada.
-- Cuánto dura en la práctica la sesión de Gmail en Testing, y si pasar la app a
-  producción lo evita.
-- Avisos reales en USD y las tasas elegidas.
+- Invesbot: el informe de octubre, que dirá si los avisos «tomaremos» de ese mes, hoy
+  decididos como inversión, fueron el único registro del aporte, y los primeros
+  informes de Manuela.
 - Un `deltaLink` o un `historyId` caducados con datos reales.
+
+**Limitaciones conocidas**
+
+- La sesión de Gmail en modo Testing dura 7 días: pasado ese plazo hay que volver
+  a iniciar sesión. No se ha probado si pasar la app a producción lo evita.
 - Las transferencias entre titulares no se detectan solas en los datos actuales
-  (los avisos de Santiago no traen la cuenta destino); por ahora se marcan a mano
-  por destino.
+  (los avisos de Santiago no traen la cuenta destino); se marcan a mano por
+  destino.

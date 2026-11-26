@@ -4,7 +4,7 @@ import json
 import os
 import re
 import socket
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -325,6 +325,14 @@ def test_year_tab_lists_frequent_merchants_of_the_year(dashboard):
     # The decided movements of every month count; the pending one of the fixture does not.
     expect(ranking).to_contain_text("FERRETERIA DEL ANO · 1")
     assert ranking.inner_text().count(" · ") == 2  # the fixture's merchant and the new one
+    for letter in "ABCDEFGHIJ":
+        store.import_message(letter, [movement(letter, f"COMERCIO {letter * 3}", message_id=letter, day=f"{other}-11",
+                                               amount_minor=800000, decision="personal")])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+    page.locator("#tab-year").click()
+    expect(ranking).to_contain_text("COMERCIO III")
+    assert ranking.inner_text().count(" · ") == 10
 
 
 def test_grouped_usd_purchases_show_dollars_not_zero_cop(dashboard):
@@ -855,8 +863,10 @@ def test_annual_chart_has_visible_numeric_axis_labels(dashboard):
 def test_year_category_legend_sits_under_the_chart(dashboard):
     page, _, _, _ = dashboard
     page.locator("#tab-year").click()
-    chart = page.locator("#year-chart-svg").bounding_box()
-    legend = page.locator("#year-category-legend").bounding_box()
+    # One reading for both: the tab fades in moving, so separate readings differ.
+    chart, legend = page.locator("#year-chart-svg, #year-category-legend").evaluate_all(
+        "nodes => nodes.map(node => node.getBoundingClientRect().toJSON())"
+    )
     assert legend["y"] >= chart["y"] + chart["height"] - 1
     assert legend["width"] > chart["width"] * .8  # it spans the card instead of a side column
 
@@ -880,7 +890,8 @@ def test_pending_card_hides_when_everything_is_decided_and_the_rest_share_one_ro
         heroes = page.locator(f"{panel} .metric.hero")
         expect(heroes).to_have_count(3)
         assert "Por decidir" not in page.locator(panel).inner_text()
-        tops = {round(heroes.nth(index).bounding_box()["y"]) for index in range(3)}
+        # One reading for all: the tab fades in moving, so separate readings differ.
+        tops = set(heroes.evaluate_all("nodes => nodes.map(node => Math.round(node.getBoundingClientRect().y))"))
         assert len(tops) == 1, (panel, tops)
 
 
@@ -1247,3 +1258,47 @@ def test_income_and_spending_bars_use_colours_apart_for_colour_blindness(dashboa
       return [fillOf('Ingresos'), fillOf('Gastos'), style.getPropertyValue('--s1').trim(), style.getPropertyValue('--s2').trim()];
     }""")
     assert fills[0] == fills[2] and fills[1] == fills[3]
+
+
+def test_invesbot_plans_are_investments_with_their_figures(dashboard):
+    page, store, month, _ = dashboard
+    today = date.today()
+    previous = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+
+    def report(period: str, balance: int, returns: int, expected: int, recorded: int,
+               plan: str = "Plan Ficticio") -> dict:
+        return {
+            "identity": f"INVESBOT|{plan}|{period}", "owner": "santiago", "product": "INVESBOT",
+            "suffix": plan, "period_start": f"{period}-01", "period_end": f"{period}-28",
+            "movements": 0, "matched": 0, "missing": 0, "balance_minor": balance, "opening_minor": 100000000,
+            "contributions_minor": 80000000, "withdrawals_minor": 0, "returns_minor": returns,
+            "expected_contributions_minor": expected, "recorded_contributions_minor": recorded,
+        }
+
+    store.record_statements([
+        report(previous, 150000000, 2000000, 60000000, 50000000),
+        report(month, 170000000, -5000000, 80000000, 70000000),
+        report(month, 90000000, 1000000, 90000000, 90000000, plan="Plan Igual"),
+    ], [])
+    page.reload()
+    expect(page.locator("main")).to_have_attribute("aria-busy", "false")
+
+    def investment_rows():
+        block = page.locator("#statement-sections details").filter(has_text="Inversiones")
+        block.locator("summary").click()
+        return block.locator(".statement-row")
+
+    rows = investment_rows()
+    assert rows.count() == 2
+    text = rows.filter(has_text="Plan Ficticio").inner_text()
+    assert "Invesbot Plan Ficticio" in text and "*" not in text
+    assert re.search(r"aportes .*800\.000.* · retiros .* · rendimientos [-−]\s?.*50\.000", text), text
+    assert re.search(r"El informe cuenta .*800\.000.* en aportes; hay .*700\.000.* registrados", text), text
+    # The report says as much as was recorded: no difference line.
+    assert "El informe cuenta" not in rows.filter(has_text="Plan Igual").inner_text()
+    # The older report has its own difference, but only the newest report of a plan shows one.
+    page.locator(f"#month-chips button[data-month='{previous}']").click()
+    older = investment_rows().filter(has_text="Plan Ficticio").inner_text()
+    assert "Invesbot Plan Ficticio" in older and "El informe cuenta" not in older, older
+    page.locator("#tab-year").click()
+    expect(page.locator("#investment-balances")).to_contain_text("Invesbot Plan Ficticio")

@@ -31,7 +31,7 @@ param(
     [ValidateRange(0, 3650)]
     [int]$OlderThanDays = 30,
     [switch]$Apply,
-    # serve / invoices: also open the panel to paired devices of the home network.
+    # serve / import / invoices: also open the panel to paired devices of the home network.
     [switch]$Red,
     # devices: revoke one device by name, or all of them.
     [ValidateLength(1, 40)]
@@ -43,7 +43,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 # $PSScriptRoot is not available yet when parameter defaults are evaluated with -File.
-if (-not $DataDir) { $DataDir = Join-Path (Split-Path $PSScriptRoot -Parent) ".local\MonthlyCloseAgent" }
+# Same folder as shared.storage.data_root().
+$localData = if ("$env:AGENTE_LOCAL_DATA".Trim()) { "$env:AGENTE_LOCAL_DATA".Trim() } else { Join-Path (Split-Path $PSScriptRoot -Parent) ".local" }
+if (-not $DataDir) { $DataDir = Join-Path $localData "MonthlyCloseAgent" }
 function Get-PanelContent {
     $request = [System.Net.HttpWebRequest]::Create("http://127.0.0.1:8766")
     $request.Proxy = $null
@@ -54,6 +56,15 @@ function Get-PanelContent {
         $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
         try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
     } finally { $response.Dispose() }
+}
+
+function Assert-PanelOnNetwork {
+    # A panel already open cannot be opened to the network: the same process must listen on both ports.
+    $panel = @(Get-NetTCPConnection -State Listen -LocalPort 8766 -ErrorAction SilentlyContinue).OwningProcess
+    $network = @(Get-NetTCPConnection -State Listen -LocalPort 8767 -ErrorAction SilentlyContinue).OwningProcess
+    if ($panel -and -not ($network | Where-Object { $_ -in $panel })) {
+        throw "El panel ya esta abierto sin red. Cierra el panel abierto o ejecuta import sin -Red."
+    }
 }
 
 function Write-RunLog {
@@ -147,8 +158,8 @@ function Wait-OllamaModels {
 }
 
 $root = Split-Path $PSScriptRoot -Parent
-if ($Red -and $Command -notin @("serve", "invoices")) {
-    throw "-Red solo aplica a serve e invoices."
+if ($Red -and ($Command -notin @("serve", "import", "invoices") -or ($Command -eq "import" -and $ReadOnly))) {
+    throw "-Red solo aplica a serve, invoices e import sin -ReadOnly."
 }
 if ($Command -eq "lan-firewall") {
     # Inbound TCP to the two network panel ports, only on Private networks and from the
@@ -177,11 +188,9 @@ if (-not (Test-Path -LiteralPath $python)) {
     throw "Falta .venv. Ejecuta scripts\bootstrap.ps1."
 }
 # One log per execution in each feature's local data folder; Python keeps the last 10.
-# Invoices follow AGENTE_LOCAL_DATA like shared.storage.data_root().
 # "login -Mailbox facturas" signs in to the invoice mailbox; the name is reserved for it.
 $invoiceLogin = $Command -eq "login" -and $Mailbox -eq "facturas"
 if ($Command -in @("invoices", "invoices-cleanup") -or $invoiceLogin) {
-    $localData = if ("$env:AGENTE_LOCAL_DATA".Trim()) { "$env:AGENTE_LOCAL_DATA".Trim() } else { Join-Path $root ".local" }
     $logDir = Join-Path $localData "MailInvoiceAgent\logs"
     $logCommand = if ($invoiceLogin) { "login" } elseif ($Command -eq "invoices-cleanup") { "cleanup" } elseif ($Resume) { "resume" } else { "batch" }
 } else {
@@ -277,6 +286,7 @@ try {
         $needsOllama = $LASTEXITCODE -eq 0
     }
     if ($Command -eq "import") {
+        if ($Red) { Assert-PanelOnNetwork }
         & $python -m monthly_close.main check-config --data-dir $DataDir --log-file $script:logFile
         if ($LASTEXITCODE -ne 0) { throw "Configuracion no validada; no se inicia la importacion." }
     }
@@ -305,7 +315,8 @@ try {
     if ($ToCategory) { $arguments += @("--to", $ToCategory) }
     if ($ReadOnly) { $arguments += "--read-only" }
     if ($ReprocessEmpty) { $arguments += "--reprocess-empty" }
-    if ($Red) { $arguments += "--lan" }
+    # With import, only the panel opens to the network, once the scan ends.
+    if ($Red -and $Command -eq "serve") { $arguments += "--lan" }
     if ($Command -eq "import") {
         Write-Step "Iniciando recorrido del buzon."
     }
@@ -328,9 +339,9 @@ try {
                 }
             }
             if ($null -eq $panel) {
-                $panelProcess = Start-Process -FilePath $python -ArgumentList @(
-                    "-u", "-m", "monthly_close.main", "serve", "--data-dir", "`"$DataDir`""
-                ) -WorkingDirectory $root -PassThru
+                $panelArguments = @("-u", "-m", "monthly_close.main", "serve", "--data-dir", "`"$DataDir`"")
+                if ($Red) { $panelArguments += "--lan" }
+                $panelProcess = Start-Process -FilePath $python -ArgumentList $panelArguments -WorkingDirectory $root -PassThru
                 $panelDeadline = (Get-Date).AddSeconds(15)
                 while ($null -eq $panel) {
                     if ($panelProcess.HasExited -or (Get-Date) -ge $panelDeadline) {
@@ -345,6 +356,8 @@ try {
                         Start-Sleep -Milliseconds 250
                     }
                 }
+            } elseif ($Red) {
+                Assert-PanelOnNetwork  # opened by someone else during the import
             }
             if ($panel -notmatch '<title>Cierre mensual') {
                 throw "El puerto 8766 esta ocupado por una pagina distinta al panel."
