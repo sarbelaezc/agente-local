@@ -373,3 +373,69 @@ def test_a_failed_correction_stores_nothing(make_store):
         store.apply_invesbot(invesbot.period_checks(reports), outcome)
     assert [r for r in store.state()["statement_checks"] if r["product"] == "INVESBOT"] == []
     assert store.restored_invesbot_ids() == set()
+
+
+def stored_checks(store):
+    return {r["suffix"] + r["period_end"]: r for r in store.state()["statement_checks"]
+            if r["product"] == "INVESBOT"}
+
+
+def test_complements_read_the_reports_after_the_statements(tmp_path, monkeypatch, make_store, preferences):
+    from monthly_close import main as app
+    store = make_store()
+    insert(store, [*monthly(), move("jul", "2026-07-01", merchant="Invesbot", decision="exclude")])
+    calls = []
+    monkeypatch.setattr(app, "refresh_reconciled_coverage", lambda *args: calls.append(
+        len(stored_checks(store))))
+    monkeypatch.setattr(app.invesbot, "read_reports", lambda data_dir: [july_report()])
+    app.run_complements(store, tmp_path, {}, preferences, date(2026, 3, 1))
+    assert calls == [1]  # the rows were stored before the coverage was refreshed
+    assert store.restored_invesbot_ids() == {"jul"}
+
+
+def test_an_unreadable_report_stops_the_run_without_storing(tmp_path, monkeypatch, make_store, preferences):
+    from monthly_close import main as app
+    store = make_store()
+    folder = tmp_path / "invesbot" / "santiago"
+    folder.mkdir(parents=True)
+    (folder / "bueno.pdf").write_bytes(b"bueno")
+    (folder / "malo.pdf").write_bytes(b"malo")
+    fake_pdf_text(monkeypatch, {"bueno": report_text(), "malo": "no es un informe"})
+    with pytest.raises(invesbot.ReportError, match="malo.pdf"):
+        app.run_complements(store, tmp_path, {}, preferences, date(2026, 3, 1))
+    assert stored_checks(store) == {}
+
+
+def test_without_reports_nothing_is_printed(tmp_path, make_store, preferences, capsys):
+    from monthly_close import main as app
+    store = make_store()
+    app.run_complements(store, tmp_path, {}, preferences, date(2026, 3, 1))
+    assert "Invesbot" not in capsys.readouterr().out
+
+
+def test_the_lines_carry_counts_and_the_latest_difference_without_amounts(tmp_path, monkeypatch, make_store):
+    from monthly_close import main as app
+    store = make_store()
+    insert(store, monthly(months=6))
+    monkeypatch.setattr(app.invesbot, "read_reports", lambda data_dir: [july_report(), august_report()])
+    lines = app.import_invesbot_reports(store, tmp_path)
+    assert lines == [
+        "Invesbot Plan Ficticio (santiago): 2 informes leídos; 0 aportes contados de nuevo.",
+        "Invesbot Plan Ficticio: el informe de agosto cuenta más aportes que los registrados; revisa el panel.",
+    ]
+    assert not any("$" in line for line in lines)
+
+
+def test_an_older_report_added_later_recalculates_the_next(tmp_path, monkeypatch, make_store):
+    from monthly_close import main as app
+    store = make_store()
+    newer = report(month=8, opening=100_000, additional=700_000, balance=815_000)
+    older = report(month=7, opening=100_000, additional=600_000, balance=710_000)
+    monkeypatch.setattr(app.invesbot, "read_reports", lambda data_dir: [newer])
+    app.import_invesbot_reports(store, tmp_path)
+    [first] = stored_checks(store).values()
+    monkeypatch.setattr(app.invesbot, "read_reports", lambda data_dir: [older, newer])
+    app.import_invesbot_reports(store, tmp_path)
+    august = stored_checks(store)["Plan Ficticio2026-08-31"]
+    assert first["contributions_minor"] == 80_000_000
+    assert august["contributions_minor"] == 10_000_000
